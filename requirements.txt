@@ -2,10 +2,8 @@ streamlit
 pandas
 requests
 scipy
-numpy
+matplotlib
+yfinance
 lxml
 html5lib
-beautifulsoup4
-openpyxl
-matplotlib
-cloudscraper
+bs4
