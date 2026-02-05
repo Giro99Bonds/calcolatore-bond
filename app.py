@@ -2,29 +2,31 @@ import streamlit as st
 import pandas as pd
 import datetime
 import yfinance as yf
+import matplotlib.pyplot as plt  # <--- QUESTA ERA LA RIGA MANCANTE
 from scipy import optimize
 from dateutil.relativedelta import relativedelta
 
-# Configurazione
+# ==============================================================================
+# CONFIGURAZIONE PAGINA
+# ==============================================================================
 st.set_page_config(page_title="Universal Bond Calculator", layout="wide", page_icon="🌍")
 
-# Inizializza memoria (Session State)
+# Inizializza memoria (Session State) per ricordare i dati inseriti
 if 'db_locale' not in st.session_state:
-    st.session_state.db_locale = {}  # Dizionario per ricordare i dati inseriti
+    st.session_state.db_locale = {}
 
 # ==============================================================================
-# 1. MOTORE DI RICERCA UNIVERSALE (Yahoo Finance)
+# 1. MOTORE DI RICERCA (YAHOO FINANCE)
 # ==============================================================================
 def cerca_titolo_universale(isin):
     isin = isin.strip().upper()
     
-    # Tentativi di suffissi per le varie borse
-    # .MI = Milano (BTP), .RG = EuroTLX, .F = Francoforte, .PA = Parigi, = Nessun suffisso (US)
+    # Suffissi per cercare nelle varie borse (Milano, EuroTLX, Francoforte, ecc.)
     suffissi = [".MI", ".RG", ".F", ".PA", ".DE", ""]
     
     info_trovate = {"successo": False, "msg": "Titolo non trovato."}
 
-    # Barra di caricamento per dare feedback all'utente
+    # Barra di caricamento
     progress_text = "Ricerca sui mercati globali in corso..."
     my_bar = st.progress(0, text=progress_text)
     
@@ -54,13 +56,15 @@ def cerca_titolo_universale(isin):
         except:
             pass
         
-        my_bar.progress(int((i+1)/len(suffissi)*100), text=f"Cercando in {suff}...")
+        # Avanzamento barra
+        perc = int((i+1)/len(suffissi)*100)
+        my_bar.progress(perc, text=f"Cercando in {suff}...")
 
     my_bar.empty()
     return info_trovate
 
 # ==============================================================================
-# 2. MOTORE MATEMATICO (XIRR + Duration)
+# 2. MOTORE MATEMATICO (RENDIMENTO & FLUSSI)
 # ==============================================================================
 def calcola_rendimento(prezzo, cedola_pct, scadenza, investito, tasse_pct, freq_mesi):
     oggi = datetime.date.today()
@@ -76,6 +80,7 @@ def calcola_rendimento(prezzo, cedola_pct, scadenza, investito, tasse_pct, freq_
     
     cursor = today_f = oggi
     
+    # Generazione date future
     while True:
         cursor = cursor + relativedelta(months=+freq_mesi)
         if cursor > scadenza: break
@@ -83,7 +88,9 @@ def calcola_rendimento(prezzo, cedola_pct, scadenza, investito, tasse_pct, freq_
         dt = scadenza if cursor >= scadenza else cursor
         
         if dt == scadenza:
+            # Rimborso capitale + Ultima cedola + Tasse su eventuale guadagno capitale
             gain_lordo = (100 - prezzo) * (nominale / 100)
+            # Le tasse si pagano solo se c'è un guadagno (Capital Gain)
             tassa_gain = max(0, gain_lordo * (tasse_pct/100))
             rimborso_netto = nominale - tassa_gain
             
@@ -94,6 +101,7 @@ def calcola_rendimento(prezzo, cedola_pct, scadenza, investito, tasse_pct, freq_
             flussi.append(cedola_periodica)
             date_f.append(dt)
             
+    # Funzione XIRR (Tasso Interno di Rendimento)
     def xirr(cf, dts):
         dts_days = [(d - dts[0]).days for d in dts]
         try: return optimize.newton(lambda r: sum([v/(1+r)**(d/365.0) for v,d in zip(cf, dts_days)]), 0.05)
@@ -109,7 +117,7 @@ def calcola_rendimento(prezzo, cedola_pct, scadenza, investito, tasse_pct, freq_
 # 3. INTERFACCIA UTENTE
 # ==============================================================================
 st.title("🌍 Universal Bond Calculator")
-st.caption("Inserisci un ISIN qualsiasi. Il sistema cerca il PREZZO live. Se mancano cedola/scadenza, le inserisci una volta sola.")
+st.caption("Inserisci ISIN -> Trova Prezzo Live -> Calcola Rendimento Netto")
 
 # --- SEZIONE 1: RICERCA ---
 col1, col2 = st.columns([1, 2])
@@ -163,14 +171,14 @@ with col1:
         
         s = st.date_input("Scadenza", value=dati_form["scadenza"])
         
-        st.markdown("### Parametri")
+        st.markdown("### Parametri Investimento")
         c_inv, c_tax = st.columns(2)
         inv = c_inv.number_input("Investito (€)", value=10000, step=1000)
         tax = c_tax.selectbox("Tasse", [12.5, 26.0], help="12.5% Stato, 26% Corporate")
         
         c_freq, c_b = st.columns(2)
-        freq_dict = {"Annuale": 12, "Semestrale": 6, "Trimestrale": 3}
-        freq = c_freq.selectbox("Frequenza", list(freq_dict.keys()), index=1)
+        freq_dict = {"Annuale": 12, "Semestrale (BTP/BOT)": 6, "Trimestrale": 3}
+        freq = c_freq.selectbox("Frequenza Cedola", list(freq_dict.keys()), index=1)
         
         submit = st.form_submit_button("🚀 Calcola Rendimento")
 
@@ -200,13 +208,12 @@ if submit:
         
         # Creazione Grafico
         fig, ax = plt.subplots(figsize=(10, 3))
-        ax.bar(df_chart["Data"], df_chart["Importo"], color=colors, width=15)
+        ax.bar(df_chart["Data"], df_chart["Importo"], color=colors, width=20)
         ax.axhline(0, color='black', linewidth=0.8)
         ax.grid(axis='y', linestyle='--', alpha=0.3)
+        
+        # Mostra il grafico con Streamlit
         st.pyplot(fig)
         
         with st.expander("Vedi Tabella Pagamenti"):
             st.dataframe(df_chart)
-
-# --- DEBUG: Mostra memoria ---
-# st.write(st.session_state.db_locale)
