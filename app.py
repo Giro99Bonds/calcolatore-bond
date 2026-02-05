@@ -12,12 +12,12 @@ from scipy import optimize
 # ==============================================================================
 st.set_page_config(page_title="Bond Manager Pro", layout="wide", page_icon="📊")
 
-# Inizializza il portafoglio nella memoria del browser
+# Inizializza il portafoglio
 if 'portafoglio' not in st.session_state:
     st.session_state.portafoglio = []
 
 # ==============================================================================
-# 1. MOTORE DI SCARICAMENTO "ANTI-BLOCCO"
+# 1. MOTORE DI SCARICAMENTO (CON DEBUG E PROTEZIONE)
 # ==============================================================================
 PAGINE_DA_ANALIZZARE = [
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR",
@@ -30,21 +30,14 @@ PAGINE_DA_ANALIZZARE = [
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def scarica_database():
-    """
-    Scarica i dati e li salva in cache per 1 ora.
-    Usa headers realistici per non farsi bloccare.
-    """
     database_totale = pd.DataFrame()
     
-    # Headers completi per sembrare un vero Browser
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Connection": "keep-alive"
+        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
     }
 
-    # Barra di progresso nella sidebar per non disturbare
     progress_bar = st.sidebar.progress(0)
     status_text = st.sidebar.empty()
     
@@ -52,11 +45,11 @@ def scarica_database():
         s.headers.update(headers)
         
         for i, url in enumerate(PAGINE_DA_ANALIZZARE):
-            nome_monitor = url.split("monitor=")[1].split("&")[0].upper()
-            status_text.text(f"Scaricamento: {nome_monitor}...")
-            
             try:
-                # Ritardo casuale minimo per sicurezza
+                nome_monitor = url.split("monitor=")[1].split("&")[0].upper()
+                status_text.text(f"Scaricamento: {nome_monitor}...")
+                
+                # Ritardo anti-blocco
                 if i > 0: time.sleep(random.uniform(0.5, 1.5))
                 
                 r = s.get(url, timeout=15)
@@ -64,21 +57,26 @@ def scarica_database():
                 if r.status_code == 200:
                     try:
                         tabelle = pd.read_html(r.text, thousands='.', decimal=',')
+                        # Cerca la tabella giusta
                         for df in tabelle:
-                            df.columns = df.columns.str.strip()
+                            df.columns = df.columns.str.strip() # Pulisce spazi
                             if 'ISIN' in df.columns:
+                                # Forza ISIN come stringa
                                 df['ISIN'] = df['ISIN'].astype(str).str.strip().str.upper()
                                 database_totale = pd.concat([database_totale, df], ignore_index=True)
                                 break
-                    except ValueError:
-                        pass # Nessuna tabella trovata
-            except Exception:
-                continue # Passa al prossimo link se uno fallisce
+                    except ValueError: pass
+            except Exception: continue
             
             progress_bar.progress((i + 1) / len(PAGINE_DA_ANALIZZARE))
             
     status_text.empty()
     progress_bar.empty()
+    
+    # --- FIX CRITICO: SE IL DB È VUOTO, RESTITUISCI DATAFRAME VUOTO MA CON COLONNE ---
+    if database_totale.empty:
+        return pd.DataFrame(columns=['ISIN', 'Name', 'Price', 'Coupon', 'Maturity'])
+        
     return database_totale
 
 # ==============================================================================
@@ -105,7 +103,6 @@ def analizza_flussi_bond(prezzo, cedola, scadenza, importo_investito, tasse_pct)
             gain = max(0, 100 - prezzo)
             tassa_gain = gain * (tasse_pct/100) * (nominale/100)
             rimborso_netto = nominale - tassa_gain
-            
             flussi.append(cedola_netta_totale + rimborso_netto)
             date_f.append(dt)
             break
@@ -113,7 +110,6 @@ def analizza_flussi_bond(prezzo, cedola, scadenza, importo_investito, tasse_pct)
             flussi.append(cedola_netta_totale)
             date_f.append(dt)
             
-    # Calcolo XIRR
     def xirr(cf, dts):
         dts_days = [(d - dts[0]).days for d in dts]
         try: return optimize.newton(lambda r: sum([v/(1+r)**(d/365) for v,d in zip(cf, dts_days)]), 0.05)
@@ -121,7 +117,6 @@ def analizza_flussi_bond(prezzo, cedola, scadenza, importo_investito, tasse_pct)
 
     rend_netto = xirr(flussi, date_f)
     
-    # Duration
     numeratore = 0
     denominatore = 0
     for i in range(1, len(flussi)):
@@ -142,18 +137,30 @@ def analizza_flussi_bond(prezzo, cedola, scadenza, importo_investito, tasse_pct)
     }
 
 # ==============================================================================
-# 3. INTERFACCIA UTENTE
+# 3. INTERFACCIA UTENTE (CON GESTIONE ERRORI)
 # ==============================================================================
 
-# Caricamento Dati (con spinner visibile solo la prima volta)
-with st.spinner('Aggiornamento database bond in corso...'):
+with st.spinner('Aggiornamento database bond in corso (potrebbe richiedere 30 secondi)...'):
     db = scarica_database()
 
-# --- SIDEBAR NAVIGAZIONE ---
+# --- BLOCCO DI SICUREZZA ---
+# Se il database è vuoto, mostriamo un errore invece di far crashare tutto
+if db.empty or 'ISIN' not in db.columns:
+    st.error("⛔ ERRORE: Nessun dato scaricato.")
+    st.warning("""
+    **Cause possibili:**
+    1. Il sito 'SimpleToolsForInvestors' ha bloccato momentaneamente il tuo IP.
+    2. Problemi di connessione internet.
+    
+    **Soluzione:** Riprova tra 10 minuti o prova a cambiare rete (es. usa hotspot).
+    """)
+    st.stop() # Ferma l'app qui
+# ---------------------------
+
 st.sidebar.title("Menu")
 pagina = st.sidebar.radio("Seleziona:", ["🔎 Cerca Bond", "💼 Gestione Portafoglio"])
 
-# --- PAGINA 1: RICERCA E ANALISI ---
+# --- PAGINA 1: RICERCA ---
 if pagina == "🔎 Cerca Bond":
     st.title("🔎 Analisi Bond Singolo")
     
@@ -161,24 +168,21 @@ if pagina == "🔎 Cerca Bond":
     with col1:
         isin_input = st.text_input("Inserisci ISIN (o parte del nome):").strip().upper()
     with col2:
-        # Niente più domande Si/No, solo un menu pulito
-        tasse_input = st.selectbox("Tassazione", [12.5, 26.0], index=0, help="12.5% per Titoli di Stato, 26% per Corporate")
+        tasse_input = st.selectbox("Tassazione", [12.5, 26.0], index=0)
 
     if isin_input:
-        # Ricerca "Fuzzy" (trova anche se scrivi parziale)
+        # Ora siamo sicuri che 'ISIN' esiste nel db grazie al blocco di sicurezza sopra
         risultati = db[db['ISIN'].str.contains(isin_input, na=False)]
         
         if risultati.empty:
-            st.error("❌ Nessun titolo trovato.")
+            st.error("❌ Nessun titolo trovato con questo codice.")
         else:
-            # Se ci sono più risultati, fanne scegliere uno
             if len(risultati) > 1:
-                st.warning(f"Trovati {len(risultati)} titoli. Mostro il primo.")
+                st.info(f"Trovati {len(risultati)} titoli. Visualizzo il primo.")
             
             riga = risultati.iloc[0]
             
             try:
-                # Parsing Dati
                 cols = riga.index
                 if 'Price' in cols: p = riga['Price']
                 elif 'Last' in cols: p = riga['Last']
@@ -192,10 +196,8 @@ if pagina == "🔎 Cerca Bond":
                 scadenza = datetime.datetime.strptime(s_str, "%d/%m/%Y").date()
                 nome = riga['Name'] if 'Name' in cols else isin_input
                 
-                # Calcoli (simuliamo 1000 euro per l'analisi singola)
                 dati = analizza_flussi_bond(prezzo, cedola, scadenza, 1000, tasse_input)
                 
-                # --- VISUALIZZAZIONE ---
                 st.divider()
                 st.subheader(f"📄 {nome}")
                 st.caption(f"ISIN: {riga['ISIN']}")
@@ -206,7 +208,6 @@ if pagina == "🔎 Cerca Bond":
                 k3.metric("Guadagno su 1k", f"{dati['profitto_netto']:+.2f} €")
                 k4.metric("Duration", f"{dati['duration']:.2f} anni")
                 
-                # Grafico
                 st.subheader("Flussi di Cassa")
                 df_plot = dati['df_flussi']
                 colors = ['red' if x < 0 else 'green' for x in df_plot["Importo"]]
@@ -227,7 +228,6 @@ if pagina == "🔎 Cerca Bond":
 elif pagina == "💼 Gestione Portafoglio":
     st.title("💼 Il Tuo Portafoglio (Laddering)")
     
-    # Sezione Aggiunta (in alto per comodità)
     with st.expander("➕ Aggiungi Titolo al Portafoglio", expanded=True):
         c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
         p_isin = c1.text_input("ISIN").strip().upper()
@@ -239,7 +239,6 @@ elif pagina == "💼 Gestione Portafoglio":
             if not res_db.empty:
                 r = res_db.iloc[0]
                 try:
-                    # Estrazione rapida
                     cols = r.index
                     if 'Price' in cols: pr = float(str(r['Price']).replace(',', '.'))
                     elif 'Last' in cols: pr = float(str(r['Last']).replace(',', '.'))
@@ -251,10 +250,8 @@ elif pagina == "💼 Gestione Portafoglio":
                     sc = datetime.datetime.strptime(str(r['Maturity']), "%d/%m/%Y").date()
                     nm = r['Name'] if 'Name' in cols else p_isin
                     
-                    # Calcolo
                     calcoli = analizza_flussi_bond(pr, cp, sc, p_importo, p_tasse)
                     
-                    # Salvataggio in Sessione
                     st.session_state.portafoglio.append({
                         "ISIN": p_isin,
                         "Nome": nm,
@@ -268,11 +265,9 @@ elif pagina == "💼 Gestione Portafoglio":
             else:
                 st.error("ISIN non trovato nel database.")
 
-    # Visualizzazione Portafoglio
     if st.session_state.portafoglio:
         st.divider()
         
-        # 1. Tabella Riepilogo
         df_view = pd.DataFrame([{
             "Nome": b["Nome"],
             "Scadenza": b["Scadenza"],
@@ -283,10 +278,8 @@ elif pagina == "💼 Gestione Portafoglio":
         st.subheader("I tuoi titoli")
         st.table(df_view)
         
-        # 2. Aggregazione Totale
         tot_inv = sum(b['Investito'] for b in st.session_state.portafoglio)
         df_tot = pd.concat([b['Flussi'] for b in st.session_state.portafoglio])
-        # Raggruppa per data sommando gli importi
         df_chart = df_tot.groupby("Data")["Importo"].sum().reset_index().sort_values("Data")
         guadagno_tot = df_chart["Importo"].sum()
         
@@ -294,7 +287,6 @@ elif pagina == "💼 Gestione Portafoglio":
         m1.metric("Totale Investito", f"{tot_inv:,.0f} €")
         m2.metric("Profitto Netto a Scadenza", f"{guadagno_tot:,.2f} €", delta_color="normal")
         
-        # 3. Grafico Aggregato
         st.subheader("📅 Flussi di Cassa Totali (Entrate previste)")
         
         fig2, ax2 = plt.subplots(figsize=(12, 5))
