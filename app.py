@@ -8,65 +8,109 @@ import matplotlib.pyplot as plt
 from scipy import optimize
 
 # ==============================================================================
-# CONFIGURAZIONE E LISTA IDENTITÀ (Per aggirare i blocchi)
+# CONFIGURAZIONE
 # ==============================================================================
-st.set_page_config(page_title="Bond Sniper", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Bond Sniper (Proxy Mode)", layout="wide", page_icon="🛡️")
 
-# Lista di "Facce" da usare a rotazione per confondere il server
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-]
+if 'portafoglio' not in st.session_state:
+    st.session_state.portafoglio = []
 
+# Lista URL Monitor
 URLS = {
     "🇮🇹 Italia (BTP/CCT)": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR",
-    "🇮🇹 Italia (Inflation Linked)": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia_inflation&yieldtype=G&timescale=DUR",
-    "🇪🇺 Europa (Romania/Bulgaria/Est)": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=europe&yieldtype=G&timescale=DUR",
-    "🇩🇪 Germania (Bund)": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR",
-    "🏢 Corporate (Aziende)": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR",
-    "🇺🇸 USA (Treasury)": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR"
+    "🇮🇹 Italia (Inflation)": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia_inflation&yieldtype=G&timescale=DUR",
+    "🇪🇺 Europa (Romania/Est)": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=europe&yieldtype=G&timescale=DUR",
+    "🇩🇪 Germania": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR",
+    "🏢 Corporate": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR",
 }
 
 # ==============================================================================
-# 1. FUNZIONE SCARICAMENTO FURTIVO
+# 1. MOTORE PROXY AUTOMATICO
 # ==============================================================================
-@st.cache_data(ttl=600, show_spinner=False) # Cache di 10 minuti
-def scarica_listino_specifico(url_target):
+def get_free_proxies():
+    """Scarica una lista di proxy pubblici gratuiti"""
+    try:
+        # Usiamo una lista pubblica affidabile di proxy HTTP/HTTPS
+        url_list = "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
+        r = requests.get(url_list, timeout=5)
+        if r.status_code == 200:
+            proxies = r.text.splitlines()
+            return [p for p in proxies if p]
+    except:
+        return []
+    return []
+
+def scarica_con_proxy_rotativo(url_target):
     """
-    Scarica SOLO un listino alla volta per non insospettire il server.
+    Prova diversi proxy finché non ne trova uno che funziona.
     """
-    # Ritardo casuale (simula un umano che ci mette tempo a cliccare)
-    time.sleep(random.uniform(1.0, 3.0))
+    status_box = st.empty()
+    status_box.info("🕵️‍♂️ Cerco un tunnel (Proxy) funzionante...")
+    
+    proxies_list = get_free_proxies()
+    # Ne prendiamo 20 a caso per non provare sempre gli stessi
+    random.shuffle(proxies_list)
+    short_list = proxies_list[:15]
     
     headers = {
-        "User-Agent": random.choice(USER_AGENTS), # Cambia identità ogni volta
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://www.google.com/",
-        "Connection": "keep-alive"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Referer": "https://google.com"
     }
 
+    # Tentativo DIRETTO (senza proxy) prima di tutto
     try:
-        r = requests.get(url_target, headers=headers, timeout=15)
-        
-        if r.status_code == 200:
-            dfs = pd.read_html(r.text, thousands='.', decimal=',')
-            # Cerca la tabella giusta
-            for df in dfs:
-                if 'ISIN' in df.columns:
-                    # Pulizia colonne
-                    df.columns = df.columns.str.strip()
-                    df['ISIN'] = df['ISIN'].astype(str).str.strip().str.upper()
-                    return df
-    except Exception as e:
-        return None
+        r = requests.get(url_target, headers=headers, timeout=5)
+        if r.status_code == 200 and len(r.text) > 1000:
+            status_box.success("✅ Connessione Diretta Riuscita!")
+            time.sleep(1)
+            status_box.empty()
+            return r.text
+    except:
+        pass
+
+    # Se diretto fallisce, inizia la rotazione proxy
+    progress_bar = st.progress(0)
     
+    for i, proxy in enumerate(short_list):
+        protocollo = "http"
+        proxy_dict = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
+        
+        status_box.warning(f"🔄 Tentativo {i+1}/{len(short_list)} tramite {proxy}...")
+        progress_bar.progress((i + 1) / len(short_list))
+        
+        try:
+            r = requests.get(url_target, headers=headers, proxies=proxy_dict, timeout=4)
+            
+            # Controllo se ha scaricato davvero la pagina giusta
+            if r.status_code == 200 and "ISIN" in r.text:
+                status_box.success(f"✅ Trovato tunnel funzionante: {proxy}")
+                time.sleep(1)
+                status_box.empty()
+                progress_bar.empty()
+                return r.text
+        except:
+            continue # Se fallisce, passa al prossimo
+
+    status_box.error("❌ Nessun proxy funzionante trovato al momento. Riprova.")
+    progress_bar.empty()
     return None
 
 # ==============================================================================
-# 2. MOTORE MATEMATICO
+# 2. PARSING E CALCOLO
 # ==============================================================================
+def parse_html_table(html_content):
+    if not html_content: return pd.DataFrame()
+    try:
+        dfs = pd.read_html(html_content, thousands='.', decimal=',')
+        for df in dfs:
+            if 'ISIN' in df.columns:
+                df.columns = df.columns.str.strip()
+                df['ISIN'] = df['ISIN'].astype(str).str.strip().str.upper()
+                return df
+    except: pass
+    return pd.DataFrame()
+
 def calcola_analytics(prezzo, cedola, scadenza, importo, tasse):
     nominale = importo / (prezzo/100)
     oggi = datetime.date.today()
@@ -75,7 +119,7 @@ def calcola_analytics(prezzo, cedola, scadenza, importo, tasse):
     
     cedola_netta = (cedola * nominale) * (1 - tasse/100)
     
-    cursor = oggi
+    cursor = today_f = oggi
     while True:
         try: cursor = cursor.replace(year=cursor.year + 1)
         except: cursor = cursor + datetime.timedelta(days=365)
@@ -92,7 +136,6 @@ def calcola_analytics(prezzo, cedola, scadenza, importo, tasse):
             flussi.append(cedola_netta)
             date_f.append(dt)
             
-    # XIRR
     def xirr(cf, dts):
         dts = [(d - dts[0]).days for d in dts]
         try: return optimize.newton(lambda r: sum([v/(1+r)**(d/365) for v,d in zip(cf, dts)]), 0.05)
@@ -100,105 +143,88 @@ def calcola_analytics(prezzo, cedola, scadenza, importo, tasse):
         
     rend = xirr(flussi, date_f)
     
-    # Duration
-    num = sum([(date_f[i]-oggi).days/365.25 * flussi[i]/((1+rend)**((date_f[i]-oggi).days/365.25)) for i in range(1, len(flussi))])
-    den = sum([flussi[i]/((1+rend)**((date_f[i]-oggi).days/365.25)) for i in range(1, len(flussi))])
-    duration = num/den if den != 0 else 0
+    # Duration Semplificata
+    duration = 0
+    if rend > 0:
+        num = sum([(date_f[i]-oggi).days/365.25 * flussi[i]/((1+rend)**((date_f[i]-oggi).days/365.25)) for i in range(1, len(flussi))])
+        den = sum([flussi[i]/((1+rend)**((date_f[i]-oggi).days/365.25)) for i in range(1, len(flussi))])
+        duration = num/den if den != 0 else 0
     
     return rend*100, duration, pd.DataFrame({"Data": date_f, "Importo": flussi})
 
 # ==============================================================================
-# 3. INTERFACCIA UTENTE
+# 3. INTERFACCIA
 # ==============================================================================
-st.title("🎯 Bond Sniper (Anti-Block)")
-st.markdown("Questo sistema scarica **solo il mercato necessario** per evitare il ban dell'IP.")
+st.title("🛡️ Bond Sniper (Auto-Proxy)")
+st.markdown("Se il server è bloccato, questo sistema cercherà automaticamente una via alternativa.")
 
-# --- SELEZIONE MERCATO (Strategica) ---
-col_m1, col_m2 = st.columns([2, 1])
-with col_m1:
-    mercato_scelto = st.selectbox("1. Seleziona Mercato (Scarica solo questo)", list(URLS.keys()))
-with col_m2:
-    if st.button("🔄 Forza Aggiornamento"):
-        st.cache_data.clear()
-        st.rerun()
+# Selettore
+mercato = st.selectbox("Seleziona Mercato:", list(URLS.keys()))
 
-# --- SCARICAMENTO MIRATO ---
-with st.spinner(f"Scaricamento dati {mercato_scelto} in corso..."):
-    db = scarica_listino_specifico(URLS[mercato_scelto])
-
-if db is None or db.empty:
-    st.error("⛔ Blocco IP Attivo o Errore Connessione.")
-    st.warning("Il sito ha rifiutato la connessione. Attendi qualche minuto e riprova.")
-    st.stop()
-else:
-    st.success(f"✅ Dati scaricati: {len(db)} titoli disponibili.")
-
-st.divider()
-
-# --- RICERCA TITOLO ---
-col1, col2, col3 = st.columns([2, 1, 1])
-with col1:
-    isin_search = st.text_input("2. Cerca ISIN o Nome", placeholder="es. IT0005...").strip().upper()
-with col2:
-    importo = st.number_input("Investimento €", value=10000, step=1000)
-with col3:
-    tasse = st.selectbox("Tassazione", [12.5, 26.0])
-
-if isin_search:
-    # Filtro
-    filtro = db[db['ISIN'].str.contains(isin_search, na=False) | db['Name'].astype(str).str.contains(isin_search, case=False, na=False)]
-    
-    if filtro.empty:
-        st.warning("Nessun titolo trovato in questo mercato.")
-    else:
-        # Selettore se ci sono più risultati
-        opzioni = filtro['ISIN'] + " | " + filtro['Name']
-        scelta = st.selectbox("Trovati più titoli, seleziona:", opzioni)
+if st.button("🚀 Scarica Dati (con Bypass)", type="primary"):
+    with st.spinner("Avvio procedura di sblocco..."):
+        html_data = scarica_con_proxy_rotativo(URLS[mercato])
         
-        isin_reale = scelta.split(" | ")[0]
-        riga = filtro[filtro['ISIN'] == isin_reale].iloc[0]
-        
-        # --- ANALISI ---
-        try:
-            # Parsing "sporco" ma efficace per vari formati
-            cols = riga.index
-            if 'Price' in cols: p_val = riga['Price']
-            elif 'Last' in cols: p_val = riga['Last']
-            else: p_val = 100
-            
-            p = float(str(p_val).replace(',', '.'))
-            
-            c_str = str(riga.get('Coupon', 0)).replace('%','').strip().split(' ')[0]
-            c = 0.0 if c_str in ['ZC', 'zero', '-'] else float(c_str.replace(',', '.'))/100
-            
-            s_obj = riga['Maturity']
-            # Gestione formati data misti
-            if isinstance(s_obj, str):
-                s = datetime.datetime.strptime(s_obj, "%d/%m/%Y").date()
+        if html_data:
+            df = parse_html_table(html_data)
+            if not df.empty:
+                st.session_state['db_current'] = df
+                st.rerun() # Ricarica per mostrare i dati
             else:
-                s = s_obj # Se pandas l'ha già convertito
+                st.error("HTML scaricato ma nessuna tabella valida trovata.")
+        else:
+            st.error("Tutti i tentativi di connessione sono falliti.")
+
+# --- SEZIONE DATI ---
+if 'db_current' in st.session_state:
+    db = st.session_state['db_current']
+    st.success(f"Dati caricati: {len(db)} obbligazioni disponibili.")
+    
+    st.divider()
+    
+    c1, c2, c3 = st.columns([2,1,1])
+    isin_input = c1.text_input("Cerca ISIN:", "").strip().upper()
+    investimento = c2.number_input("Euro:", value=10000, step=1000)
+    tax = c3.selectbox("Tax:", [12.5, 26.0])
+    
+    if isin_input:
+        res = db[db['ISIN'].str.contains(isin_input, na=False)]
+        if not res.empty:
+            row = res.iloc[0]
             
-            # Calcolo
-            rend, dur, df_flussi = calcola_analytics(p, c, s, importo, tasse)
-            
-            # --- DASHBOARD ---
-            st.markdown(f"### 📄 {riga.get('Name', 'Bond')}")
-            
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Prezzo", f"{p} €")
-            k2.metric("Rendimento Netto", f"{rend:.2f}%", delta="Reale Annuo")
-            k3.metric("Duration", f"{dur:.2f} anni")
-            k4.metric("Profitto Totale", f"{(df_flussi['Importo'].sum()):+.2f} €")
-            
-            # Grafico
-            fig, ax = plt.subplots(figsize=(10, 3))
-            colors = ['red' if x < 0 else 'green' for x in df_flussi["Importo"]]
-            ax.bar(df_flussi["Data"], df_flussi["Importo"], color=colors)
-            ax.axhline(0, color='black')
-            st.pyplot(fig)
-            
-            with st.expander("Dettaglio Flussi"):
-                st.dataframe(df_flussi)
+            # Estrazione sicura
+            try:
+                # Prezzo
+                cols = row.index
+                p_raw = row['Price'] if 'Price' in cols else row.get('Last', 100)
+                prezzo = float(str(p_raw).replace(',', '.'))
                 
-        except Exception as e:
-            st.error(f"Errore nella lettura dei dati del titolo: {e}")
+                # Cedola
+                c_raw = str(row.get('Coupon', 0)).replace('%','').strip().split(' ')[0]
+                cedola = 0.0 if c_raw in ['ZC', 'zero', '-'] else float(c_raw.replace(',', '.'))/100
+                
+                # Scadenza
+                s_obj = row['Maturity']
+                scadenza = datetime.datetime.strptime(str(s_obj), "%d/%m/%Y").date() if isinstance(str(s_obj), str) else s_obj
+                
+                # Calcoli
+                rend, dur, flussi = calcola_analytics(prezzo, cedola, scadenza, investimento, tax)
+                
+                st.markdown(f"### {row.get('Name', 'Bond')}")
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Prezzo", f"{prezzo}")
+                k2.metric("Rendimento Netto", f"{rend:.2f}%")
+                k3.metric("Duration", f"{dur:.2f}")
+                
+                fig, ax = plt.subplots(figsize=(10, 2))
+                colors = ['red' if x < 0 else 'green' for x in flussi["Importo"]]
+                ax.bar(flussi["Data"], flussi["Importo"], color=colors)
+                st.pyplot(fig)
+                
+                with st.expander("Dettagli Pagamenti"):
+                    st.dataframe(flussi)
+                    
+            except Exception as e:
+                st.error(f"Errore lettura dati: {e}")
+        else:
+            st.warning("ISIN non trovato nel listino scaricato.")
