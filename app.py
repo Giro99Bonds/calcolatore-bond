@@ -2,228 +2,211 @@ import streamlit as st
 import pandas as pd
 import datetime
 import yfinance as yf
-import requests
-import matplotlib.pyplot as plt
 from scipy import optimize
-from dateutil.relativedelta import relativedelta # Importante per calcolo date preciso
+from dateutil.relativedelta import relativedelta
 
-# Configurazione Pagina
-st.set_page_config(page_title="Bond Manager Pro", layout="wide", page_icon="📈")
+# Configurazione
+st.set_page_config(page_title="Universal Bond Calculator", layout="wide", page_icon="🌍")
 
-if 'portafoglio' not in st.session_state:
-    st.session_state.portafoglio = []
+# Inizializza memoria (Session State)
+if 'db_locale' not in st.session_state:
+    st.session_state.db_locale = {}  # Dizionario per ricordare i dati inseriti
 
 # ==============================================================================
-# 1. SCARICAMENTO DATI (QualeBTP + Yahoo)
+# 1. MOTORE DI RICERCA UNIVERSALE (Yahoo Finance)
 # ==============================================================================
-@st.cache_data(ttl=600)
-def scarica_qualebtp():
-    url = "https://www.qualebtp.it/"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        r = requests.get(url, headers=headers, timeout=5)
-        if r.status_code == 200:
-            tabelle = pd.read_html(r.content, decimal=',', thousands='.')
-            for df in tabelle:
-                if 'ISIN' in df.columns:
-                    return df
-    except: pass
-    return pd.DataFrame()
+def cerca_titolo_universale(isin):
+    isin = isin.strip().upper()
+    
+    # Tentativi di suffissi per le varie borse
+    # .MI = Milano (BTP), .RG = EuroTLX, .F = Francoforte, .PA = Parigi, = Nessun suffisso (US)
+    suffissi = [".MI", ".RG", ".F", ".PA", ".DE", ""]
+    
+    info_trovate = {"successo": False, "msg": "Titolo non trovato."}
 
-def cerca_su_yahoo(isin):
-    suffissi = [".MI", ".F", ".RG", ""] 
-    for suff in suffissi:
+    # Barra di caricamento per dare feedback all'utente
+    progress_text = "Ricerca sui mercati globali in corso..."
+    my_bar = st.progress(0, text=progress_text)
+    
+    for i, suff in enumerate(suffissi):
         ticker = isin + suff
         try:
             bond = yf.Ticker(ticker)
+            # Chiediamo il prezzo di oggi
             hist = bond.history(period="1d")
+            
             if not hist.empty:
+                # TROVATO!
                 prezzo = float(hist['Close'].iloc[-1])
                 info = bond.info
-                return {
-                    "Prezzo": prezzo,
-                    "Nome": info.get('longName', ticker),
-                    "Trovato": True,
-                    "Fonte": f"Yahoo ({ticker})"
+                nome = info.get('longName', info.get('shortName', ticker))
+                
+                info_trovate = {
+                    "successo": True,
+                    "isin": isin,
+                    "ticker": ticker,
+                    "prezzo": prezzo,
+                    "nome": nome,
+                    "msg": f"Trovato su mercato: {suff if suff else 'USA/OTC'}"
                 }
-        except: continue
-    return {"Trovato": False}
+                my_bar.progress(100, text="Completato!")
+                return info_trovate
+        except:
+            pass
+        
+        my_bar.progress(int((i+1)/len(suffissi)*100), text=f"Cercando in {suff}...")
+
+    my_bar.empty()
+    return info_trovate
 
 # ==============================================================================
-# 2. MOTORE MATEMATICO (CORRETTO PER FREQUENZA)
+# 2. MOTORE MATEMATICO (XIRR + Duration)
 # ==============================================================================
-def calcola_rendimento_preciso(prezzo, cedola_pct, scadenza, importo_investito, tasse_pct, frequenza_mesi):
+def calcola_rendimento(prezzo, cedola_pct, scadenza, investito, tasse_pct, freq_mesi):
     oggi = datetime.date.today()
     if prezzo <= 0: prezzo = 100.0
     
-    # Calcolo Nominale (Quanti pezzi compro)
-    # Esempio: Investo 1000€ a prezzo 90 -> Compro 1111€ nominali
-    nominale = importo_investito / (prezzo / 100)
+    nominale = investito / (prezzo / 100)
+    flussi = [-investito]
+    date_f = [oggi]
     
-    flussi = []
-    date_f = []
+    # Calcolo cedola netta periodica
+    cedola_annua_netta = (cedola_pct / 100) * nominale * (1 - tasse_pct/100)
+    cedola_periodica = cedola_annua_netta / (12 / freq_mesi)
     
-    # 1. USCITA: Oggi pago l'investimento
-    flussi.append(-importo_investito)
-    date_f.append(oggi)
-    
-    # 2. CEDOLE FUTURE
-    # Cedola annuale netta in %
-    cedola_annuale_netta_pct = cedola_pct * (1 - tasse_pct/100)
-    # Importo cedola singola (es. se semestrale è metà)
-    numero_cedole_anno = 12 / frequenza_mesi
-    importo_cedola_netta = (cedola_annuale_netta_pct / 100 * nominale) / numero_cedole_anno
-    
-    # Generiamo le date future
     cursor = today_f = oggi
     
-    # Troviamo la prossima data cedola (stimata)
-    # Andiamo avanti di "frequenza_mesi" finché non superiamo oggi
-    # (Semplificazione: per precisione assoluta servirebbe data godimento, ma questo approssima bene)
     while True:
-        cursor = cursor + relativedelta(months=+frequenza_mesi)
+        cursor = cursor + relativedelta(months=+freq_mesi)
         if cursor > scadenza: break
         
         dt = scadenza if cursor >= scadenza else cursor
         
         if dt == scadenza:
-            # Rimborso Finale + Ultima Cedola + Minus/Plusvalenza
             gain_lordo = (100 - prezzo) * (nominale / 100)
-            if gain_lordo > 0:
-                tassa_gain = gain_lordo * (tasse_pct / 100)
-                rimborso_netto = nominale - tassa_gain
-            else:
-                rimborso_netto = nominale # Minusvalenza (non gestita fiscalmente qui per semplicità)
+            tassa_gain = max(0, gain_lordo * (tasse_pct/100))
+            rimborso_netto = nominale - tassa_gain
             
-            flussi.append(importo_cedola_netta + rimborso_netto)
+            flussi.append(cedola_periodica + rimborso_netto)
             date_f.append(dt)
             break
         else:
-            flussi.append(importo_cedola_netta)
+            flussi.append(cedola_periodica)
             date_f.append(dt)
             
-    # 3. CALCOLO XIRR
     def xirr(cf, dts):
         dts_days = [(d - dts[0]).days for d in dts]
-        try: 
-            return optimize.newton(lambda r: sum([v/(1+r)**(d/365.0) for v,d in zip(cf, dts_days)]), 0.05)
+        try: return optimize.newton(lambda r: sum([v/(1+r)**(d/365.0) for v,d in zip(cf, dts_days)]), 0.05)
         except: return 0.0
 
-    rendimento = xirr(flussi, date_f) * 100
-    
     return {
-        "rendimento": rendimento,
+        "rendimento": xirr(flussi, date_f) * 100,
         "flussi": pd.DataFrame({"Data": date_f, "Importo": [round(x, 2) for x in flussi]}),
         "guadagno": sum(flussi)
     }
 
 # ==============================================================================
-# 3. INTERFACCIA
+# 3. INTERFACCIA UTENTE
 # ==============================================================================
-st.title("📈 Calcolatore Rendimenti Reali")
+st.title("🌍 Universal Bond Calculator")
+st.caption("Inserisci un ISIN qualsiasi. Il sistema cerca il PREZZO live. Se mancano cedola/scadenza, le inserisci una volta sola.")
 
-# Caricamento Sfondo
-with st.spinner("Caricamento listini..."):
-    db_btp = scarica_qualebtp()
-
+# --- SEZIONE 1: RICERCA ---
 col1, col2 = st.columns([1, 2])
 
 with col1:
-    st.subheader("Inserimento Dati")
-    isin_in = st.text_input("ISIN", "").strip().upper()
+    isin_input = st.text_input("Inserisci ISIN", "").strip().upper()
+    btn_cerca = st.button("🔍 Cerca Titolo")
     
-    # Default
-    dp, dc, ds, dn = 100.0, 3.0, datetime.date.today() + datetime.timedelta(days=1800), "Nuovo Bond"
-    frequenza_default = 6 # Default BTP (Semestrale)
+    # Variabili di default
+    dati_form = {
+        "nome": "Nuovo Titolo",
+        "prezzo": 100.0,
+        "cedola": 3.0,
+        "scadenza": datetime.date.today() + datetime.timedelta(days=365*5)
+    }
     
-    if isin_in:
-        trovato = False
-        # Cerca su QualeBTP
-        if not db_btp.empty:
-            riga = db_btp[db_btp['ISIN'] == isin_in]
-            if not riga.empty:
-                st.success("Trovato (BTP Italia)!")
-                try:
-                    r = riga.iloc[0]
-                    # Parsing Robusto
-                    dp = float(str(r['Prezzo']).replace(',', '.'))
-                    dc = float(str(r['Cedola']).replace('%','').replace(',','.'))
-                    ds = datetime.datetime.strptime(str(r['Scadenza']), "%d/%m/%Y").date()
-                    dn = r['Titolo']
-                    trovato = True
-                except: pass
-        
-        # Cerca su Yahoo
-        if not trovato:
-            dy = cerca_su_yahoo(isin_in)
-            if dy["Trovato"]:
-                st.info(f"Prezzo trovato su Yahoo Finance")
-                dp = dy["Prezzo"]
-                dn = dy["Nome"]
-                st.caption("⚠️ Controlla Cedola e Scadenza manualmente.")
+    # LOGICA DI RICERCA
+    if btn_cerca and isin_input:
+        # 1. Controlla se lo conosciamo già (Memoria Sessione)
+        if isin_input in st.session_state.db_locale:
+            st.success("Dati recuperati dalla memoria!")
+            saved = st.session_state.db_locale[isin_input]
+            dati_form.update(saved)
+            # Proviamo comunque ad aggiornare il prezzo live
+            res_live = cerca_titolo_universale(isin_input)
+            if res_live["successo"]:
+                dati_form["prezzo"] = res_live["prezzo"]
+                st.toast(f"Prezzo aggiornato live: {res_live['prezzo']}€")
+                
+        # 2. Se è nuovo, cerca online
+        else:
+            res = cerca_titolo_universale(isin_input)
+            if res["successo"]:
+                st.success(f"{res['msg']}")
+                dati_form["prezzo"] = res["prezzo"]
+                dati_form["nome"] = res["nome"]
+                st.info("⚠️ Yahoo ha trovato il PREZZO. Verifica Cedola e Scadenza.")
+            else:
+                st.error("ISIN non trovato sui mercati online. Inserisci tutto manualmente.")
 
-    with st.form("calcola"):
-        nome = st.text_input("Nome", value=dn)
+    st.divider()
+    
+    # --- SEZIONE 2: FORM DI CALCOLO ---
+    with st.form("calcolo_bond"):
+        st.markdown("### Dati Titolo")
+        nome = st.text_input("Nome", value=dati_form["nome"])
         
-        c1, c2 = st.columns(2)
-        p = c1.number_input("Prezzo (€)", value=dp, format="%.2f", help="Prezzo di mercato (Corso Secco)")
-        c = c2.number_input("Cedola Annuale (%)", value=dc, format="%.2f")
+        c_p, c_c = st.columns(2)
+        p = c_p.number_input("Prezzo (€)", value=float(dati_form["prezzo"]), format="%.2f", step=0.01)
+        c = c_c.number_input("Cedola Annuale (%)", value=float(dati_form["cedola"]), format="%.2f", step=0.1)
         
-        s = st.date_input("Scadenza", value=ds)
+        s = st.date_input("Scadenza", value=dati_form["scadenza"])
         
-        st.divider()
-        c3, c4 = st.columns(2)
-        # SELETTORE FREQUENZA (FONDAMENTALE PER IL CALCOLO)
-        freq_dict = {"Annuale": 12, "Semestrale (BTP Standard)": 6, "Trimestrale": 3}
-        freq_label = c3.selectbox("Frequenza Cedola", list(freq_dict.keys()), index=1) # Default Semestrale
-        freq_val = freq_dict[freq_label]
+        st.markdown("### Parametri")
+        c_inv, c_tax = st.columns(2)
+        inv = c_inv.number_input("Investito (€)", value=10000, step=1000)
+        tax = c_tax.selectbox("Tasse", [12.5, 26.0], help="12.5% Stato, 26% Corporate")
         
-        tax = c4.selectbox("Tasse", [12.5, 26.0], help="12.5% Titoli Stato, 26% Aziende")
-        inv = st.number_input("Investito (€)", value=10000, step=1000)
+        c_freq, c_b = st.columns(2)
+        freq_dict = {"Annuale": 12, "Semestrale": 6, "Trimestrale": 3}
+        freq = c_freq.selectbox("Frequenza", list(freq_dict.keys()), index=1)
         
-        submit = st.form_submit_button("Calcola Rendimento Netto")
+        submit = st.form_submit_button("🚀 Calcola Rendimento")
 
+# --- SEZIONE 3: RISULTATI ---
 if submit:
-    res = calcola_rendimento_preciso(p, c, s, inv, tax, freq_val)
+    # 1. Salva i dati fissi (cedola/scadenza) in memoria per il futuro
+    if isin_input:
+        st.session_state.db_locale[isin_input] = {
+            "nome": nome, "cedola": c, "scadenza": s
+        }
+    
+    # 2. Calcola
+    res = calcola_rendimento(p, c, s, inv, tax, freq_dict[freq])
     
     with col2:
         st.subheader(f"📊 Risultati: {nome}")
         
-        m1, m2 = st.columns(2)
-        m1.metric("Rendimento Netto Annuo (XIRR)", f"{res['rendimento']:.2f}%", delta_color="normal")
-        m2.metric("Guadagno Netto a Scadenza", f"{res['guadagno']:,.2f} €")
+        # KPI Principali
+        k1, k2 = st.columns(2)
+        k1.metric("Rendimento Netto Annuo", f"{res['rendimento']:.2f}%", delta_color="normal")
+        k2.metric("Guadagno Netto Totale", f"{res['guadagno']:,.2f} €")
         
-        st.info(f"Cedola netta per periodo: **{res['flussi']['Importo'].iloc[1]:.2f} €**")
-        
+        # Grafico Flussi
+        st.write("#### 📅 Flussi di Cassa")
         df_chart = res['flussi']
         colors = ['red' if x < 0 else 'green' for x in df_chart["Importo"]]
         
-        # Grafico
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.bar(df_chart["Data"], df_chart["Importo"], color=colors, width=20) # Width fisso per estetica
-        ax.axhline(0, color='black', linewidth=1)
-        ax.set_title("Flussi di Cassa")
+        # Creazione Grafico
+        fig, ax = plt.subplots(figsize=(10, 3))
+        ax.bar(df_chart["Data"], df_chart["Importo"], color=colors, width=15)
+        ax.axhline(0, color='black', linewidth=0.8)
         ax.grid(axis='y', linestyle='--', alpha=0.3)
         st.pyplot(fig)
         
         with st.expander("Vedi Tabella Pagamenti"):
-            st.dataframe(res['flussi'])
-        
-        if st.button("➕ Aggiungi al Portafoglio"):
-            st.session_state.portafoglio.append({
-                "Nome": nome, "Investito": inv, 
-                "Rendimento": res['rendimento'], "Flussi": res['flussi']
-            })
-            st.success("Aggiunto!")
-            st.rerun()
+            st.dataframe(df_chart)
 
-# PORTAFOGLIO
-if st.session_state.portafoglio:
-    st.divider()
-    st.subheader("💼 Portafoglio")
-    df_p = pd.DataFrame(st.session_state.portafoglio)[["Nome", "Investito", "Rendimento"]]
-    st.table(df_p)
-    
-    if st.button("Reset"):
-        st.session_state.portafoglio = []
-        st.rerun()
+# --- DEBUG: Mostra memoria ---
+# st.write(st.session_state.db_locale)
