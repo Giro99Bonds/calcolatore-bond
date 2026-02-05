@@ -10,15 +10,19 @@ from scipy import optimize
 # ==============================================================================
 # 0. CONFIGURAZIONE PAGINA
 # ==============================================================================
-st.set_page_config(page_title="Bond Manager Pro", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Bond Manager (Anti-Ban)", layout="wide", page_icon="🛡️")
 
-# Inizializza il portafoglio
 if 'portafoglio' not in st.session_state:
     st.session_state.portafoglio = []
 
-# ==============================================================================
-# 1. MOTORE DI SCARICAMENTO (CON DEBUG E PROTEZIONE)
-# ==============================================================================
+# Lista di "Facce" (User-Agents) diverse per confondere il server
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+]
+
 PAGINE_DA_ANALIZZARE = [
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR",
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia_inflation&yieldtype=G&timescale=DUR",
@@ -28,15 +32,31 @@ PAGINE_DA_ANALIZZARE = [
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR"
 ]
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def scarica_database():
+# ==============================================================================
+# 1. MOTORE DI SCARICAMENTO "BYPASS"
+# ==============================================================================
+# Rimosso @st.cache_data per forzare tentativi freschi se cambi proxy
+def scarica_database(proxy_url=None):
     database_totale = pd.DataFrame()
     
+    # Seleziona un'identità a caso
+    current_agent = random.choice(USER_AGENTS)
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": current_agent,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
+        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.google.com/", # Finge di arrivare da Google
+        "Connection": "keep-alive"
     }
+
+    # Configurazione Proxy (se inserito dall'utente)
+    proxies = {}
+    if proxy_url:
+        if not proxy_url.startswith("http"):
+            proxy_url = f"http://{proxy_url}"
+        proxies = {"http": proxy_url, "https": proxy_url}
+        st.toast(f"🕵️‍♂️ Uso Proxy: {proxy_url}", icon="🛡️")
 
     progress_bar = st.sidebar.progress(0)
     status_text = st.sidebar.empty()
@@ -47,33 +67,38 @@ def scarica_database():
         for i, url in enumerate(PAGINE_DA_ANALIZZARE):
             try:
                 nome_monitor = url.split("monitor=")[1].split("&")[0].upper()
-                status_text.text(f"Scaricamento: {nome_monitor}...")
+                status_text.text(f"Scarico {nome_monitor}...")
                 
-                # Ritardo anti-blocco
-                if i > 0: time.sleep(random.uniform(0.5, 1.5))
+                # Aggiungi parametro casuale per evitare la cache del server
+                url_bypass = f"{url}&nocache={random.randint(1, 100000)}"
                 
-                r = s.get(url, timeout=15)
+                # Ritardo casuale per sembrare umano
+                time.sleep(random.uniform(1.0, 3.0))
+                
+                r = s.get(url_bypass, timeout=20, proxies=proxies)
                 
                 if r.status_code == 200:
                     try:
                         tabelle = pd.read_html(r.text, thousands='.', decimal=',')
-                        # Cerca la tabella giusta
                         for df in tabelle:
-                            df.columns = df.columns.str.strip() # Pulisce spazi
+                            df.columns = df.columns.str.strip()
                             if 'ISIN' in df.columns:
-                                # Forza ISIN come stringa
                                 df['ISIN'] = df['ISIN'].astype(str).str.strip().str.upper()
                                 database_totale = pd.concat([database_totale, df], ignore_index=True)
                                 break
                     except ValueError: pass
-            except Exception: continue
+                elif r.status_code == 403:
+                    st.toast(f"⛔ Blocco IP su {nome_monitor}. Prova col Proxy!", icon="⚠️")
+                    
+            except Exception as e:
+                continue
             
             progress_bar.progress((i + 1) / len(PAGINE_DA_ANALIZZARE))
             
     status_text.empty()
     progress_bar.empty()
     
-    # --- FIX CRITICO: SE IL DB È VUOTO, RESTITUISCI DATAFRAME VUOTO MA CON COLONNE ---
+    # Se vuoto, restituisci struttura vuota per non crashare
     if database_totale.empty:
         return pd.DataFrame(columns=['ISIN', 'Name', 'Price', 'Coupon', 'Maturity'])
         
@@ -137,51 +162,51 @@ def analizza_flussi_bond(prezzo, cedola, scadenza, importo_investito, tasse_pct)
     }
 
 # ==============================================================================
-# 3. INTERFACCIA UTENTE (CON GESTIONE ERRORI)
+# 3. INTERFACCIA UTENTE
 # ==============================================================================
 
-with st.spinner('Aggiornamento database bond in corso (potrebbe richiedere 30 secondi)...'):
-    db = scarica_database()
+st.sidebar.title("Configurazione")
 
-# --- BLOCCO DI SICUREZZA ---
-# Se il database è vuoto, mostriamo un errore invece di far crashare tutto
+# --- BOX PROXY (LA SOLUZIONE ANTI-BAN) ---
+st.sidebar.markdown("### 🛡️ Bypass Blocco IP")
+proxy_input = st.sidebar.text_input("Inserisci Proxy HTTP (Opzionale)", placeholder="es. 192.168.1.1:8080", help="Se il sito ti ha bloccato, cerca 'Free HTTP Proxy List' su Google e incollane uno qui.")
+
+if st.sidebar.button("🔄 Ricarica Dati"):
+    st.cache_data.clear()
+    st.rerun()
+
+# Caricamento DB
+if 'db' not in st.session_state or st.sidebar.button("Forza Aggiornamento"):
+    with st.spinner('Connessione Stealth in corso...'):
+        st.session_state.db = scarica_database(proxy_input if proxy_input else None)
+
+db = st.session_state.db
+
+# --- CONTROLLO D'EMERGENZA ---
 if db.empty or 'ISIN' not in db.columns:
-    st.error("⛔ ERRORE: Nessun dato scaricato.")
-    st.warning("""
-    **Cause possibili:**
-    1. Il sito 'SimpleToolsForInvestors' ha bloccato momentaneamente il tuo IP.
-    2. Problemi di connessione internet.
-    
-    **Soluzione:** Riprova tra 10 minuti o prova a cambiare rete (es. usa hotspot).
-    """)
-    st.stop() # Ferma l'app qui
-# ---------------------------
+    st.error("⛔ Blocco IP rilevato.")
+    st.warning("Il sito ha bloccato la tua connessione. Vai su 'spys.one/en/http-proxy-list/', copia un IP e incollalo nel box 'Bypass Blocco IP' a sinistra.")
+    st.stop()
 
-st.sidebar.title("Menu")
-pagina = st.sidebar.radio("Seleziona:", ["🔎 Cerca Bond", "💼 Gestione Portafoglio"])
+# --- NAVIGAZIONE ---
+pagina = st.sidebar.radio("Vai a:", ["🔎 Cerca Bond", "💼 Gestione Portafoglio"])
 
-# --- PAGINA 1: RICERCA ---
 if pagina == "🔎 Cerca Bond":
-    st.title("🔎 Analisi Bond Singolo")
+    st.title("🔎 Analisi Bond (Anti-Ban)")
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        isin_input = st.text_input("Inserisci ISIN (o parte del nome):").strip().upper()
+        isin_input = st.text_input("ISIN o Nome:").strip().upper()
     with col2:
-        tasse_input = st.selectbox("Tassazione", [12.5, 26.0], index=0)
+        tasse_input = st.selectbox("Tassazione", [12.5, 26.0])
 
     if isin_input:
-        # Ora siamo sicuri che 'ISIN' esiste nel db grazie al blocco di sicurezza sopra
         risultati = db[db['ISIN'].str.contains(isin_input, na=False)]
         
         if risultati.empty:
-            st.error("❌ Nessun titolo trovato con questo codice.")
+            st.error("❌ Nessun titolo trovato.")
         else:
-            if len(risultati) > 1:
-                st.info(f"Trovati {len(risultati)} titoli. Visualizzo il primo.")
-            
             riga = risultati.iloc[0]
-            
             try:
                 cols = riga.index
                 if 'Price' in cols: p = riga['Price']
@@ -222,17 +247,16 @@ if pagina == "🔎 Cerca Bond":
                     st.dataframe(dati['df_flussi'], use_container_width=True)
 
             except Exception as e:
-                st.error(f"Errore analisi dati: {e}")
+                st.error(f"Errore calcolo: {e}")
 
-# --- PAGINA 2: PORTAFOGLIO ---
 elif pagina == "💼 Gestione Portafoglio":
-    st.title("💼 Il Tuo Portafoglio (Laddering)")
+    st.title("💼 Portafoglio Laddering")
     
-    with st.expander("➕ Aggiungi Titolo al Portafoglio", expanded=True):
+    with st.expander("➕ Aggiungi Titolo", expanded=True):
         c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
         p_isin = c1.text_input("ISIN").strip().upper()
-        p_importo = c2.number_input("Investimento (€)", min_value=1000, step=1000, value=5000)
-        p_tasse = c3.selectbox("Tasse", [12.5, 26.0])
+        p_importo = c2.number_input("Euro", min_value=1000, step=1000, value=5000)
+        p_tasse = c3.selectbox("Tax", [12.5, 26.0])
         
         if c4.button("Aggiungi"):
             res_db = db[db['ISIN'] == p_isin]
@@ -241,43 +265,37 @@ elif pagina == "💼 Gestione Portafoglio":
                 try:
                     cols = r.index
                     if 'Price' in cols: pr = float(str(r['Price']).replace(',', '.'))
-                    elif 'Last' in cols: pr = float(str(r['Last']).replace(',', '.'))
-                    else: pr = 100.0
+                    else: pr = float(str(r.get('Last', 100)).replace(',', '.'))
                     
-                    cp_str = str(r['Coupon']).replace('%', '').strip().split(' ')[0]
+                    cp_str = str(r.get('Coupon', '0')).replace('%', '').strip().split(' ')[0]
                     cp = 0.0 if cp_str in ['ZC', 'zero', '-'] else float(cp_str.replace(',', '.')) / 100
                     
                     sc = datetime.datetime.strptime(str(r['Maturity']), "%d/%m/%Y").date()
-                    nm = r['Name'] if 'Name' in cols else p_isin
+                    nm = r.get('Name', p_isin)
                     
                     calcoli = analizza_flussi_bond(pr, cp, sc, p_importo, p_tasse)
                     
                     st.session_state.portafoglio.append({
-                        "ISIN": p_isin,
-                        "Nome": nm,
-                        "Scadenza": sc,
-                        "Investito": p_importo,
-                        "Rendimento": calcoli['rendimento'],
+                        "ISIN": p_isin, "Nome": nm, "Scadenza": sc,
+                        "Investito": p_importo, "Rendimento": calcoli['rendimento'],
                         "Flussi": calcoli['df_flussi']
                     })
                     st.success(f"Aggiunto: {nm}")
-                except: st.error("Errore nei dati del bond.")
+                except: st.error("Dati non validi.")
             else:
-                st.error("ISIN non trovato nel database.")
+                st.error("ISIN non trovato.")
 
     if st.session_state.portafoglio:
         st.divider()
         
+        # Tabella
         df_view = pd.DataFrame([{
-            "Nome": b["Nome"],
-            "Scadenza": b["Scadenza"],
-            "Investito": f"{b['Investito']} €",
-            "Rendimento": f"{b['Rendimento']:.2f}%"
+            "Nome": b["Nome"], "Scadenza": b["Scadenza"],
+            "Investito": f"{b['Investito']} €", "Rendimento": f"{b['Rendimento']:.2f}%"
         } for b in st.session_state.portafoglio])
-        
-        st.subheader("I tuoi titoli")
         st.table(df_view)
         
+        # Totali
         tot_inv = sum(b['Investito'] for b in st.session_state.portafoglio)
         df_tot = pd.concat([b['Flussi'] for b in st.session_state.portafoglio])
         df_chart = df_tot.groupby("Data")["Importo"].sum().reset_index().sort_values("Data")
@@ -285,10 +303,9 @@ elif pagina == "💼 Gestione Portafoglio":
         
         m1, m2 = st.columns(2)
         m1.metric("Totale Investito", f"{tot_inv:,.0f} €")
-        m2.metric("Profitto Netto a Scadenza", f"{guadagno_tot:,.2f} €", delta_color="normal")
+        m2.metric("Profitto Netto Totale", f"{guadagno_tot:,.2f} €")
         
-        st.subheader("📅 Flussi di Cassa Totali (Entrate previste)")
-        
+        # Grafico
         fig2, ax2 = plt.subplots(figsize=(12, 5))
         colors2 = ['red' if x < 0 else 'green' for x in df_chart["Importo"]]
         ax2.bar(df_chart["Data"], df_chart["Importo"], color=colors2)
@@ -296,8 +313,6 @@ elif pagina == "💼 Gestione Portafoglio":
         ax2.grid(axis='y', linestyle='--', alpha=0.5)
         st.pyplot(fig2)
         
-        if st.button("🗑️ Svuota Tutto"):
+        if st.button("🗑️ Reset"):
             st.session_state.portafoglio = []
             st.rerun()
-    else:
-        st.info("Il portafoglio è vuoto. Usa il pannello sopra per aggiungere titoli.")
