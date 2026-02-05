@@ -1,30 +1,41 @@
+import streamlit as st
 import pandas as pd
 import requests
 import datetime
-import numpy as np
 import matplotlib.pyplot as plt
 from scipy import optimize
 
+# Configurazione Pagina
+st.set_page_config(page_title="Bond Analyzer", layout="wide")
+
 # ==============================================================================
-# 1. LINK AI MONITOR (La tua "Miniera Dati")
+# 1. LINK AI MONITOR
 # ==============================================================================
 PAGINE_DA_ANALIZZARE = [
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR",
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia_inflation&yieldtype=G&timescale=DUR",
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=europe&yieldtype=G&timescale=DUR",
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR",
-    "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR"
+    "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR",
+    "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR"
 ]
 
 # ==============================================================================
-# 2. MOTORE SCARICAMENTO DATI
+# 2. MOTORE SCARICAMENTO DATI (CACHED)
 # ==============================================================================
+@st.cache_data(ttl=3600) # La cache dura 1 ora per non scaricare sempre
 def scarica_database():
-    print(f"📥 Scarico i listini aggiornati...")
     db = pd.DataFrame()
     headers = {"User-Agent": "Mozilla/5.0"}
     
-    for url in PAGINE_DA_ANALIZZARE:
+    # Barra di progresso
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    total_links = len(PAGINE_DA_ANALIZZARE)
+    
+    for i, url in enumerate(PAGINE_DA_ANALIZZARE):
+        status_text.text(f"Scaricamento dati da: {url.split('=')[1]}...")
         try:
             r = requests.get(url, headers=headers, timeout=10)
             tabelle = pd.read_html(r.text, thousands='.', decimal=',')
@@ -33,36 +44,26 @@ def scarica_database():
                 df.columns = df.columns.str.strip()
                 if 'ISIN' in df.columns:
                     db = pd.concat([db, df], ignore_index=True)
-        except: continue
-    
-    print(f"✅ Database pronto: {len(db)} obbligazioni indicizzate.\n")
+        except Exception as e:
+            continue
+        progress_bar.progress((i + 1) / total_links)
+            
+    status_text.empty()
+    progress_bar.empty()
     return db
 
 # ==============================================================================
-# 3. ANALISI FINANZIARIA AVANZATA
+# 3. ANALISI FINANZIARIA
 # ==============================================================================
 def analizza_bond(prezzo, cedola, scadenza, tasse=12.5):
-    nominale = 1000 # Lotto minimo standard
+    nominale = 1000
     oggi = datetime.date.today()
     
-    # --- A. CALCOLO RATEO (Stima Semplificata) ---
-    # Per essere precisi al centesimo servirebbe la data godimento esatta.
-    # Qui stimiamo il rateo su base annuale standard (30/360 approx per semplicità)
-    # Se la cedola è 0 (ZC), rateo è 0.
-    rateo_netto = 0.0
-    if cedola > 0:
-        # Assumiamo cedola annuale come worst-case per il rateo massimo, 
-        # oppure calcoliamo giorni da inizio anno se non abbiamo data stacco precedente.
-        # Per semplicità in questo script: rateo = 0 (Il prezzo TEL QUEL lo vede l'utente in banca).
-        # Ma visualizziamo che l'utente paga Prezzo + Commissioni.
-        pass 
-
-    # --- B. COSTRUZIONE PIANO CEDOLARE ---
-    flussi = []     # Importi
-    date_f = []     # Date
-    tipi = []       # Label (Cedola o Rimborso)
+    flussi = []
+    date_f = []
+    tipi = []
     
-    # 1. Uscita Iniziale
+    # Uscita Iniziale
     investimento = -nominale * (prezzo/100)
     flussi.append(investimento)
     date_f.append(oggi)
@@ -70,8 +71,7 @@ def analizza_bond(prezzo, cedola, scadenza, tasse=12.5):
     
     cedola_netta = (cedola * nominale) * (1 - tasse/100)
     
-    # 2. Generazione Flussi Futuri
-    cursor = today_f = oggi
+    cursor = oggi
     while True:
         try: cursor = cursor.replace(year=cursor.year + 1)
         except: cursor = cursor + datetime.timedelta(days=365)
@@ -81,21 +81,19 @@ def analizza_bond(prezzo, cedola, scadenza, tasse=12.5):
         dt = scadenza if cursor >= scadenza else cursor
         
         if dt == scadenza:
-            # Calcolo Tasse su Capital Gain (se comprato sotto 100)
             gain = max(0, 100 - prezzo)
             tassa_gain = gain * (tasse/100) * (nominale/100)
             rimborso_netto = nominale - tassa_gain
-            
             flussi.append(cedola_netta + rimborso_netto)
             date_f.append(dt)
-            tipi.append("Cedola + Rimborso")
+            tipi.append("Rimborso + Cedola")
             break
         else:
             flussi.append(cedola_netta)
             date_f.append(dt)
             tipi.append("Cedola")
 
-    # --- C. CALCOLO RENDIMENTO (XIRR) ---
+    # XIRR
     def xirr(cf, dts):
         dts_days = [(d - dts[0]).days for d in dts]
         try: return optimize.newton(lambda r: sum([v/(1+r)**(d/365) for v,d in zip(cf, dts_days)]), 0.05)
@@ -103,125 +101,98 @@ def analizza_bond(prezzo, cedola, scadenza, tasse=12.5):
     
     rend_netto = xirr(flussi, date_f)
     
-    # --- D. CALCOLO DURATION (Sensibilità) ---
-    # Macaulay Duration semplificata (media ponderata dei tempi)
+    # Duration
     numeratore = 0
     denominatore = 0
-    for i in range(1, len(flussi)): # Saltiamo l'acquisto (indice 0)
+    for i in range(1, len(flussi)):
         t_anni = (date_f[i] - oggi).days / 365.25
         valore_att = flussi[i] / ((1 + rend_netto)**t_anni)
         numeratore += t_anni * valore_att
         denominatore += valore_att
         
     duration = numeratore / denominatore if denominatore != 0 else 0
-    modified_duration = duration / (1 + rend_netto)
 
-    # --- E. DATAFRAME FLUSSI (Per visualizzazione) ---
     df_flussi = pd.DataFrame({
         "Data": date_f,
         "Tipo": tipi,
-        "Importo Netto (€)": [round(f, 2) for f in flussi]
+        "Importo": [round(f, 2) for f in flussi]
     })
     
-    # Guadagno Totale in Euro
-    profitto_totale = sum(flussi)
-
     return {
         "rendimento": rend_netto * 100,
-        "duration": modified_duration,
-        "profitto_euro": profitto_totale,
-        "df_flussi": df_flussi,
-        "investimento": investimento
+        "duration": duration,
+        "profitto": sum(flussi),
+        "df_flussi": df_flussi
     }
 
 # ==============================================================================
-# 4. DASHBOARD GRAFICA (VISUALIZZAZIONE)
+# 4. INTERFACCIA STREAMLIT
 # ==============================================================================
-def mostra_dashboard(dati_analisi, nome_bond):
-    df = dati_analisi["df_flussi"]
-    investimento = abs(dati_analisi["investimento"])
-    profitto = dati_analisi["profitto_euro"]
-    
-    print("\n" + "="*60)
-    print(f" 📊 REPORT ANALISI: {nome_bond}")
-    print("="*60)
-    
-    # SEZIONE 1: KPI PRINCIPALI
-    print(f"🔹 RENDIMENTO NETTO ANNUO:  {dati_analisi['rendimento']:.2f}%")
-    print(f"🔹 DURATION (RISCHIO):      {dati_analisi['duration']:.2f} anni")
-    print(f"   (Se i tassi salgono dell'1%, il prezzo scende di circa il {dati_analisi['duration']:.2f}%)")
-    print(f"🔹 GUADAGNO TOTALE PULITO:  {profitto:+.2f} € (su 1000€ investiti)")
-    print("-" * 60)
-    
-    # SEZIONE 2: TABELLA FLUSSI (Primi 5 e ultimi 5 se lunga)
-    print("📅 PIANO DEI PAGAMENTI (Cash Flow):")
-    if len(df) > 10:
-        print(df.head(5).to_string(index=False))
-        print("... (altre cedole) ...")
-        print(df.tail(3).to_string(index=False))
-    else:
-        print(df.to_string(index=False))
-    print("-" * 60)
+st.title("🕵️‍♂️ Bond Analyzer Pro")
+st.markdown("Inserisci l'ISIN e ottieni analisi, flussi di cassa e grafici.")
 
-    # SEZIONE 3: GRAFICO
-    print("📈 Generazione grafico flussi in corso...")
-    
-    colors = ['red' if x < 0 else 'green' for x in df["Importo Netto (€)"]]
-    
-    plt.figure(figsize=(10, 6))
-    
-    # Bar Chart
-    plt.bar(df["Data"], df["Importo Netto (€)"], color=colors, width=100)
-    
-    # Linea cumulativa (Break-even)
-    cumsum = df["Importo Netto (€)"].cumsum()
-    plt.plot(df["Data"], cumsum, color='blue', marker='o', linestyle='--', label='Saldo Cumulativo')
-    
-    plt.axhline(0, color='black', linewidth=0.8)
-    plt.title(f"Analisi Flussi: {nome_bond}\nRendimento Netto: {dati_analisi['rendimento']:.2f}%")
-    plt.xlabel("Data")
-    plt.ylabel("Euro (€)")
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.legend()
-    
-    # Formattazione Date asse X
-    plt.gcf().autofmt_xdate()
-    
-    plt.show()
-
-# ==============================================================================
-# 5. LOOP PRINCIPALE
-# ==============================================================================
-if __name__ == "__main__":
+# Scarica DB
+with st.spinner('Aggiornamento database obbligazioni in corso...'):
     db = scarica_database()
+
+st.success(f"Database caricato: {len(db)} titoli disponibili.")
+
+# Input Utente
+col1, col2 = st.columns([3, 1])
+with col1:
+    isin_input = st.text_input("Inserisci Codice ISIN (es. IT0005519787)", "").strip()
+with col2:
+    tassazione = st.selectbox("Tassazione", [12.5, 26.0], index=0, help="12.5% per Stati (White List), 26% per Aziende")
+
+if isin_input:
+    # Cerca nel DB
+    riga = db[db['ISIN'] == isin_input]
     
-    while True:
-        isin = input("\n🔎 Inserisci ISIN (o 'exit'): ").strip()
-        if isin.lower() == 'exit': break
-        
-        riga = db[db['ISIN'] == isin]
-        
-        if riga.empty:
-            print("❌ ISIN non trovato.")
-            # Qui potresti attivare l'input manuale se vuoi
-            continue
-            
+    if riga.empty:
+        st.error(f"❌ ISIN {isin_input} non trovato nei listini automatici.")
+        st.warning("Prova a cercare un BTP classico o un bond Europeo.")
+    else:
         try:
             # Estrazione Dati
             prezzo = float(str(riga.iloc[0]['Price' if 'Price' in riga.columns else 'Last']).replace(',', '.'))
             c_raw = str(riga.iloc[0]['Coupon']).replace('%', '').strip().split(' ')[0]
-            cedola = 0.0 if c_raw in ['ZC', 'zero'] else float(c_raw.replace(',', '.')) / 100
+            cedola = 0.0 if c_raw in ['ZC', 'zero', '-'] else float(c_raw.replace(',', '.')) / 100
             s_str = str(riga.iloc[0]['Maturity'])
             scadenza = datetime.datetime.strptime(s_str, "%d/%m/%Y").date()
-            nome = riga.iloc[0]['Name'] if 'Name' in riga.columns else isin
+            nome = riga.iloc[0]['Name'] if 'Name' in riga.columns else "Titolo Sconosciuto"
             
-            # Input Tasse
-            tipo = input("È Titolo di Stato? [s/n]: ").lower()
-            tasse = 12.5 if tipo == 's' else 26.0
+            # Calcoli
+            res = analizza_bond(prezzo, cedola, scadenza, tassazione)
             
-            # Analisi e Visualizzazione
-            risultati = analizza_bond(prezzo, cedola, scadenza, tasse)
-            mostra_dashboard(risultati, nome)
+            # --- VISUALIZZAZIONE RISULTATI ---
+            st.divider()
+            st.subheader(f"📄 {nome}")
             
+            # Metriche in alto
+            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+            kpi1.metric("Prezzo Attuale", f"{prezzo} €")
+            kpi2.metric("Rendimento Netto", f"{res['rendimento']:.2f}%")
+            kpi3.metric("Guadagno Totale", f"{res['profitto']:+.2f} €", help="Su 1000€ investiti")
+            kpi4.metric("Duration (Rischio)", f"{res['duration']:.2f} anni")
+            
+            # Grafico
+            st.subheader("📉 Flussi di Cassa (Cash Flow)")
+            
+            df_plot = res['df_flussi']
+            colors = ['red' if x < 0 else 'green' for x in df_plot["Importo"]]
+            
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.bar(df_plot["Data"], df_plot["Importo"], color=colors)
+            ax.axhline(0, color='black', linewidth=0.8)
+            ax.set_title("Uscite (Rosso) vs Entrate (Verde)")
+            ax.grid(axis='y', linestyle='--', alpha=0.5)
+            
+            # IMPORTANTE: Streamlit usa st.pyplot, non plt.show()
+            st.pyplot(fig)
+            
+            # Tabella Dati
+            with st.expander("Vedi Tabella Pagamenti Dettagliata"):
+                st.dataframe(res['df_flussi'], use_container_width=True)
+                
         except Exception as e:
-            print(f"⚠️ Errore dati: {e}")
+            st.error(f"Errore nella lettura dei dati del titolo: {e}")
