@@ -74,28 +74,77 @@ def get_bond_data(isin_code):
     ]
     
     headers = {'User-Agent': 'Mozilla/5.0'}
+
+    # Helper per ricerca colonne flessibile (Robustezza)
+    def trova_colonna(df, keywords):
+        for col in df.columns:
+            for key in keywords:
+                if key.lower() in col.lower():
+                    return col
+        return None
+
     for source in sources:
         try:
-            r = requests.get(source["url"], headers=headers, timeout=5)
+            r = requests.get(source["url"], headers=headers, timeout=6)
             if r.status_code != 200: continue
+            
+            # Legge le tabelle
             df_list = pd.read_html(r.content, decimal=",", thousands=".")
+            
             for df in df_list:
-                if 'Codice ISIN' in df.columns:
-                    match = df[df['Codice ISIN'] == isin_code]
+                # Cerca colonna ISIN
+                col_isin = trova_colonna(df, ['isin', 'codice'])
+                
+                if col_isin:
+                    match = df[df[col_isin] == isin_code]
                     if not match.empty:
                         row = match.iloc[0]
-                        pr = float(str(row['Prezzo di riferimento']).replace(',', '.'))
-                        scad = datetime.strptime(str(row['Data scadenza']), '%Y-%m-%d').date()
-                        desc = row['Descrizione']
-                        val = row['Divisa'] if 'Divisa' in df.columns else "EUR"
-                        ced = 0.0
-                        if source["freq"] > 0:
-                            m = re.search(r'(\d+(?:[.,]\d+)?)%', desc)
-                            if m: ced = float(m.group(1).replace(',', '.'))
                         
-                        return {"source": source["nome"], "freq": source["freq"], "valuta": val,
-                                "prezzo": pr, "scadenza": scad, "cedola": ced, "desc": desc}
-        except: pass
+                        # Cerca altre colonne
+                        col_prezzo = trova_colonna(df, ['prezzo', 'price', 'last', 'quotazione'])
+                        col_scadenza = trova_colonna(df, ['scadenza', 'maturity', 'date'])
+                        col_desc = trova_colonna(df, ['descrizione', 'nome', 'description', 'name'])
+                        col_divisa = trova_colonna(df, ['divisa', 'curr', 'valuta'])
+                        
+                        if not col_prezzo or not col_scadenza: continue
+
+                        try:
+                            # Prezzo clean
+                            pr_str = str(row[col_prezzo]).replace(',', '.').replace('€', '').strip()
+                            pr = float(pr_str)
+                            
+                            # Data Parsing Robusto
+                            scad_str = str(row[col_scadenza])
+                            try:
+                                scad = datetime.strptime(scad_str, '%Y-%m-%d').date()
+                            except:
+                                try:
+                                    scad = datetime.strptime(scad_str, '%d/%m/%Y').date()
+                                except:
+                                    continue 
+                            
+                            desc = row[col_desc] if col_desc else "N/A"
+                            val = row[col_divisa] if col_divisa else "EUR"
+                            
+                            # Cedola
+                            ced = 0.0
+                            if source["freq"] > 0:
+                                m = re.search(r'(\d+(?:[.,]\d+)?)%', desc)
+                                if m: ced = float(m.group(1).replace(',', '.'))
+                            
+                            return {
+                                "source": source["nome"],
+                                "freq": source["freq"],
+                                "valuta": val,
+                                "prezzo": pr,
+                                "scadenza": scad,
+                                "cedola": ced,
+                                "desc": desc
+                            }
+                        except:
+                            continue
+        except: 
+            pass
     return None
 
 def calcola_metriche(dati, tax_rate):
@@ -163,7 +212,7 @@ else:
         st.title("Menu Bond Club")
         page = st.radio("Scegli Sezione:", ["🔎 Analisi Singola", "💼 Costruisci Portafoglio"])
         st.divider()
-        st.caption("Database supportati: 28")
+        st.caption("Database supportati: 28 (Real-Time)")
         if st.button("Esci dal Club"):
             st.session_state.access_granted = False
             st.rerun()
