@@ -5,15 +5,16 @@ import re
 from datetime import datetime, date, timedelta
 import numpy as np
 from scipy import optimize
+from openai import OpenAI
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Bond Club Portfolio", page_icon="💼", layout="wide")
+st.set_page_config(page_title="Bond Club Pro", page_icon="🇪🇺", layout="wide")
 
 # --- INIZIALIZZAZIONE SESSION STATE ---
 if 'access_granted' not in st.session_state:
     st.session_state.access_granted = False
 if 'portfolio' not in st.session_state:
-    st.session_state.portfolio = [] # Lista per salvare i bond del portafoglio
+    st.session_state.portfolio = [] 
 
 # --- FUNZIONI DI CALCOLO (Backend) ---
 def xirr(cashflows, dates):
@@ -32,7 +33,11 @@ def rendimento_semplice_360(prezzo, rimborso, giorni):
     return ((rimborso - prezzo) / prezzo) * (360 / giorni)
 
 def get_bond_data(isin_code):
+    # ELENCO FONTI AGGIORNATO CON "BANCHE EUROPEE"
     sources = [
+        {"nome": "BANCHE EUROPEE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheeuropee&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "BANCHE ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "BANCHE (Corporate)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=banche&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BOT (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0},
         {"nome": "BTP (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
         {"nome": "BUND (Germania)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR", "freq": 1},
@@ -108,6 +113,27 @@ def calcola_metriche(dati, tax_rate):
     
     return {"tir_lordo": tir_lordo, "tir_netto": tir_netto, "giorni": giorni, "data_valuta": data_valuta}
 
+# --- FUNZIONE AI (Opzionale) ---
+def chiedi_all_ai(dati_bond, rendimenti):
+    try:
+        if "OPENAI_API_KEY" not in st.secrets: return None
+        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+        prompt = f"""
+        Analizza questo bond BANCA/CORPORATE o GOVERNATIVO.
+        Nome: {dati_bond['desc']} ({dati_bond['source']})
+        Prezzo: {dati_bond['prezzo']}
+        Rendimento Netto: {rendimenti['tir_netto']*100:.2f}%
+        Scadenza: {dati_bond['scadenza']}
+        
+        Dimmi i rischi principali (Emittente, Tassi) in 3 frasi secche e ironiche.
+        """
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+    except: return None
+
 # ==========================================
 #              GATEKEEPER
 # ==========================================
@@ -130,7 +156,6 @@ if not st.session_state.access_granted:
 #           APP PRINCIPALE
 # ==========================================
 else:
-    # --- SIDEBAR MENU ---
     with st.sidebar:
         st.title("Menu Bond Club")
         page = st.radio("Scegli Sezione:", ["🔎 Analisi Singola", "💼 Costruisci Portafoglio"])
@@ -139,37 +164,53 @@ else:
             st.session_state.access_granted = False
             st.rerun()
 
-    # =========================================================
-    # PAGINA 1: ANALISI SINGOLA (Quella che avevamo)
-    # =========================================================
+    # --- PAGINA 1: ANALISI ---
     if page == "🔎 Analisi Singola":
-        st.title("🔎 Scanner Bond")
-        st.caption("Analizza un singolo titolo o confrontane due.")
+        st.title("🔎 Scanner Bond & Banche")
+        st.caption("Cerca Titoli di Stato o Obbligazioni Bancarie.")
 
         tab1, tab2 = st.tabs(["Analisi", "Confronto"])
 
         with tab1:
             c1, c2, c3 = st.columns([2, 1, 1])
             isin_input = c1.text_input("Inserisci ISIN", placeholder="Es. IT000...", key="single_isin").strip().upper()
-            tassazione = c2.selectbox("Tassazione", [12.5, 26.0], index=0, format_func=lambda x: f"{x}%", key="tax1")
+            
+            # Qui l'utente sceglie la tassa (26% è importante per le banche)
+            tassazione = c2.selectbox("Tassazione", [12.5, 26.0], index=0, format_func=lambda x: f"{x}%", help="Usa 26% per le Banche!", key="tax1")
+            
             c3.write("") 
             c3.write("")
             if c3.button("Calcola", use_container_width=True, key="btn1") and isin_input:
-                with st.spinner("Scraping in corso..."):
+                with st.spinner("Scansiono 11 Database..."):
                     dati = get_bond_data(isin_input)
                     if dati:
                         res = calcola_metriche(dati, tassazione/100)
-                        st.success(f"**{dati['desc']}**")
+                        
+                        # LOGICA VISIVA
+                        if "BANCHE" in dati['source']:
+                            st.warning(f"🏦 Trovato nel monitor **{dati['source']}**. Assicurati di usare tassazione al 26%.")
+                        else:
+                            st.success(f"🏛️ Trovato nel monitor **{dati['source']}**")
+                            
+                        st.subheader(f"**{dati['desc']}**")
+                        
                         m1, m2, m3 = st.columns(3)
                         m1.metric("Prezzo", f"{dati['prezzo']} {dati['valuta']}")
                         m2.metric("Rendimento Netto", f"{res['tir_netto']*100:.3f}%")
                         m3.metric("Rendimento Lordo", f"{res['tir_lordo']*100:.3f}%")
                         st.info(f"Scadenza: {dati['scadenza']} ({res['giorni']} gg)")
+                        
+                        # AI
+                        ai_msg = chiedi_all_ai(dati, res)
+                        if ai_msg:
+                            st.divider()
+                            st.info(f"🤖 **AI:** {ai_msg}")
+                            
                     else:
                         st.error("ISIN non trovato.")
 
         with tab2:
-            st.write("Confronto diretto tra due ISIN")
+            st.write("Confronto diretto (es. BTP vs Bancario)")
             col_a, col_b = st.columns(2)
             isin_a = col_a.text_input("ISIN A", key="cmp_a").strip().upper()
             isin_b = col_b.text_input("ISIN B", key="cmp_b").strip().upper()
@@ -190,35 +231,26 @@ else:
                     else:
                         st.error("Uno dei due ISIN non trovato.")
 
-    # =========================================================
-    # PAGINA 2: COSTRUISCI PORTAFOGLIO (Nuova)
-    # =========================================================
+    # --- PAGINA 2: PORTAFOGLIO ---
     elif page == "💼 Costruisci Portafoglio":
-        st.title("💼 Il Mio Portafoglio Bond")
-        st.write("Aggiungi i titoli che possiedi (o vorresti) per calcolare il rendimento complessivo.")
-
-        # --- SEZIONE AGGIUNTA ---
+        st.title("💼 Il Mio Portafoglio")
+        
         with st.container(border=True):
             st.subheader("Aggiungi Titolo")
             c_in1, c_in2, c_in3, c_in4 = st.columns([2, 2, 1, 1])
             
             p_isin = c_in1.text_input("ISIN", placeholder="IT000...", key="p_isin").strip().upper()
-            p_nominale = c_in2.number_input("Valore Nominale (€)", min_value=1000, step=1000, value=1000, help="Quanti soldi di valore facciale compri")
+            p_nominale = c_in2.number_input("Valore Nominale (€)", min_value=1000, step=1000, value=1000)
             p_tax = c_in3.selectbox("Tasse", [12.5, 26.0], key="p_tax", format_func=lambda x: f"{x}%")
             c_in4.write("")
             c_in4.write("")
-            add_btn = c_in4.button("➕ Aggiungi", use_container_width=True)
-
-            if add_btn and p_isin:
-                with st.spinner("Cerco e calcolo..."):
+            
+            if c_in4.button("➕ Aggiungi", use_container_width=True) and p_isin:
+                with st.spinner("Cerco..."):
                     dati = get_bond_data(p_isin)
                     if dati:
-                        # Calcolo metriche per questo bond
                         metrics = calcola_metriche(dati, p_tax/100)
-                        
-                        # Calcolo valore di mercato (Quanto paghi davvero)
                         valore_mercato = (p_nominale * dati['prezzo']) / 100
-                        
                         nuovo_bond = {
                             "ISIN": p_isin,
                             "Nome": dati['desc'],
@@ -226,54 +258,28 @@ else:
                             "Prezzo": dati['prezzo'],
                             "Valore Mercato": valore_mercato,
                             "Rend. Netto %": metrics['tir_netto'] * 100,
-                            "Rend. Lordo %": metrics['tir_lordo'] * 100,
-                            "Tasse": p_tax,
-                            "Valuta": dati['valuta']
+                            "Tasse": p_tax
                         }
-                        
                         st.session_state.portfolio.append(nuovo_bond)
                         st.success(f"Aggiunto: {dati['desc']}")
                     else:
                         st.error("ISIN non trovato.")
 
-        # --- VISUALIZZAZIONE PORTAFOGLIO ---
         if len(st.session_state.portfolio) > 0:
             st.divider()
-            st.subheader("📊 Composizione Attuale")
-            
-            # Creiamo un DataFrame per visualizzare meglio
             df_pf = pd.DataFrame(st.session_state.portfolio)
-            
-            # Tabella interattiva
             st.dataframe(df_pf[["ISIN", "Nome", "Nominale", "Prezzo", "Valore Mercato", "Rend. Netto %"]], use_container_width=True)
 
-            # --- CALCOLO RENDIMENTO MEDIO PONDERATO ---
             totale_investito = df_pf["Valore Mercato"].sum()
-            
-            # Formula Ponderata: Somma(Rendimento * Peso)
-            # Peso = Valore Mercato del singolo bond / Totale Investito
-            
             df_pf["Peso"] = df_pf["Valore Mercato"] / totale_investito
             df_pf["Contributo Netto"] = df_pf["Rend. Netto %"] * df_pf["Peso"]
-            df_pf["Contributo Lordo"] = df_pf["Rend. Lordo %"] * df_pf["Peso"]
-            
             avg_yield_netto = df_pf["Contributo Netto"].sum()
-            avg_yield_lordo = df_pf["Contributo Lordo"].sum()
             
             st.divider()
-            col_res1, col_res2, col_res3 = st.columns(3)
+            col_res1, col_res2 = st.columns(2)
+            col_res1.metric("Totale Investito", f"€ {totale_investito:,.2f}")
+            col_res2.metric("Rendimento Medio Netto", f"{avg_yield_netto:.3f}%")
             
-            col_res1.metric("Totale Investito (Mercato)", f"€ {totale_investito:,.2f}")
-            col_res2.metric("Rendimento Medio Netto", f"{avg_yield_netto:.3f}%", help="Media ponderata in base ai soldi investiti")
-            col_res3.metric("Rendimento Medio Lordo", f"{avg_yield_lordo:.3f}%")
-            
-            # Grafico a torta
-            st.write("Distribuzione Portafoglio:")
-            st.bar_chart(df_pf.set_index("Nome")["Valore Mercato"])
-            
-            # Tasto Reset
             if st.button("🗑️ Svuota Portafoglio"):
                 st.session_state.portfolio = []
                 st.rerun()
-        else:
-            st.info("Il tuo portafoglio è vuoto. Aggiungi dei bond sopra.")
