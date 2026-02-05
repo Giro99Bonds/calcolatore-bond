@@ -7,7 +7,7 @@ import numpy as np
 from scipy import optimize
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Bond Club Pro", page_icon="🦁", layout="wide")
+st.set_page_config(page_title="Bond Club Pro", page_icon="🌐", layout="wide")
 
 # --- INIZIALIZZAZIONE SESSION STATE ---
 if 'access_granted' not in st.session_state:
@@ -32,15 +32,30 @@ def rendimento_semplice_360(prezzo, rimborso, giorni):
     return ((rimborso - prezzo) / prezzo) * (360 / giorni)
 
 def get_bond_data(isin_code):
-    # ELENCO FONTI COMPLETO (17 DATASET)
+    # ELENCO FONTI COMPLETO (28 DATASET)
     sources = [
-        # --- EMITTENTI SPECIFICI (NUOVI) ---
+        # --- NUOVI AGGIUNTI (SPECIALI) ---
+        {"nome": "TDS/SOVRANAZIONALI 2026", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=sovtds2026&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ZERO COUPON (Global)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=zerocoupon&yieldtype=G&timescale=DUR", "freq": 0},
+        {"nome": "CEDOLA ZERO (Mix)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=cedolazero&yieldtype=G&timescale=DUR", "freq": 0},
+        {"nome": "SUBORDINATE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=subordinate&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ULTRA LUNGHI (25Y+ EUR)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=25yearsEUR&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "GREEN BONDS", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=greenbond&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "CALLABLE (Richiamabili)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=callable&yieldtype=G&timescale=DUR", "freq": 1},
+
+        # --- SETTORIALI ---
+        {"nome": "CORPORATE ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporateitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "TELECOM (Tlc)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=telecom&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "AUTOMOTIVE (Auto)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=automotive&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ENERGY (Petrolio/Gas)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=petrolio&yieldtype=G&timescale=DUR", "freq": 1},
+
+        # --- EMITTENTI SPECIFICI ---
         {"nome": "INTESA SANPAOLO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=intesasanpaolo&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "UNICREDIT", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=unicredit&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "MEDIOBANCA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=mediobanca&yieldtype=G&timescale=DUR", "freq": 1},
         
         # --- CORPORATE & BANCHE ---
-        {"nome": "CORPORATE (Aziende)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "CORPORATE (Generale)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BANCHE USA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheusa&yieldtype=G&timescale=DUR", "freq": 2}, 
         {"nome": "BANCHE ITALIA (Mix)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BANCHE EUROPEE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheeuropee&yieldtype=G&timescale=DUR", "freq": 1},
@@ -148,39 +163,50 @@ else:
         st.title("Menu Bond Club")
         page = st.radio("Scegli Sezione:", ["🔎 Analisi Singola", "💼 Costruisci Portafoglio"])
         st.divider()
-        st.caption("Database supportati: 17")
+        st.caption("Database supportati: 28")
         if st.button("Esci dal Club"):
             st.session_state.access_granted = False
             st.rerun()
 
     # --- PAGINA 1: ANALISI ---
     if page == "🔎 Analisi Singola":
-        st.title("🔎 Scanner Bond Universale")
-        st.caption("Ricerca tra 17 Database: Stati, Banche, Corporate e Emergenti.")
+        st.title("🔎 Scanner Bond Definitivo")
+        st.caption("Ricerca su 28 Database: Inclusi Subordinate, Callable, Zero Coupon e Green.")
 
         tab1, tab2 = st.tabs(["Analisi", "Confronto"])
 
         with tab1:
             c1, c2, c3 = st.columns([2, 1, 1])
-            isin_input = c1.text_input("Inserisci ISIN", placeholder="Es. IT000... o US...", key="single_isin").strip().upper()
+            isin_input = c1.text_input("Inserisci ISIN", placeholder="Es. IT000... o XS...", key="single_isin").strip().upper()
             
-            tassazione = c2.selectbox("Tassazione", [12.5, 26.0], index=0, format_func=lambda x: f"{x}%", help="Usa 26% per Banche e Corporate!", key="tax1")
+            tassazione = c2.selectbox("Tassazione", [12.5, 26.0], index=0, format_func=lambda x: f"{x}%", help="Usa 26% per Corporate, Auto, Banche, Telecom!", key="tax1")
             
             c3.write("") 
             c3.write("")
             if c3.button("Calcola", use_container_width=True, key="btn1") and isin_input:
-                with st.spinner("Scansiono 17 Database..."):
+                with st.spinner("Scansiono 28 Database (potrebbe volerci qualche secondo)..."):
                     dati = get_bond_data(isin_input)
                     if dati:
                         res = calcola_metriche(dati, tassazione/100)
                         
-                        # Avvisi intelligenti sulla fonte
+                        # --- AVVISI INTELLIGENTI ---
                         fonte = dati['source']
-                        if any(x in fonte for x in ["INTESA", "UNICREDIT", "MEDIOBANCA", "BANCHE", "CORPORATE"]):
-                            st.warning(f"🏦 Trovato in **{fonte}**. Tassazione suggerita: **26%**.")
+                        
+                        # 1. Avviso Tassazione
+                        warning_tax = ["BANCHE", "CORPORATE", "TELECOM", "AUTOMOTIVE", "ENERGY", "INTESA", "UNICREDIT", "MEDIOBANCA", "SUBORDINATE", "CALLABLE"]
+                        if any(x in fonte for x in warning_tax):
+                            st.warning(f"🏭 Trovato in **{fonte}**. Tassazione suggerita: **26%**.")
                         else:
                             st.success(f"🏛️ Trovato in **{fonte}**")
-                            
+                        
+                        # 2. Avviso Rischio Struttura
+                        if "SUBORDINATE" in fonte:
+                            st.error("⚠️ ATTENZIONE: Titolo **SUBORDINATO**. In caso di fallimento della banca, rischi di perdere il capitale dopo gli azionisti.")
+                        if "CALLABLE" in fonte:
+                            st.warning("📞 ATTENZIONE: Titolo **CALLABLE**. L'emittente può rimborsarlo prima della scadenza se i tassi scendono.")
+                        if "ZERO" in fonte or "ZC" in dati['desc']:
+                            st.info("ℹ️ Titolo **ZERO COUPON**. Non paga cedole periodiche, il rendimento è tutto alla scadenza.")
+
                         st.subheader(f"**{dati['desc']}**")
                         
                         m1, m2, m3 = st.columns(3)
@@ -197,7 +223,7 @@ else:
                         st.error("ISIN non trovato nei database configurati.")
 
         with tab2:
-            st.write("Confronto diretto (es. Intesa vs Unicredit)")
+            st.write("Confronto diretto (es. Subordinato vs Senior)")
             col_a, col_b = st.columns(2)
             isin_a = col_a.text_input("ISIN A", key="cmp_a").strip().upper()
             isin_b = col_b.text_input("ISIN B", key="cmp_b").strip().upper()
