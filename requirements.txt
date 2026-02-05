@@ -2,6 +2,7 @@ streamlit
 pandas
 requests
 scipy
-numpy
+matplotlib
 lxml
 html5lib
+bs4
