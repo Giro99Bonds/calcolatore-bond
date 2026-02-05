@@ -5,10 +5,9 @@ import re
 from datetime import datetime, date, timedelta
 import numpy as np
 from scipy import optimize
-from openai import OpenAI
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Bond Club Pro", page_icon="🇪🇺", layout="wide")
+st.set_page_config(page_title="Bond Club Pro", page_icon="🏦", layout="wide")
 
 # --- INIZIALIZZAZIONE SESSION STATE ---
 if 'access_granted' not in st.session_state:
@@ -33,10 +32,10 @@ def rendimento_semplice_360(prezzo, rimborso, giorni):
     return ((rimborso - prezzo) / prezzo) * (360 / giorni)
 
 def get_bond_data(isin_code):
-    # ELENCO FONTI AGGIORNATO CON "BANCHE EUROPEE"
+    # ELENCO FONTI COMPLETO (12 DATASET)
     sources = [
-        {"nome": "BANCHE EUROPEE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheeuropee&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BANCHE ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "BANCHE EUROPEE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheeuropee&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BANCHE (Corporate)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=banche&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BOT (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0},
         {"nome": "BTP (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
@@ -113,29 +112,8 @@ def calcola_metriche(dati, tax_rate):
     
     return {"tir_lordo": tir_lordo, "tir_netto": tir_netto, "giorni": giorni, "data_valuta": data_valuta}
 
-# --- FUNZIONE AI (Opzionale) ---
-def chiedi_all_ai(dati_bond, rendimenti):
-    try:
-        if "OPENAI_API_KEY" not in st.secrets: return None
-        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-        prompt = f"""
-        Analizza questo bond BANCA/CORPORATE o GOVERNATIVO.
-        Nome: {dati_bond['desc']} ({dati_bond['source']})
-        Prezzo: {dati_bond['prezzo']}
-        Rendimento Netto: {rendimenti['tir_netto']*100:.2f}%
-        Scadenza: {dati_bond['scadenza']}
-        
-        Dimmi i rischi principali (Emittente, Tassi) in 3 frasi secche e ironiche.
-        """
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content
-    except: return None
-
 # ==========================================
-#              GATEKEEPER
+#              GATEKEEPER (Tossico?)
 # ==========================================
 if not st.session_state.access_granted:
     st.markdown("<h1 style='text-align: center; color: red;'>⛔ AREA RISERVATA ⛔</h1>", unsafe_allow_html=True)
@@ -160,14 +138,15 @@ else:
         st.title("Menu Bond Club")
         page = st.radio("Scegli Sezione:", ["🔎 Analisi Singola", "💼 Costruisci Portafoglio"])
         st.divider()
+        st.caption("Database supportati: 12")
         if st.button("Esci dal Club"):
             st.session_state.access_granted = False
             st.rerun()
 
     # --- PAGINA 1: ANALISI ---
     if page == "🔎 Analisi Singola":
-        st.title("🔎 Scanner Bond & Banche")
-        st.caption("Cerca Titoli di Stato o Obbligazioni Bancarie.")
+        st.title("🔎 Scanner Bond Universale")
+        st.caption("Cerca Titoli di Stato, Banche Italiane/Estere e Corporate.")
 
         tab1, tab2 = st.tabs(["Analisi", "Confronto"])
 
@@ -175,22 +154,22 @@ else:
             c1, c2, c3 = st.columns([2, 1, 1])
             isin_input = c1.text_input("Inserisci ISIN", placeholder="Es. IT000...", key="single_isin").strip().upper()
             
-            # Qui l'utente sceglie la tassa (26% è importante per le banche)
+            # Selettore Tassazione (Importante per le banche)
             tassazione = c2.selectbox("Tassazione", [12.5, 26.0], index=0, format_func=lambda x: f"{x}%", help="Usa 26% per le Banche!", key="tax1")
             
             c3.write("") 
             c3.write("")
             if c3.button("Calcola", use_container_width=True, key="btn1") and isin_input:
-                with st.spinner("Scansiono 11 Database..."):
+                with st.spinner("Scansiono 12 Database..."):
                     dati = get_bond_data(isin_input)
                     if dati:
                         res = calcola_metriche(dati, tassazione/100)
                         
-                        # LOGICA VISIVA
+                        # Avvisi visuali sul tipo di monitor trovato
                         if "BANCHE" in dati['source']:
-                            st.warning(f"🏦 Trovato nel monitor **{dati['source']}**. Assicurati di usare tassazione al 26%.")
+                            st.warning(f"🏦 Trovato in **{dati['source']}**. Tassazione suggerita: 26%.")
                         else:
-                            st.success(f"🏛️ Trovato nel monitor **{dati['source']}**")
+                            st.success(f"🏛️ Trovato in **{dati['source']}**")
                             
                         st.subheader(f"**{dati['desc']}**")
                         
@@ -199,15 +178,9 @@ else:
                         m2.metric("Rendimento Netto", f"{res['tir_netto']*100:.3f}%")
                         m3.metric("Rendimento Lordo", f"{res['tir_lordo']*100:.3f}%")
                         st.info(f"Scadenza: {dati['scadenza']} ({res['giorni']} gg)")
-                        
-                        # AI
-                        ai_msg = chiedi_all_ai(dati, res)
-                        if ai_msg:
-                            st.divider()
-                            st.info(f"🤖 **AI:** {ai_msg}")
                             
                     else:
-                        st.error("ISIN non trovato.")
+                        st.error("ISIN non trovato nei database configurati.")
 
         with tab2:
             st.write("Confronto diretto (es. BTP vs Bancario)")
@@ -268,17 +241,21 @@ else:
         if len(st.session_state.portfolio) > 0:
             st.divider()
             df_pf = pd.DataFrame(st.session_state.portfolio)
+            
+            # Formattazione per la visualizzazione
             st.dataframe(df_pf[["ISIN", "Nome", "Nominale", "Prezzo", "Valore Mercato", "Rend. Netto %"]], use_container_width=True)
 
             totale_investito = df_pf["Valore Mercato"].sum()
+            
+            # Calcolo Ponderato
             df_pf["Peso"] = df_pf["Valore Mercato"] / totale_investito
             df_pf["Contributo Netto"] = df_pf["Rend. Netto %"] * df_pf["Peso"]
             avg_yield_netto = df_pf["Contributo Netto"].sum()
             
             st.divider()
             col_res1, col_res2 = st.columns(2)
-            col_res1.metric("Totale Investito", f"€ {totale_investito:,.2f}")
-            col_res2.metric("Rendimento Medio Netto", f"{avg_yield_netto:.3f}%")
+            col_res1.metric("Totale Investito (al mercato)", f"€ {totale_investito:,.2f}")
+            col_res2.metric("Rendimento Medio Netto Ponderato", f"{avg_yield_netto:.3f}%")
             
             if st.button("🗑️ Svuota Portafoglio"):
                 st.session_state.portfolio = []
