@@ -7,7 +7,7 @@ import numpy as np
 from scipy import optimize
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Bond Club Pro", page_icon="🏦", layout="wide")
+st.set_page_config(page_title="Bond Club Pro", page_icon="🦁", layout="wide")
 
 # --- INIZIALIZZAZIONE SESSION STATE ---
 if 'access_granted' not in st.session_state:
@@ -32,16 +32,26 @@ def rendimento_semplice_360(prezzo, rimborso, giorni):
     return ((rimborso - prezzo) / prezzo) * (360 / giorni)
 
 def get_bond_data(isin_code):
-    # ELENCO FONTI COMPLETO (12 DATASET)
+    # ELENCO FONTI COMPLETO (17 DATASET)
     sources = [
-        {"nome": "BANCHE ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        # --- EMITTENTI SPECIFICI (NUOVI) ---
+        {"nome": "INTESA SANPAOLO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=intesasanpaolo&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "UNICREDIT", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=unicredit&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "MEDIOBANCA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=mediobanca&yieldtype=G&timescale=DUR", "freq": 1},
+        
+        # --- CORPORATE & BANCHE ---
+        {"nome": "CORPORATE (Aziende)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "BANCHE USA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheusa&yieldtype=G&timescale=DUR", "freq": 2}, 
+        {"nome": "BANCHE ITALIA (Mix)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BANCHE EUROPEE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheeuropee&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "BANCHE (Corporate)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=banche&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "BANCHE (Generale)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=banche&yieldtype=G&timescale=DUR", "freq": 1},
+        
+        # --- TITOLI DI STATO ---
         {"nome": "BOT (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0},
         {"nome": "BTP (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
         {"nome": "BUND (Germania)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "OAT (Francia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=francia&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "USA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR", "freq": 2},
+        {"nome": "USA (Treasuries)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR", "freq": 2},
         {"nome": "ROMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=romania&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "EUROPA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=europa&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "ALTRI EUROPA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=altri_europa&yieldtype=G&timescale=DUR", "freq": 1},
@@ -113,7 +123,7 @@ def calcola_metriche(dati, tax_rate):
     return {"tir_lordo": tir_lordo, "tir_netto": tir_netto, "giorni": giorni, "data_valuta": data_valuta}
 
 # ==========================================
-#              GATEKEEPER (Tossico?)
+#              GATEKEEPER
 # ==========================================
 if not st.session_state.access_granted:
     st.markdown("<h1 style='text-align: center; color: red;'>⛔ AREA RISERVATA ⛔</h1>", unsafe_allow_html=True)
@@ -138,7 +148,7 @@ else:
         st.title("Menu Bond Club")
         page = st.radio("Scegli Sezione:", ["🔎 Analisi Singola", "💼 Costruisci Portafoglio"])
         st.divider()
-        st.caption("Database supportati: 12")
+        st.caption("Database supportati: 17")
         if st.button("Esci dal Club"):
             st.session_state.access_granted = False
             st.rerun()
@@ -146,30 +156,30 @@ else:
     # --- PAGINA 1: ANALISI ---
     if page == "🔎 Analisi Singola":
         st.title("🔎 Scanner Bond Universale")
-        st.caption("Cerca Titoli di Stato, Banche Italiane/Estere e Corporate.")
+        st.caption("Ricerca tra 17 Database: Stati, Banche, Corporate e Emergenti.")
 
         tab1, tab2 = st.tabs(["Analisi", "Confronto"])
 
         with tab1:
             c1, c2, c3 = st.columns([2, 1, 1])
-            isin_input = c1.text_input("Inserisci ISIN", placeholder="Es. IT000...", key="single_isin").strip().upper()
+            isin_input = c1.text_input("Inserisci ISIN", placeholder="Es. IT000... o US...", key="single_isin").strip().upper()
             
-            # Selettore Tassazione (Importante per le banche)
-            tassazione = c2.selectbox("Tassazione", [12.5, 26.0], index=0, format_func=lambda x: f"{x}%", help="Usa 26% per le Banche!", key="tax1")
+            tassazione = c2.selectbox("Tassazione", [12.5, 26.0], index=0, format_func=lambda x: f"{x}%", help="Usa 26% per Banche e Corporate!", key="tax1")
             
             c3.write("") 
             c3.write("")
             if c3.button("Calcola", use_container_width=True, key="btn1") and isin_input:
-                with st.spinner("Scansiono 12 Database..."):
+                with st.spinner("Scansiono 17 Database..."):
                     dati = get_bond_data(isin_input)
                     if dati:
                         res = calcola_metriche(dati, tassazione/100)
                         
-                        # Avvisi visuali sul tipo di monitor trovato
-                        if "BANCHE" in dati['source']:
-                            st.warning(f"🏦 Trovato in **{dati['source']}**. Tassazione suggerita: 26%.")
+                        # Avvisi intelligenti sulla fonte
+                        fonte = dati['source']
+                        if any(x in fonte for x in ["INTESA", "UNICREDIT", "MEDIOBANCA", "BANCHE", "CORPORATE"]):
+                            st.warning(f"🏦 Trovato in **{fonte}**. Tassazione suggerita: **26%**.")
                         else:
-                            st.success(f"🏛️ Trovato in **{dati['source']}**")
+                            st.success(f"🏛️ Trovato in **{fonte}**")
                             
                         st.subheader(f"**{dati['desc']}**")
                         
@@ -177,13 +187,17 @@ else:
                         m1.metric("Prezzo", f"{dati['prezzo']} {dati['valuta']}")
                         m2.metric("Rendimento Netto", f"{res['tir_netto']*100:.3f}%")
                         m3.metric("Rendimento Lordo", f"{res['tir_lordo']*100:.3f}%")
-                        st.info(f"Scadenza: {dati['scadenza']} ({res['giorni']} gg)")
-                            
+                        
+                        c_info1, c_info2 = st.columns(2)
+                        c_info1.info(f"Scadenza: {dati['scadenza']} ({res['giorni']} gg)")
+                        if dati['valuta'] != 'EUR':
+                            c_info2.warning(f"⚠️ Valuta: **{dati['valuta']}**. Rischio cambio!")
+
                     else:
                         st.error("ISIN non trovato nei database configurati.")
 
         with tab2:
-            st.write("Confronto diretto (es. BTP vs Bancario)")
+            st.write("Confronto diretto (es. Intesa vs Unicredit)")
             col_a, col_b = st.columns(2)
             isin_a = col_a.text_input("ISIN A", key="cmp_a").strip().upper()
             isin_b = col_b.text_input("ISIN B", key="cmp_b").strip().upper()
@@ -213,7 +227,7 @@ else:
             c_in1, c_in2, c_in3, c_in4 = st.columns([2, 2, 1, 1])
             
             p_isin = c_in1.text_input("ISIN", placeholder="IT000...", key="p_isin").strip().upper()
-            p_nominale = c_in2.number_input("Valore Nominale (€)", min_value=1000, step=1000, value=1000)
+            p_nominale = c_in2.number_input("Valore Nominale", min_value=1000, step=1000, value=1000)
             p_tax = c_in3.selectbox("Tasse", [12.5, 26.0], key="p_tax", format_func=lambda x: f"{x}%")
             c_in4.write("")
             c_in4.write("")
@@ -231,7 +245,8 @@ else:
                             "Prezzo": dati['prezzo'],
                             "Valore Mercato": valore_mercato,
                             "Rend. Netto %": metrics['tir_netto'] * 100,
-                            "Tasse": p_tax
+                            "Tasse": p_tax,
+                            "Valuta": dati['valuta']
                         }
                         st.session_state.portfolio.append(nuovo_bond)
                         st.success(f"Aggiunto: {dati['desc']}")
@@ -241,20 +256,16 @@ else:
         if len(st.session_state.portfolio) > 0:
             st.divider()
             df_pf = pd.DataFrame(st.session_state.portfolio)
-            
-            # Formattazione per la visualizzazione
-            st.dataframe(df_pf[["ISIN", "Nome", "Nominale", "Prezzo", "Valore Mercato", "Rend. Netto %"]], use_container_width=True)
+            st.dataframe(df_pf[["ISIN", "Nome", "Nominale", "Prezzo", "Valore Mercato", "Rend. Netto %", "Valuta"]], use_container_width=True)
 
             totale_investito = df_pf["Valore Mercato"].sum()
-            
-            # Calcolo Ponderato
             df_pf["Peso"] = df_pf["Valore Mercato"] / totale_investito
             df_pf["Contributo Netto"] = df_pf["Rend. Netto %"] * df_pf["Peso"]
             avg_yield_netto = df_pf["Contributo Netto"].sum()
             
             st.divider()
             col_res1, col_res2 = st.columns(2)
-            col_res1.metric("Totale Investito (al mercato)", f"€ {totale_investito:,.2f}")
+            col_res1.metric("Totale Investito (al mercato)", f"{totale_investito:,.2f}")
             col_res2.metric("Rendimento Medio Netto Ponderato", f"{avg_yield_netto:.3f}%")
             
             if st.button("🗑️ Svuota Portafoglio"):
