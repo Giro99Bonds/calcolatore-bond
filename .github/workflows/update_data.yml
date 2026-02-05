@@ -1,0 +1,47 @@
+name: Aggiorna Dati Bond
+
+# QUANDO DEVE PARTIRE?
+on:
+  schedule:
+    # Esegue ogni giorno alle 08:00 UTC (circa le 09:00 o 10:00 italiane)
+    - cron: '0 8 * * *'
+  # Permette di avviarlo a mano col bottone "Run workflow"
+  workflow_dispatch:
+
+# COSA DEVE FARE?
+jobs:
+  scarica_e_aggiorna:
+    runs-on: ubuntu-latest
+    
+    # Permessi fondamentali per permettere al bot di salvare il file nel repository
+    permissions:
+      contents: write
+
+    steps:
+      # 1. Prende il codice dal tuo repository
+      - name: Checkout del codice
+        uses: actions/checkout@v4
+
+      # 2. Installa Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      # 3. Installa le librerie necessarie (Pandas, Requests, ecc.)
+      - name: Installazione librerie
+        run: pip install pandas requests lxml html5lib
+
+      # 4. Esegue lo script Python che hai creato prima
+      - name: Esecuzione Scraper
+        run: python scraper.py
+
+      # 5. Salva il file CSV generato (Commit & Push)
+      - name: Salvataggio dati (Commit & Push)
+        run: |
+          git config --global user.name 'BondBot'
+          git config --global user.email 'bot@noreply.github.com'
+          git add dati_bonds_completi.csv
+          # Se non ci sono cambiamenti (nessun dato nuovo), non dare errore
+          git commit -m "Aggiornamento dati automatico" || exit 0
+          git push
