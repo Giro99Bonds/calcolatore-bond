@@ -1,221 +1,285 @@
+import streamlit as st
 import pandas as pd
 import requests
 import datetime
-import time
+import matplotlib.pyplot as plt
 from scipy import optimize
 
 # ==============================================================================
-# 1. CONFIGURAZIONE: LINK DA ANALIZZARE
+# 0. CONFIGURAZIONE E SETUP
 # ==============================================================================
+st.set_page_config(page_title="Bond Master Tool", layout="wide", page_icon="📈")
+
+# Inizializza Session State per il Portafoglio (Memoria)
+if 'portafoglio' not in st.session_state:
+    st.session_state.portafoglio = []
+
+# Link ai database
 PAGINE_DA_ANALIZZARE = [
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR",
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia_inflation&yieldtype=G&timescale=DUR",
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=europe&yieldtype=G&timescale=DUR",
     "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR",
-    "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR"
+    "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR",
+    "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR"
 ]
 
 # ==============================================================================
-# 2. MOTORE DI SCARICAMENTO (ROBUSTO E CAMUFFATO)
+# 1. FUNZIONI DI CALCOLO E SCARICAMENTO (IL MOTORE)
 # ==============================================================================
-def costruisci_database_unificato():
-    print(f"📥 Avvio scaricamento dati da {len(PAGINE_DA_ANALIZZARE)} fonti...")
+@st.cache_data(ttl=3600)
+def scarica_database():
+    db = pd.DataFrame()
+    headers = {"User-Agent": "Mozilla/5.0"}
     
-    database_totale = pd.DataFrame()
-    
-    # Maschera completa da Browser Reale per evitare blocchi
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
-    }
-    
-    with requests.Session() as s:
-        s.headers.update(headers)
-        
-        for url in PAGINE_DA_ANALIZZARE:
-            # Estrai nome per log
-            try: nome_monitor = url.split("monitor=")[1].split("&")[0]
-            except: nome_monitor = "Pagina"
+    for url in PAGINE_DA_ANALIZZARE:
+        try:
+            r = requests.get(url, headers=headers, timeout=5)
+            # Legge tutte le tabelle nella pagina
+            tabelle = pd.read_html(r.text, thousands='.', decimal=',')
             
-            print(f"   ...connessione a: {nome_monitor}...", end="\r")
-            
-            try:
-                r = s.get(url, timeout=15)
+            # --- MODIFICA ANTI-CRASH ---
+            # Invece di prendere la tabella più grande a caso, 
+            # controlliamo che abbia la colonna 'ISIN'
+            for df in tabelle:
+                # Pulizia nomi colonne
+                df.columns = df.columns.str.strip()
                 
-                # Controllo Anti-Ban
-                if r.status_code != 200:
-                    print(f"\n❌ Errore HTTP {r.status_code} su {nome_monitor} (Accesso negato)")
-                    continue
-
-                # Lettura tabelle con Pandas
-                # Usiamo 'lxml' se disponibile, altrimenti default
-                try:
-                    tabelle = pd.read_html(r.text, thousands='.', decimal=',')
-                except ValueError:
-                    print(f"\n⚠️ Nessuna tabella trovata su {nome_monitor}")
-                    continue
-
-                # --- RICERCA INTELLIGENTE ---
-                # Non prendiamo la più lunga a caso. Cerchiamo quella con la colonna ISIN.
-                tabella_trovata = False
-                for df in tabelle:
-                    df.columns = df.columns.str.strip() # Pulisce spazi
+                # Se la tabella ha la colonna ISIN, è quella giusta!
+                if 'ISIN' in df.columns:
+                    # Convertiamo tutto in stringa per evitare errori di formato
+                    df['ISIN'] = df['ISIN'].astype(str)
+                    db = pd.concat([db, df], ignore_index=True)
+                    break # Trovata la tabella giusta per questo link, passo al prossimo
                     
-                    if 'ISIN' in df.columns:
-                        # Converti ISIN in stringa per evitare errori di formato
-                        df['ISIN'] = df['ISIN'].astype(str)
-                        database_totale = pd.concat([database_totale, df], ignore_index=True)
-                        tabella_trovata = True
-                        break # Trovata la tabella giusta in questa pagina, esco dal loop tabelle
-                
-                if not tabella_trovata:
-                    print(f"\n⚠️ Tabella dati non trovata su {nome_monitor} (Il sito potrebbe aver cambiato layout)")
-
-                # Pausa di cortesia per non sembrare un attacco DDoS
-                time.sleep(1)
-
-            except Exception as e:
-                print(f"\n⚠️ Errore tecnico su {nome_monitor}: {e}")
-                continue
+        except Exception: 
+            continue
             
-    print(f"\n✅ DATABASE PRONTO. Titoli caricati in memoria: {len(database_totale)}")
-    return database_totale
+    return db
 
-# ==============================================================================
-# 3. CALCOLO FINANZIARIO (TIR / XIRR)
-# ==============================================================================
-def calcola_tir_netto(prezzo, cedola, scadenza, tasse=12.5):
-    nominale = 1000
+def analizza_flussi_completi(prezzo, cedola, scadenza, importo_nominale=1000, tasse=12.5):
     oggi = datetime.date.today()
+    flussi = []
+    date_f = []
     
-    # Uscita iniziale (Prezzo di acquisto)
-    flussi = [-nominale * (prezzo/100)]
-    date_flussi = [oggi]
+    # 1. Acquisto (Uscita)
+    costo_acquisto = -importo_nominale * (prezzo/100)
+    flussi.append(costo_acquisto)
+    date_f.append(oggi)
     
-    cedola_netta = (cedola * nominale) * (1 - tasse/100)
+    cedola_netta_importo = (cedola * importo_nominale) * (1 - tasse/100)
     
-    # Generazione timeline dei pagamenti
     cursor = oggi
     while True:
         try: cursor = cursor.replace(year=cursor.year + 1)
         except: cursor = cursor + datetime.timedelta(days=365)
         
         if cursor > scadenza: break
-        
         dt = scadenza if cursor >= scadenza else cursor
         
         if dt == scadenza:
-            # All'ultima data ricevi: Ultima Cedola + Capitale + Eventuale guadagno tassato
-            gain = max(0, 100 - prezzo)
-            tassa_gain = gain * (tasse/100) * (nominale/100)
-            rimborso = nominale - tassa_gain
+            # Rimborso + Cedola + Gain Netto
+            gain_unitario = max(0, 100 - prezzo)
+            tassa_gain = (gain_unitario * (tasse/100)) / 100 * importo_nominale
+            rimborso_netto = importo_nominale - tassa_gain
             
-            flussi.append(cedola_netta + rimborso)
-            date_flussi.append(dt)
+            flussi.append(cedola_netta_importo + rimborso_netto)
+            date_f.append(dt)
             break
         else:
-            # Cedola annuale standard
-            flussi.append(cedola_netta)
-            date_flussi.append(dt)
-
-    # Funzione Matematica XIRR
+            flussi.append(cedola_netta_importo)
+            date_f.append(dt)
+            
+    # Calcolo XIRR
     def xirr(cf, dts):
         dts_days = [(d - dts[0]).days for d in dts]
         try: return optimize.newton(lambda r: sum([v/(1+r)**(d/365) for v,d in zip(cf, dts_days)]), 0.05)
         except: return 0
-        
-    return xirr(flussi, date_flussi) * 100
 
-# ==============================================================================
-# 4. INTERFACCIA UTENTE
-# ==============================================================================
-def main():
-    # 1. Scarica database (con gestione errori)
-    db = costruisci_database_unificato()
+    rend_netto = xirr(flussi, date_f)
     
-    if db.empty:
-        print("\n⛔ IMPOSSIBILE PROSEGUIRE: Database vuoto.")
-        print("Consiglio: Controlla la tua connessione internet o riprova più tardi.")
-        return
+    # Calcolo Duration
+    numeratore = 0
+    denominatore = 0
+    for i in range(1, len(flussi)):
+        t_anni = (date_f[i] - oggi).days / 365.25
+        val_att = flussi[i] / ((1+rend_netto)**t_anni)
+        numeratore += t_anni * val_att
+        denominatore += val_att
+    duration = numeratore / denominatore if denominatore != 0 else 0
 
-    while True:
-        print("\n" + "="*50)
-        isin_input = input("🔎 Inserisci ISIN (o 'exit' per uscire): ").strip()
+    df_flussi = pd.DataFrame({"Data": date_f, "Importo": [round(f, 2) for f in flussi]})
+    
+    return {
+        "rendimento": rend_netto * 100,
+        "duration": duration,
+        "profitto_netto": sum(flussi),
+        "df_flussi": df_flussi
+    }
+
+# ==============================================================================
+# 2. INTERFACCIA UTENTE (NAVIGAZIONE)
+# ==============================================================================
+
+# Scaricamento dati all'avvio
+with st.spinner('Connessione ai mercati in corso...'):
+    db = scarica_database()
+
+# --- CONTROLLO DI SICUREZZA ANTI-CRASH ---
+if db.empty or 'ISIN' not in db.columns:
+    st.error("⚠️ Errore di connessione: Non sono riuscito a scaricare i dati.")
+    st.warning("Potrebbe essere un problema momentaneo del sito sorgente. Riprova più tardi.")
+    st.stop() # Ferma l'app qui per non generare altri errori
+
+# --- MENU LATERALE ---
+st.sidebar.title("📌 Menu Navigazione")
+pagina_selezionata = st.sidebar.radio(
+    "Vai a:", 
+    ["🔎 Analisi Singolo Titolo", "💼 Portafoglio Laddering"]
+)
+
+# ------------------------------------------------------------------------------
+# PAGINA 1: ANALISI SINGOLO TITOLO
+# ------------------------------------------------------------------------------
+if pagina_selezionata == "🔎 Analisi Singolo Titolo":
+    st.title("🔎 Analisi Approfondita Bond")
+    st.markdown("Inserisci un ISIN per vedere rendimento reale, duration e grafico dei pagamenti.")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        isin_input = st.text_input("Inserisci ISIN:", placeholder="Es. IT0005519787").strip()
+    with col2:
+        tasse_input = st.selectbox("Tassazione", [12.5, 26.0], index=0)
         
-        if isin_input.lower() in ['exit', 'esci', 'stop']:
-            print("👋 Alla prossima!")
-            break
-            
-        # 2. Cerca nel database
+    if isin_input:
+        # Filtro sicuro
         riga = db[db['ISIN'] == isin_input]
         
         if riga.empty:
-            print(f"❌ ISIN {isin_input} non trovato.")
-            
-            # Opzione manuale in caso di fallimento
-            risposta = input("   Vuoi inserire i dati manualmente? (s/n): ").lower()
-            if risposta == 's':
-                try:
-                    p = float(input("   💰 Prezzo (es. 98.50): ").replace(',', '.'))
-                    c = float(input("   🎫 Cedola % (es. 3.50): ").replace(',', '.')) / 100
-                    s_str = input("   📅 Scadenza (GG/MM/AAAA): ")
-                    s = datetime.datetime.strptime(s_str, "%d/%m/%Y").date()
-                    
-                    t = input("   È Titolo di Stato? (s/n): ").lower()
-                    tax = 12.5 if t == 's' else 26.0
-                    
-                    res = calcola_tir_netto(p, c, s, tax)
-                    print(f"\n🚀 RENDIMENTO NETTO REALE (Manuale): {res:.2f}%")
-                except Exception as e:
-                    print(f"Errore inserimento: {e}")
-            continue
-            
-        # 3. Estrai dati (se trovato)
-        try:
-            # Gestione colonne con nomi variabili (Price/Last/Bid)
-            cols = riga.columns
-            prezzo = 0.0
-            if 'Price' in cols: prezzo = float(str(riga.iloc[0]['Price']).replace(',', '.'))
-            elif 'Last' in cols: prezzo = float(str(riga.iloc[0]['Last']).replace(',', '.'))
-            elif 'Bid' in cols: prezzo = float(str(riga.iloc[0]['Bid']).replace(',', '.'))
-            
-            # Gestione Cedola (pulizia caratteri strani)
-            c_raw = str(riga.iloc[0]['Coupon']).replace('%', '').strip().split(' ')[0]
-            if c_raw in ['ZC', 'zero', '-', 'nan', 'None']: 
-                cedola = 0.0
-            else:
-                cedola = float(c_raw.replace(',', '.')) / 100
+            st.error("❌ ISIN non trovato nei listini scaricati.")
+            st.info("Suggerimento: Controlla di aver scritto l'ISIN correttamente (es. IT000...).")
+        else:
+            try:
+                # Estrazione Dati Sicura
+                # Gestione colonne che cambiano nome (Price/Last/Bid)
+                cols = riga.columns
+                prezzo = 0.0
+                if 'Price' in cols: prezzo = float(str(riga.iloc[0]['Price']).replace(',', '.'))
+                elif 'Last' in cols: prezzo = float(str(riga.iloc[0]['Last']).replace(',', '.'))
+                elif 'Bid' in cols: prezzo = float(str(riga.iloc[0]['Bid']).replace(',', '.'))
                 
-            # Gestione Scadenza
-            s_str = str(riga.iloc[0]['Maturity'])
-            scadenza = datetime.datetime.strptime(s_str, "%d/%m/%Y").date()
-            
-            nome = riga.iloc[0]['Name'] if 'Name' in cols else "Obbligazione"
+                # Gestione Cedola
+                c_str = str(riga.iloc[0]['Coupon']).replace('%', '').strip().split(' ')[0]
+                cedola = 0.0 if c_str in ['ZC', 'zero', '-', 'nan'] else float(c_str.replace(',', '.')) / 100
+                
+                # Gestione Scadenza
+                s_str = str(riga.iloc[0]['Maturity'])
+                scadenza = datetime.datetime.strptime(s_str, "%d/%m/%Y").date()
+                
+                nome = riga.iloc[0]['Name'] if 'Name' in riga.columns else isin_input
+                
+                # Calcolo Avanzato
+                dati = analizza_flussi_completi(prezzo, cedola, scadenza, 1000, tasse_input)
+                
+                # --- VISUALIZZAZIONE ---
+                st.divider()
+                st.subheader(f"📄 {nome}")
+                
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Prezzo", f"{prezzo} €")
+                k2.metric("Rendimento Netto", f"{dati['rendimento']:.2f}%")
+                k3.metric("Guadagno su 1k", f"{dati['profitto_netto']:+.2f} €")
+                k4.metric("Duration", f"{dati['duration']:.2f} anni")
+                
+                st.subheader("📉 Grafico Flussi di Cassa")
+                df_plot = dati['df_flussi']
+                colors = ['red' if x < 0 else 'green' for x in df_plot["Importo"]]
+                
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.bar(df_plot["Data"], df_plot["Importo"], color=colors)
+                ax.axhline(0, color='black', linewidth=0.8)
+                ax.set_title("Flussi di Cassa")
+                ax.grid(axis='y', linestyle='--', alpha=0.5)
+                st.pyplot(fig)
+                
+                with st.expander("Vedi Tabella Pagamenti"):
+                    st.dataframe(dati['df_flussi'], use_container_width=True)
+                    
+            except Exception as e:
+                st.error(f"Errore nei calcoli del titolo: {e}")
 
-            # Output Dati
-            print("-" * 40)
-            print(f"📄 Titolo:   {nome}")
-            print(f"💰 Prezzo:   {prezzo}")
-            print(f"🎫 Cedola:   {cedola*100:.2f}%")
-            print(f"📅 Scadenza: {scadenza.strftime('%d/%m/%Y')}")
-            print("-" * 40)
-            
-            
+# ------------------------------------------------------------------------------
+# PAGINA 2: PORTAFOGLIO LADDERING
+# ------------------------------------------------------------------------------
+elif pagina_selezionata == "💼 Portafoglio Laddering":
+    st.title("💼 Il Tuo Portafoglio Obbligazionario")
+    
+    with st.expander("➕ Aggiungi un nuovo Bond al portafoglio", expanded=True):
+        c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+        p_isin = c1.text_input("ISIN Bond").strip()
+        p_importo = c2.number_input("Importo Investito (€)", min_value=1000, step=1000, value=5000)
+        p_tasse = c3.selectbox("Tasse %", [12.5, 26.0])
+        
+        if c4.button("Aggiungi"):
+            riga = db[db['ISIN'] == p_isin]
+            if not riga.empty:
+                try:
+                    # Estrazione e Calcolo (replicata per sicurezza)
+                    cols = riga.columns
+                    if 'Price' in cols: prezzo = float(str(riga.iloc[0]['Price']).replace(',', '.'))
+                    elif 'Last' in cols: prezzo = float(str(riga.iloc[0]['Last']).replace(',', '.'))
+                    else: prezzo = 100.0 # Fallback
+                    
+                    c_str = str(riga.iloc[0]['Coupon']).replace('%', '').strip().split(' ')[0]
+                    cedola = 0.0 if c_str in ['ZC', 'zero', '-'] else float(c_str.replace(',', '.')) / 100
+                    
+                    s_str = str(riga.iloc[0]['Maturity'])
+                    scadenza = datetime.datetime.strptime(s_str, "%d/%m/%Y").date()
+                    nome = riga.iloc[0]['Name'] if 'Name' in cols else p_isin
+                    
+                    res = analizza_flussi_completi(prezzo, cedola, scadenza, p_importo, p_tasse)
+                    
+                    st.session_state.portafoglio.append({
+                        "ISIN": p_isin, "Nome": nome, "Investito": p_importo,
+                        "Scadenza": scadenza, "Rendimento": res['rendimento'],
+                        "Flussi": res['df_flussi']
+                    })
+                    st.success(f"{nome} aggiunto!")
+                except: st.error("Errore dati bond.")
+            else:
+                st.error("ISIN non trovato.")
 
-            # Domanda Tasse
-            tipo = input("È un Titolo di Stato (BTP/BOT/Bund...)? [s/n]: ").lower()
-            tasse = 12.5 if tipo == 's' else 26.0
-            
-            # Calcolo Finale
-            rendimento = calcola_tir_netto(prezzo, cedola, scadenza, tasse)
-            
-            print(f"\n🚀 RENDIMENTO NETTO REALE: {rendimento:.2f}%")
-            
-        except Exception as e:
-            print(f"⚠️ Errore nel leggere i dati del titolo: {e}")
-
-if __name__ == "__main__":
-    main()
+    if st.session_state.portafoglio:
+        st.divider()
+        st.subheader("Riepilogo Titoli")
+        
+        df_view = pd.DataFrame([{
+            "Nome": b["Nome"], "Scadenza": b["Scadenza"], 
+            "Investito": f"{b['Investito']} €", "Rendimento": f"{b['Rendimento']:.2f}%"
+        } for b in st.session_state.portafoglio])
+        st.table(df_view)
+        
+        # Aggregazione Flussi
+        df_total = pd.concat([b["Flussi"] for b in st.session_state.portafoglio])
+        df_chart = df_total.groupby("Data")["Importo"].sum().reset_index().sort_values("Data")
+        
+        tot_invest = sum([b["Investito"] for b in st.session_state.portafoglio])
+        tot_guadagno = df_chart["Importo"].sum()
+        
+        m1, m2 = st.columns(2)
+        m1.metric("Capitale Totale Investito", f"{tot_invest:,.0f} €")
+        m2.metric("Guadagno Netto Totale a Scadenza", f"{tot_guadagno:,.2f} €")
+        
+        st.subheader("📅 Flussi di Cassa Combinati")
+        fig2, ax2 = plt.subplots(figsize=(12, 5))
+        colors2 = ['red' if x < 0 else 'green' for x in df_chart["Importo"]]
+        ax2.bar(df_chart["Data"], df_chart["Importo"], color=colors2)
+        ax2.axhline(0, color='black', linewidth=0.8)
+        ax2.grid(axis='y', linestyle='--', alpha=0.5)
+        st.pyplot(fig2)
+        
+        if st.button("🗑️ Reset Portafoglio"):
+            st.session_state.portafoglio = []
+            st.rerun()
+    else:
+        st.info("Il portafoglio è vuoto. Aggiungi titoli sopra.")
