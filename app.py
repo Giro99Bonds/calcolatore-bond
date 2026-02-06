@@ -60,43 +60,22 @@ SOURCES_MAP = {
     ]
 }
 
-# --- FUNZIONI DATABASE LOCALE (MODALITÀ BRADIPO 🦥) ---
+# --- FUNZIONI DATABASE LOCALE (BRADIPO 🦥) ---
 def aggiorna_database_locale():
-    """Scarica i database MOLTO LENTAMENTE per evitare il ban"""
-    
-    # User Agents Rotanti (simulano device diversi)
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36', # PC Chrome
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15', # Mac Safari
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15' # iPhone
-    ]
-    
+    user_agents = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36']
     progress_bar = st.progress(0)
     status_text = st.empty()
-    
-    # Contiamo quanti link ci sono
     total_sources = sum(len(v) for v in SOURCES_MAP.values())
     count = 0
     
     for category, sources in SOURCES_MAP.items():
         for s in sources:
             count += 1
-            # Messaggio Utente
-            perc = int((count / total_sources) * 100)
-            status_text.markdown(f"⏳ **Scaricamento {s['nome']}**... ({count}/{total_sources}) - {perc}%")
+            status_text.markdown(f"⏳ **Scaricamento {s['nome']}**... ({count}/{total_sources})")
             progress_bar.progress(count / total_sources)
-            
             try:
-                # --- IL SEGRETO ANTI-BAN ---
-                # Aspetta un tempo casuale tra 5 e 12 secondi. 
-                # Nessun bot aspetta 12 secondi. Solo un umano lo fa.
-                sleep_time = random.uniform(5.0, 12.0)
-                time.sleep(sleep_time) 
-                
-                # Scarica
-                headers = {'User-Agent': random.choice(user_agents)}
-                r = requests.get(s['url'], headers=headers, timeout=20)
-                
+                time.sleep(random.uniform(3.0, 6.0)) # Pausa anti-ban
+                r = requests.get(s['url'], headers={'User-Agent': random.choice(user_agents)}, timeout=20)
                 if r.status_code == 200:
                     dfs = pd.read_html(r.text, decimal=",", thousands=".")
                     for df in dfs:
@@ -104,15 +83,11 @@ def aggiorna_database_locale():
                             filename = os.path.join(DB_FOLDER, f"{s['nome']}.csv")
                             df.to_csv(filename, index=False)
                             break
-            except Exception as e:
-                # Se fallisce uno, non bloccare tutto, vai avanti
-                print(f"Errore {s['nome']}: {e}")
+            except Exception as e: print(f"Errore {s['nome']}: {e}")
                 
-    status_text.text("✅ Aggiornamento Completato! Ora sei al sicuro.")
-    time.sleep(2)
-    status_text.empty()
-    progress_bar.empty()
-    st.success(f"Database salvato in locale. Ora puoi fare ricerche istantanee senza connessione.")
+    status_text.text("✅ Aggiornamento Completato!")
+    time.sleep(1); status_text.empty(); progress_bar.empty()
+    st.success(f"Database salvato in locale.")
 
 def cerca_nel_database_locale(isin, category):
     target_list = SOURCES_MAP.get(category, [])
@@ -124,8 +99,7 @@ def cerca_nel_database_locale(isin, category):
                 col_isin = next((c for c in df.columns if any(k in str(c).lower() for k in ['isin', 'codice'])), None)
                 if col_isin:
                     match = df[df[col_isin].astype(str).str.contains(isin, na=False, case=False)]
-                    if not match.empty:
-                        return match.iloc[0], s 
+                    if not match.empty: return match.iloc[0], s 
             except: continue
     return None, None
 
@@ -155,10 +129,7 @@ def determina_tasse(nome_fonte, descrizione_titolo):
     fonti_whitelist = ["BTP", "BOT", "BUND", "OAT", "USA", "ROMANIA", "EUROPA", "TDS"]
     for w in fonti_whitelist:
         if w in nome_fonte.upper(): return 12.5
-    desc_upper = descrizione_titolo.upper()
-    keywords_stato = ["REPUBLIC", "REPUBBLICA", "TREASURY", "KINGDOM", "REGNO", "BTP", "CCT", "BOT", "OAT", "BUND"]
-    for k in keywords_stato:
-        if k in desc_upper: return 12.5
+    if any(k in descrizione_titolo.upper() for k in ["REPUBLIC", "REPUBBLICA", "TREASURY", "BTP", "OAT", "BUND"]): return 12.5
     return 26.0
 
 def genera_flussi_cassa(dati, importo, tax_rate):
@@ -169,22 +140,25 @@ def genera_flussi_cassa(dati, importo, tax_rate):
     scadenza = dati['sc']
     freq = dati['freq']
     
-    flussi.append({"Data": today_plus_2(oggi), "Evento": "🔴 Acquisto", "Netto": -prezzo_acquisto}) # T+2
+    flussi.append({"Data": today_plus_2(oggi), "Evento": "🔴 Acquisto", "Netto": -prezzo_acquisto})
     
+    ced_netta = 0
     if freq > 0:
         ced_netta = (nominale * (dati['ced']/100) / freq) * (1 - tax_rate/100)
         curr = scadenza
+        # Genera date cedole a ritroso
         while curr > (oggi + timedelta(days=2)):
-            flussi.append({"Data": curr, "Evento": "🟢 Cedola", "Netto": ced_netta})
+            # Evita duplicato se la cedola cade esattamente il giorno del rimborso, la gestiamo dopo
+            if curr != scadenza:
+                flussi.append({"Data": curr, "Evento": "🟢 Cedola", "Netto": ced_netta})
             curr = curr - timedelta(days=365//freq)
-    
-    flussi = [f for f in flussi if not (f['Evento']=="🟢 Cedola" and f['Data']==scadenza)]
     
     gain = max(0, nominale - prezzo_acquisto)
     rimborso_netto = nominale - (gain * tax_rate/100)
-    ced_finale_netta = (nominale * (dati['ced']/100) / freq) * (1 - tax_rate/100) if freq > 0 else 0
     
-    flussi.append({"Data": scadenza, "Evento": "🏁 Rimborso", "Netto": rimborso_netto + ced_finale_netta})
+    # Ultima cedola + Rimborso
+    ced_finale_netta = ced_netta if freq > 0 else 0
+    flussi.append({"Data": scadenza, "Evento": "🏁 Rimborso + Cedola", "Netto": rimborso_netto + ced_finale_netta})
     
     df = pd.DataFrame(flussi)
     df['Data'] = pd.to_datetime(df['Data'])
@@ -209,31 +183,25 @@ def login():
 
 # --- MAIN APP ---
 def main_app():
-    st.title("🏛️ Bond Research Terminal (Safe Mode)")
-    st.caption("Sistema Ibrido con Protezione Anti-Ban")
+    st.title("🏛️ Bond Research Terminal")
+    st.caption("Sistema Ibrido: Ricerca Locale (Anti-Ban) + Fallback Live")
     st.markdown("---")
 
-    # SIDEBAR
     with st.sidebar:
         st.header("⚙️ Gestione Dati")
-        
-        # TASTO AGGIORNAMENTO SICURO
-        if st.button("🔄 Scarica Tutto (Safe Mode)", help="Impiega circa 3-4 minuti. NON Bannabile."):
-            with st.spinner("Scaricamento lento in corso... prenditi un caffè ☕"):
+        if st.button("🔄 Scarica Tutto (Safe Mode)", help="Impiega circa 3 minuti."):
+            with st.spinner("Scaricamento lento in corso..."):
                 aggiorna_database_locale()
         
         files_ok = len([n for n in os.listdir(DB_FOLDER) if n.endswith('.csv')]) if os.path.exists(DB_FOLDER) else 0
         st.success(f"📂 Dati Locali: {files_ok}/28")
-        
         st.divider()
         st.header("💶 Simulatore")
         importo = st.number_input("Investimento (€)", value=10000, step=1000)
-        
         if st.session_state.confronto:
             st.divider()
             st.info(f"📌 VS: {st.session_state.confronto['desc'][:15]}...")
             if st.button("Rimuovi Confronto"): st.session_state.confronto = None; st.rerun()
-        
         st.divider()
         if st.button("🚪 Logout"): st.session_state.logged_in = False; st.rerun()
 
@@ -251,29 +219,26 @@ def main_app():
     with c2: isin = st.text_input("ISIN", placeholder="IT000...").strip().upper()
     with c3: 
         st.write("")
-        btn = st.button("CERCA 🚀", use_container_width=True)
+        btn = st.button("ANALIZZA 🚀", use_container_width=True)
 
-    # LOGICA RICERCA IBRIDA
     if btn and isin:
         dati_bond = None
         modo = ""
         
-        # 1. CERCA IN LOCALE
-        with st.status("🔍 Ricerca in corso...") as status:
-            status.write("Controllo file scaricati...")
+        with st.status("🔍 Analisi in corso...") as status:
+            status.write("Consultazione database locale...")
             row, source_info = cerca_nel_database_locale(isin, cat)
             
             if row is not None:
                 dati_bond = processa_riga_bond(row, source_info)
-                modo = "📂 DATABASE LOCALE"
-                status.write("✅ Trovato offline!")
+                modo = "📂 DATABASE LOCALE (Offline)"
+                status.write("✅ Trovato in locale!")
             else:
-                status.write("⚠️ Non trovato offline. Provo online (singola richiesta)...")
-                # 2. FALLBACK ONLINE (Solo 1 richiesta)
+                status.write("⚠️ Non trovato offline. Connessione al mercato (Live)...")
                 target_list = SOURCES_MAP.get(cat, [])
                 for s in target_list:
                     try:
-                        time.sleep(1) # Piccola pausa
+                        time.sleep(0.5)
                         r = requests.get(s['url'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
                         if r.status_code == 200:
                             dfs = pd.read_html(r.text, decimal=",", thousands=".")
@@ -286,9 +251,8 @@ def main_app():
                                     break
                     except: continue
                     if dati_bond: break
-            status.update(label="Fatto", state="complete")
+            status.update(label="Analisi completata", state="complete")
 
-        # VISUALIZZAZIONE
         if dati_bond:
             tax = determina_tasse(dati_bond['fonte'], dati_bond['desc'])
             t_val = tax / 100
@@ -302,12 +266,20 @@ def main_app():
             df_flussi = genera_flussi_cassa(dati_bond, importo, tax)
             profitto = df_flussi['Netto'].sum() - importo
 
+            # --- SCHEDA TITOLO ---
             st.markdown(f"""
             <div style="background-color: #1e2130; padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; margin-bottom: 20px;">
                 <h2 style="margin:0; color:white;">{dati_bond['desc']}</h2>
                 <p style="margin:0; color:#b0b3c5;">Fonte: {modo} | Tassa: {tax}%</p>
             </div>
             """, unsafe_allow_html=True)
+            
+            # --- LINK ESTERNI DI VERIFICA (NUOVO!) ---
+            col_lk1, col_lk2, col_lk3 = st.columns([1,1,2])
+            with col_lk1:
+                st.link_button("🌐 Verifica su Google/Borsa", f"https://www.google.com/search?q={isin}+borsa+italiana+quotazione")
+            with col_lk2:
+                st.link_button("📊 Controlla su Teleborsa", f"https://www.teleborsa.it/Ricerca?q={isin}")
 
             # Confronto
             if st.session_state.confronto:
@@ -332,7 +304,24 @@ def main_app():
                 m3.metric("Scadenza", dati_bond['sc'].strftime('%d/%m/%Y'))
                 m4.metric("Profitto", f"{profitto:+.2f}€")
                 
-                # Grafico
+                # INFO EXTRA (RATEO E CEDOLA MONETARIA)
+                st.write("")
+                st.markdown("#### ℹ️ Dettagli Finanziari")
+                
+                # Calcolo valore monetario cedola
+                valore_cedola_netta = (importo * (dati_bond['ced']/100) / (dati_bond['freq'] if dati_bond['freq']>0 else 1)) * (1 - t_val)
+                freq_text = "Semestrale" if dati_bond['freq']==2 else "Annuale" if dati_bond['freq']==1 else "Zero Coupon"
+                
+                c_info1, c_info2, c_info3 = st.columns(3)
+                c_info1.info(f"**Cedola Netta:**\n{valore_cedola_netta:.2f}€ ({freq_text})")
+                
+                # Calcolo Giorni alla prossima cedola (Approx)
+                next_coupon_date = df_flussi[df_flussi['Evento'].str.contains("Cedola|Rimborso")]['Data'].min()
+                days_to_coupon = (next_coupon_date.date() - date.today()).days if next_coupon_date else 0
+                c_info2.info(f"**Prossima Cedola:**\nfra {days_to_coupon} giorni")
+                
+                c_info3.info(f"**Anni alla scadenza:**\n{anni:.2f} anni")
+
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=df_flussi['Data'], y=df_flussi['Capitale'], fill='tozeroy', mode='lines+markers', line=dict(color='#00CC96')))
                 fig.update_layout(title="Crescita Capitale", template="plotly_dark", height=300)
@@ -348,7 +337,7 @@ def main_app():
 
         else:
             st.error("Titolo non trovato.")
-            st.info("💡 Consiglio: Se non hai mai scaricato i dati, clicca 'Scarica Tutto (Safe Mode)' nella barra laterale.")
+            st.info("💡 Consiglio: Clicca 'Scarica Tutto (Safe Mode)' nella sidebar.")
 
 if st.session_state.logged_in: main_app()
 else: login()
