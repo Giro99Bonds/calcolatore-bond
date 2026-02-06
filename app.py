@@ -14,8 +14,8 @@ st.set_page_config(page_title="Bond Research Terminal", page_icon="⚖️", layo
 
 # --- CREDENZIALI DI ACCESSO ---
 # Modifica qui la password che vuoi usare
-SEGRETO_UTENTE = "admin"
-SEGRETO_PASSWORD = "password123"
+SEGRETO_UTENTE = "giulio"
+SEGRETO_PASSWORD = "Giulio99mac!"
 
 # --- MAPPA FONTI (Organizzata per Categorie) ---
 SOURCES_MAP = {
