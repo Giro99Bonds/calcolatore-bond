@@ -1,192 +1,269 @@
 import streamlit as st
 import pandas as pd
-import datetime
-import matplotlib.pyplot as plt
+import requests
+import re
+from datetime import datetime, date, timedelta
+import numpy as np
 from scipy import optimize
-from dateutil.relativedelta import relativedelta
 
-# Configurazione
-st.set_page_config(page_title="Bond Calculator (Indistruttibile)", layout="wide", page_icon="🛡️")
+# --- CONFIGURAZIONE ---
+st.set_page_config(page_title="Bond Club Pro", page_icon="🎯", layout="wide")
 
-# Inizializza portafoglio
-if 'portafoglio' not in st.session_state:
-    st.session_state.portafoglio = []
+if 'access_granted' not in st.session_state: st.session_state.access_granted = False
+if 'portfolio' not in st.session_state: st.session_state.portfolio = [] 
 
-# ==============================================================================
-# 1. GENERATORE DI LINK (L'Assistente)
-# ==============================================================================
-def genera_link_ricerca(isin):
-    isin = isin.strip().upper()
-    return {
-        "Google": f"https://www.google.com/search?q={isin}+prezzo",
-        "BorsaItaliana": f"https://www.borsaitaliana.it/borsa/obbligazioni/mot/euro-obbligazioni/scheda/{isin}.html?lang=it",
-        "Teleborsa": f"https://www.teleborsa.it/Ricerca?q={isin}",
-        "EuroTLX": f"https://www.borsaitaliana.it/borsa/obbligazioni/eurotlx/scheda/{isin}.html?lang=it"
-    }
+# --- FUNZIONI ---
+def xirr(cashflows, dates):
+    if not cashflows or not dates: return None
+    def xnpv(rate, cashflows, dates):
+        if rate <= -1.0: return float('inf')
+        t0 = dates[0]
+        return sum([cf / ((1 + rate) ** ((d - t0).days / 365.0)) for cf, d in zip(cashflows, dates)])
+    try:
+        return optimize.newton(lambda r: xnpv(r, cashflows, dates), 0.05)
+    except:
+        return None
 
-# ==============================================================================
-# 2. MOTORE MATEMATICO (Cuore del sistema)
-# ==============================================================================
-def calcola_rendimento(prezzo, cedola_pct, scadenza, investito, tasse_pct, freq_mesi):
-    oggi = datetime.date.today()
-    if prezzo <= 0.01: prezzo = 100.0
-    
-    nominale = investito / (prezzo / 100)
-    flussi = [-investito]
-    date_f = [oggi]
-    
-    # Cedola netta periodica
-    cedola_annua_netta = (cedola_pct / 100) * nominale * (1 - tasse_pct/100)
-    cedola_periodica = cedola_annua_netta / (12 / freq_mesi)
-    
-    cursor = oggi
-    
-    while True:
-        cursor = cursor + relativedelta(months=+freq_mesi)
-        if cursor > scadenza: break
-        
-        dt = scadenza if cursor >= scadenza else cursor
-        
-        if dt == scadenza:
-            gain_lordo = (100 - prezzo) * (nominale / 100)
-            tassa_gain = max(0, gain_lordo * (tasse_pct/100))
-            rimborso_netto = nominale - tassa_gain
-            flussi.append(cedola_periodica + rimborso_netto)
-            date_f.append(dt)
-            break
-        else:
-            flussi.append(cedola_periodica)
-            date_f.append(dt)
-            
-    def xirr(cf, dts):
-        dts_days = [(d - dts[0]).days for d in dts]
-        try: return optimize.newton(lambda r: sum([v/(1+r)**(d/365.0) for v,d in zip(cf, dts_days)]), 0.05)
-        except: return 0.0
+def rendimento_semplice_360(prezzo, rimborso, giorni):
+    if giorni <= 0: return 0
+    return ((rimborso - prezzo) / prezzo) * (360 / giorni)
 
-    tir = xirr(flussi, date_f) * 100
-    
-    # Duration semplificata
-    numeratore = 0
-    denominatore = 0
-    for i in range(1, len(flussi)):
-        t_anni = (date_f[i] - oggi).days / 365.25
-        val_att = flussi[i] / ((1+tir/100)**t_anni)
-        numeratore += t_anni * val_att
-        denominatore += val_att
-    duration = numeratore / denominatore if denominatore != 0 else 0
+# --- MAPPA DELLE FONTI ---
+# Qui associamo le etichette del menu ai link reali
+SOURCES_MAP = {
+    "🇮🇹 BTP & Italia": [
+        {"nome": "BTP (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
+        {"nome": "BOT (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0}
+    ],
+    "🇪🇺 Stati Europa (Bund/OAT/Ecc)": [
+        {"nome": "BUND (Germania)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "OAT (Francia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=francia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "EUROPA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=europa&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ALTRI EUROPA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=altri_europa&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ROMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=romania&yieldtype=G&timescale=DUR", "freq": 1}
+    ],
+    "🇺🇸 USA & Globali": [
+        {"nome": "USA (Treasuries)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR", "freq": 2},
+        {"nome": "GLOBALI (Emergenti)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=altri_globali&yieldtype=G&timescale=DUR", "freq": 1}
+    ],
+    "🏦 Banche (Senior & Sub)": [
+        {"nome": "BANCHE ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "BANCHE EUROPEE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheeuropee&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "BANCHE USA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheusa&yieldtype=G&timescale=DUR", "freq": 2},
+        {"nome": "SUBORDINATE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=subordinate&yieldtype=G&timescale=DUR", "freq": 1}
+    ],
+    "🏭 Corporate (Aziende)": [
+        {"nome": "CORPORATE ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporateitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "CORPORATE GENERALE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "AUTOMOTIVE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=automotive&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ENERGY", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=petrolio&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "TELECOM", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=telecom&yieldtype=G&timescale=DUR", "freq": 1}
+    ],
+    "🦁 Emittenti Specifici": [
+        {"nome": "INTESA SANPAOLO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=intesasanpaolo&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "UNICREDIT", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=unicredit&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "MEDIOBANCA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=mediobanca&yieldtype=G&timescale=DUR", "freq": 1}
+    ],
+    "💎 Speciali (Zero Coupon/Green/Lunghi)": [
+        {"nome": "ZERO COUPON", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=zerocoupon&yieldtype=G&timescale=DUR", "freq": 0},
+        {"nome": "GREEN BONDS", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=greenbond&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ULTRA LUNGHI", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=25yearsEUR&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "CALLABLE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=callable&yieldtype=G&timescale=DUR", "freq": 1}
+    ]
+}
 
-    return {
-        "tir": tir,
-        "duration": duration,
-        "flussi": pd.DataFrame({"Data": date_f, "Importo": [round(x, 2) for x in flussi]}),
-        "guadagno": sum(flussi)
-    }
-
-# ==============================================================================
-# 3. INTERFACCIA
-# ==============================================================================
-st.title("🛡️ Bond Calculator Pro (Manuale Assistito)")
-st.markdown("Questo strumento **non scarica dati** (per evitare blocchi) ma ti aiuta a trovarli in 1 secondo e fa tutti i calcoli complessi.")
-
-# --- SEZIONE CERCA E LINK ---
-col_isin, col_link = st.columns([1, 2])
-with col_isin:
-    isin_input = st.text_input("1. Incolla ISIN qui:", placeholder="IT000...").strip().upper()
-
-with col_link:
-    st.write("2. Clicca per trovare i dati (si apre in nuova scheda):")
-    if isin_input:
-        links = genera_link_ricerca(isin_input)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.link_button("🌐 Google", links["Google"])
-        c2.link_button("🇮🇹 Borsa IT", links["BorsaItaliana"])
-        c3.link_button("📊 Teleborsa", links["Teleborsa"])
-        c4.link_button("🇪🇺 EuroTLX", links["EuroTLX"])
+def get_bond_data(isin_code, category_key):
+    # Seleziona solo le fonti della categoria scelta
+    if category_key == "🌍 CERCA OVUNQUE (Lento!)":
+        target_sources = [s for sublist in SOURCES_MAP.values() for s in sublist] # Appiattisce tutto
     else:
-        st.info("👆 Inserisci un ISIN per generare i link rapidi.")
-
-st.divider()
-
-# --- SEZIONE DATI E CALCOLO ---
-st.subheader("3. Inserisci i 3 dati fondamentali")
-
-with st.form("calcolo"):
-    c_dati, c_soldi = st.columns(2)
+        target_sources = SOURCES_MAP[category_key]
     
-    with c_dati:
-        nome = st.text_input("Nome (Opzionale)", value=isin_input if isin_input else "Mio Bond")
-        p = st.number_input("Prezzo di Mercato (€)", min_value=0.0, value=100.0, step=0.1, format="%.2f")
-        c = st.number_input("Cedola Annuale (%)", min_value=0.0, value=3.0, step=0.1, format="%.2f")
-        s = st.date_input("Data Scadenza", value=datetime.date.today() + datetime.timedelta(days=365*4))
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+
+    def trova_colonna(df, keywords):
+        for col in df.columns:
+            for key in keywords:
+                if key.lower() in col.lower(): return col
+        return None
+
+    for source in target_sources:
+        try:
+            r = requests.get(source["url"], headers=headers, timeout=10)
+            if r.status_code != 200: continue
+            
+            try:
+                df_list = pd.read_html(r.content, decimal=",", thousands=".")
+            except:
+                continue
+
+            for df in df_list:
+                col_isin = trova_colonna(df, ['isin', 'codice'])
+                if col_isin:
+                    match = df[df[col_isin] == isin_code]
+                    if not match.empty:
+                        row = match.iloc[0]
+                        
+                        col_prezzo = trova_colonna(df, ['prezzo', 'price', 'last', 'quotazione'])
+                        col_scadenza = trova_colonna(df, ['scadenza', 'maturity', 'date'])
+                        col_desc = trova_colonna(df, ['descrizione', 'nome'])
+                        col_divisa = trova_colonna(df, ['divisa', 'curr', 'valuta'])
+                        
+                        if not col_prezzo or not col_scadenza: continue
+
+                        try:
+                            pr_str = str(row[col_prezzo]).replace(',', '.').replace('€', '').strip()
+                            pr = float(pr_str)
+                            
+                            scad_str = str(row[col_scadenza])
+                            try: scad = datetime.strptime(scad_str, '%Y-%m-%d').date()
+                            except: scad = datetime.strptime(scad_str, '%d/%m/%Y').date()
+                            
+                            desc = row[col_desc] if col_desc else "N/A"
+                            val = row[col_divisa] if col_divisa else "EUR"
+                            
+                            ced = 0.0
+                            if source["freq"] > 0:
+                                m = re.search(r'(\d+(?:[.,]\d+)?)%', desc)
+                                if m: ced = float(m.group(1).replace(',', '.'))
+                            
+                            return {"source": source["nome"], "freq": source["freq"], "valuta": val,
+                                    "prezzo": pr, "scadenza": scad, "cedola": ced, "desc": desc}
+                        except: continue
+        except: pass
+    return None
+
+def calcola_metriche(dati, tax_rate):
+    today = date.today()
+    np_today = np.datetime64(today, 'D')
+    data_valuta = np.busday_offset(np_today, 2, roll='forward').astype(date)
+    giorni = (dati['scadenza'] - data_valuta).days
+    
+    cf_lordi = [-dati['prezzo']]
+    cf_netti = [-dati['prezzo']]
+    dates = [data_valuta]
+    nominale = 100.0
+    
+    if dati['freq'] > 0 and dati['cedola'] > 0:
+        c_lorda = dati['cedola']/dati['freq']
+        c_netta = c_lorda * (1-tax_rate)
+        curr = dati['scadenza']
+        delta = 365 // dati['freq']
+        c_future = []
+        while curr > data_valuta:
+            c_future.append(curr)
+            curr -= timedelta(days=delta)
+        c_future.sort()
+        for d in c_future:
+            cf_lordi.append(c_lorda)
+            cf_netti.append(c_netta)
+            dates.append(d)
+        cf_lordi[-1] += nominale
+        gain = max(0, nominale - dati['prezzo'])
+        cf_netti[-1] += (nominale - (gain*tax_rate) - c_netta)
+    else:
+        cf_lordi.append(nominale)
+        gain = max(0, nominale - dati['prezzo'])
+        cf_netti.append(nominale - (gain*tax_rate))
+        dates.append(dati['scadenza'])
         
-    with c_soldi:
-        inv = st.number_input("Quanto vuoi investire? (€)", value=10000, step=1000)
-        
-        f1, f2 = st.columns(2)
-        tax = f1.selectbox("Tassazione", [12.5, 26.0], help="12.5% Stato (White list), 26% Corporate/Altri")
-        
-        freq_map = {"Annuale": 12, "Semestrale (BTP Standard)": 6, "Trimestrale": 3, "Mensile": 1}
-        freq = f2.selectbox("Frequenza Cedola", list(freq_map.keys()), index=1)
-    
-    submit = st.form_submit_button("🚀 CALCOLA RENDIMENTO", type="primary")
+    tir_lordo = xirr(cf_lordi, dates)
+    tir_netto = xirr(cf_netti, dates)
+    return {"tir_lordo": tir_lordo, "tir_netto": tir_netto, "giorni": giorni, "data_valuta": data_valuta}
 
-# --- SEZIONE RISULTATI ---
-if submit:
-    res = calcola_rendimento(p, c, s, inv, tax, freq_map[freq])
-    
-    st.divider()
-    st.subheader(f"📊 Risultati per: {nome}")
-    
-    # KPI
-    k1, k2, k3 = st.columns(3)
-    k1.metric("Rendimento Netto Annuo", f"{res['tir']:.2f}%", delta_color="normal")
-    k2.metric("Guadagno Netto Totale", f"{res['guadagno']:,.2f} €")
-    k3.metric("Duration (Rischio)", f"{res['duration']:.2f} anni")
-    
-    # Grafico
-    df = res['flussi']
-    col_graph, col_tab = st.columns([2, 1])
-    
-    with col_graph:
-        st.write("#### Flussi di Cassa")
-        colors = ['red' if x < 0 else 'green' for x in df['Importo']]
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.bar(df['Data'], df['Importo'], color=colors)
-        ax.axhline(0, color='black', linewidth=1)
-        ax.grid(axis='y', linestyle='--', alpha=0.3)
-        st.pyplot(fig)
-        
-    with col_tab:
-        st.write("#### Piano Cedolare")
-        st.dataframe(df, height=300)
-    
-    # Aggiungi al portafoglio
-    if st.button("➕ Aggiungi questo bond al Portafoglio"):
-        st.session_state.portafoglio.append({
-            "Nome": nome, "Investito": inv, "Rendimento": res['tir'], "Flussi": res['flussi']
-        })
-        st.success("Aggiunto!")
-        st.rerun()
+# --- GATEKEEPER ---
+if not st.session_state.access_granted:
+    st.markdown("<h1 style='text-align: center; color: red;'>⛔ AREA RISERVATA ⛔</h1>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.markdown("<h3 style='text-align: center;'>SEI UN TOSSICO? 💊</h3>", unsafe_allow_html=True)
+        b1, b2 = st.columns(2)
+        if b1.button("SÌ, SONO DIPENDENTE", use_container_width=True):
+            st.session_state.access_granted = True
+            st.rerun()
+        if b2.button("NO, STO BENE", use_container_width=True):
+            st.stop()
 
-# --- PORTAFOGLIO ---
-if st.session_state.portafoglio:
-    st.divider()
-    st.header(f"💼 Il tuo Portafoglio ({len(st.session_state.portafoglio)} titoli)")
-    
-    df_p = pd.DataFrame(st.session_state.portafoglio)[["Nome", "Investito", "Rendimento"]]
-    st.table(df_p)
-    
-    # Grafico Aggregato
-    flussi_tot = pd.concat([b['Flussi'] for b in st.session_state.portafoglio])
-    df_aggr = flussi_tot.groupby("Data")["Importo"].sum().reset_index().sort_values("Data")
-    
-    st.write("### 💰 Flussi Totali Combinati")
-    fig2, ax2 = plt.subplots(figsize=(12, 4))
-    cols2 = ['red' if x < 0 else 'green' for x in df_aggr["Importo"]]
-    ax2.bar(df_aggr["Data"], df_aggr["Importo"], color=cols2)
-    ax2.axhline(0, color='black')
-    st.pyplot(fig2)
-    
-    if st.button("🗑️ Svuota tutto"):
-        st.session_state.portafoglio = []
-        st.rerun()
+else:
+    with st.sidebar:
+        st.title("Menu Bond Club")
+        page = st.radio("Sezione:", ["🔎 Analisi & Scelta", "💼 Portafoglio"])
+        st.divider()
+        if st.button("Esci"):
+            st.session_state.access_granted = False
+            st.rerun()
+
+    if page == "🔎 Analisi & Scelta":
+        st.title("🔎 Scanner Intelligente")
+        st.write("Scegli dove cercare per evitare blocchi e lunghe attese.")
+
+        # --- SELETTORE CATEGORIA ---
+        categorie = list(SOURCES_MAP.keys()) + ["🌍 CERCA OVUNQUE (Lento!)"]
+        scelta_cat = st.selectbox("1. Dove devo cercare?", options=categorie, index=0)
+
+        c1, c2, c3 = st.columns([2, 1, 1])
+        isin_input = c1.text_input("2. Inserisci ISIN", placeholder="Es. IT000...", key="s_isin").strip().upper()
+        tax = c2.selectbox("3. Tasse", [12.5, 26.0], format_func=lambda x: f"{x}%", key="s_tax")
+        
+        c3.write("")
+        c3.write("")
+        
+        if c3.button("TROVA ORA 🚀", use_container_width=True) and isin_input:
+            
+            with st.spinner(f"Sto cercando in: {scelta_cat}..."):
+                dati = get_bond_data(isin_input, scelta_cat)
+                
+                if dati:
+                    res = calcola_metriche(dati, tax/100)
+                    
+                    st.success(f"Trovato: {dati['desc']}")
+                    st.caption(f"Fonte: {dati['source']}")
+                    
+                    k1, k2, k3 = st.columns(3)
+                    k1.metric("Prezzo", f"{dati['prezzo']} {dati['valuta']}")
+                    k2.metric("Rendimento Netto", f"{res['tir_netto']*100:.2f}%")
+                    k3.metric("Scadenza", f"{dati['scadenza'].strftime('%d/%m/%Y')}")
+                    
+                    # Avvisi
+                    if "SUBORDINATE" in dati['source']: st.error("⚠️ SUBORDINATO")
+                    if "CALLABLE" in dati['source']: st.warning("📞 CALLABLE")
+                    if dati['valuta'] != "EUR": st.warning(f"💱 Valuta {dati['valuta']}")
+                    
+                else:
+                    st.error("❌ Non trovato in questa categoria.")
+                    st.info("Prova a cambiare categoria nel menu in alto o controlla l'ISIN.")
+
+    elif page == "💼 Portafoglio":
+        st.title("💼 Gestione Portafoglio")
+        with st.expander("Aggiungi Titolo Manualmente o da Ricerca", expanded=True):
+            pc1, pc2, pc3 = st.columns(3)
+            p_isin = pc1.text_input("ISIN", key="p_isin").strip().upper()
+            p_nom = pc2.number_input("Nominale", 1000, step=1000)
+            p_cat = pc3.selectbox("Categoria Ricerca", options=list(SOURCES_MAP.keys()), key="p_cat")
+            
+            if st.button("Aggiungi al Portafoglio"):
+                d = get_bond_data(p_isin, p_cat)
+                if d:
+                    m = calcola_metriche(d, 0.125) # Default 12.5, modificabile
+                    val_mercato = (p_nom * d['prezzo']) / 100
+                    st.session_state.portfolio.append({
+                        "ISIN": p_isin, "Nome": d['desc'], "Nominale": p_nom,
+                        "Prezzo": d['prezzo'], "Valore": val_mercato, "Netto%": m['tir_netto']*100
+                    })
+                    st.success("Aggiunto!")
+                else:
+                    st.error("Non trovato.")
+        
+        if st.session_state.portfolio:
+            df = pd.DataFrame(st.session_state.portfolio)
+            st.dataframe(df)
+            tot = df["Valore"].sum()
+            if tot > 0:
+                media = (df["Netto%"] * (df["Valore"]/tot)).sum()
+                st.metric("Rendimento Portafoglio", f"{media:.2f}%", f"Tot: € {tot:,.2f}")
+            
+            if st.button("Reset"):
+                st.session_state.portfolio = []
+                st.rerun()
