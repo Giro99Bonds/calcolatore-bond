@@ -20,6 +20,14 @@ st.markdown("""
     .green-flag {border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px;}
     .main-header {font-size: 24px; font-weight: bold; color: white;}
     .sub-header {font-size: 14px; color: #b0b3c5;}
+    
+    /* Stile Legenda */
+    .legend-box { padding: 15px; border-radius: 8px; margin-bottom: 15px; font-size: 14px; height: 100%; }
+    .gov { background-color: #1a472a; border: 1px solid #28a745; color: #d4edda; }
+    .bank { background-color: #2c3036; border: 1px solid #6c757d; color: #e2e3e5; }
+    .corp { background-color: #0f3d4a; border: 1px solid #17a2b8; color: #d1ecf1; }
+    .spec { background-color: #4a1d2f; border: 1px solid #d63384; color: #f8d7da; }
+    .legend-title { font-weight: bold; font-size: 16px; margin-bottom: 5px; display: block; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -94,8 +102,8 @@ def stress_test(prezzo, mod_dur, convexity, shock_bps):
     return prezzo + delta_p
 
 def determina_tasse(nome, desc):
-    if any(k in nome.upper() for k in ["BTP", "BOT", "BUND", "OAT", "USA", "ROMANIA"]): return 12.5
-    if any(k in desc.upper() for k in ["REPUBLIC", "TREASURY", "BTP", "OAT"]): return 12.5
+    if any(k in nome.upper() for k in ["BTP", "BOT", "BUND", "OAT", "USA", "ROMANIA", "EUROPA", "TDS"]): return 12.5
+    if any(k in desc.upper() for k in ["REPUBLIC", "TREASURY", "BTP", "OAT", "BUND"]): return 12.5
     return 26.0
 
 def pulisci_taglio(v):
@@ -181,7 +189,7 @@ def login():
         if u==SEGRETO_UTENTE and p==SEGRETO_PASSWORD: st.session_state.logged_in=True; st.rerun()
 
 def main_app():
-    # --- SIDEBAR MENU (QUELLO CHE VOLEVI!) ---
+    # --- SIDEBAR MENU ---
     with st.sidebar:
         st.title("🏛️ MENU")
         page = st.radio("Navigazione", ["🔎 Scanner Singolo", "⚔️ Confronto", "💼 Portafoglio"])
@@ -201,15 +209,62 @@ def main_app():
     if page == "🔎 Scanner Singolo":
         st.title("🔎 Scanner Obbligazionario Pro")
         
-        # LEGENDA
-        with st.expander("📍 Guida Categorie"):
-            c1, c2, c3, c4 = st.columns(4)
-            c1.success("🏛️ GOV"); c2.warning("🏦 BANK"); c3.info("🏭 CORP"); c4.error("💎 SPEC")
+        # --- LEGENDA DETTAGLIATA (RICHIESTA UTENTE) ---
+        with st.expander("📍 GUIDA CATEGORIE (Clicca per espandere)", expanded=True):
+            st.markdown("Ecco dove cercare il tuo titolo:")
+            l1, l2, l3, l4 = st.columns(4)
+            with l1:
+                st.markdown("""
+                <div class="legend-box gov">
+                    <span class="legend-title">🏛️ GOVERNATIVI</span>
+                    <b>Titoli di Stato Sovrani</b><br>
+                    • Italia (BTP, BOT, CCT)<br>
+                    • Germania (Bund)<br>
+                    • Francia (OAT)<br>
+                    • USA (Treasury)<br>
+                    • Romania, Ungheria<br>
+                    • Unione Europea (EU Mix)
+                </div>
+                """, unsafe_allow_html=True)
+            with l2:
+                st.markdown("""
+                <div class="legend-box bank">
+                    <span class="legend-title">🏦 FINANZIARI</span>
+                    <b>Banche & Assicurazioni</b><br>
+                    • Intesa, UniCredit<br>
+                    • Mediobanca<br>
+                    • Banche Europee/USA<br>
+                    • <i>Include Subordinate</i>
+                </div>
+                """, unsafe_allow_html=True)
+            with l3:
+                st.markdown("""
+                <div class="legend-box corp">
+                    <span class="legend-title">🏭 CORPORATE</span>
+                    <b>Aziende Industriali</b><br>
+                    • Eni, Enel, Stellantis<br>
+                    • Settore Auto & Energy<br>
+                    • Telecom<br>
+                    • Multinazionali Estere
+                </div>
+                """, unsafe_allow_html=True)
+            with l4:
+                st.markdown("""
+                <div class="legend-box spec">
+                    <span class="legend-title">💎 SPECIALI</span>
+                    <b>Strutture Particolari</b><br>
+                    • Zero Coupon (No cedola)<br>
+                    • Callable (Richiamabili)<br>
+                    • Green Bonds<br>
+                    • Lunghissimi (25+ anni)
+                </div>
+                """, unsafe_allow_html=True)
 
         # INPUT
+        st.divider()
         c1, c2 = st.columns([2, 1])
-        cat = c1.selectbox("Categoria", list(SOURCES_MAP.keys()))
-        isin = c2.text_input("ISIN", placeholder="Cerca...").strip().upper()
+        cat = c1.selectbox("Seleziona Categoria Database", list(SOURCES_MAP.keys()))
+        isin = c2.text_input("Inserisci ISIN", placeholder="Cerca...").strip().upper()
         
         if isin:
             row, info = cerca_db(isin, cat)
