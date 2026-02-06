@@ -15,6 +15,7 @@ st.set_page_config(page_title="Bond Research Terminal", page_icon="🏛️", lay
 
 st.markdown("""
 <style>
+    /* Stile Card e Bandierine */
     .metric-card {background-color: #1e2130; padding: 15px; border-radius: 8px; border: 1px solid #3e445b; margin-bottom: 10px;}
     .red-flag {border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px;}
     .green-flag {border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px;}
@@ -25,8 +26,32 @@ st.markdown("""
     .bank { background-color: #383d41; border-left: 5px solid #e2e3e5; color: #e2e3e5; }
     .corp { background-color: #0c5460; border-left: 5px solid #17a2b8; color: #d1ecf1; }
     .spec { background-color: #3e243f; border-left: 5px solid #d63384; color: #f8d7da; }
-    /* Stile Bottoni Menu Attivi */
-    div.stButton > button:first-child { text-align: left; padding-left: 20px; }
+
+    /* --- TRASFORMAZIONE MENU SIDEBAR (CLEAN LOOK) --- */
+    /* Rimuove bordi e sfondo dai bottoni nella sidebar */
+    [data-testid="stSidebar"] div.stButton > button {
+        background-color: transparent;
+        border: none;
+        text-align: left;
+        color: #b0b3c5; /* Colore testo spento */
+        box-shadow: none;
+        padding-left: 0;
+        font-size: 16px;
+        transition: all 0.2s;
+    }
+    /* Effetto Hover (quando passi sopra col mouse) */
+    [data-testid="stSidebar"] div.stButton > button:hover {
+        color: #ffffff; /* Diventa bianco */
+        padding-left: 10px; /* Si sposta leggermente a destra */
+        background-color: transparent; /* Rimane trasparente */
+        border: none;
+    }
+    /* Rimuove il focus rosso brutto quando clicchi */
+    [data-testid="stSidebar"] div.stButton > button:focus {
+        box-shadow: none;
+        color: #00CC96; /* Colore attivo */
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -38,12 +63,12 @@ SEGRETO_PASSWORD = "Giulio99mac!"
 DB_FOLDER = "bond_database"
 if not os.path.exists(DB_FOLDER): os.makedirs(DB_FOLDER)
 
-# --- STATO (Session State) ---
+# --- STATO ---
 if 'portfolio' not in st.session_state: st.session_state.portfolio = []
 if 'confronto' not in st.session_state: st.session_state.confronto = None
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'connection_status' not in st.session_state: st.session_state.connection_status = "In attesa..."
-if 'page' not in st.session_state: st.session_state.page = "Scanner" # Default page
+if 'page' not in st.session_state: st.session_state.page = "Scanner" # Pagina di default
 
 # --- MAPPA FONTI ---
 SOURCES_MAP = {
@@ -76,45 +101,41 @@ SOURCES_MAP = {
     ]
 }
 
-# --- GESTIONE FILES & STATO ---
+# --- GESTIONE FILES ---
 def get_last_update_time():
     try:
         if not os.path.exists(DB_FOLDER): return None
         files = [os.path.join(DB_FOLDER, f) for f in os.listdir(DB_FOLDER) if f.endswith('.csv')]
         if not files: return None
-        newest_file = max(files, key=os.path.getmtime)
-        return datetime.fromtimestamp(os.path.getmtime(newest_file))
+        return datetime.fromtimestamp(os.path.getmtime(max(files, key=os.path.getmtime)))
     except: return None
 
 def check_connection_status():
     try:
         requests.get("https://www.google.com", timeout=3)
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.head("https://www.simpletoolsforinvestors.eu/", headers=headers, timeout=5)
         if r.status_code == 200: return "🟢 ONLINE"
         elif r.status_code in [403, 429]: return "🔴 BANNATO (403/429)"
         else: return f"🟡 STATUS {r.status_code}"
     except: return "🔴 OFFLINE"
 
-# --- MOTORE RISK & MATH ---
+# --- RISK ENGINE ---
 def calcola_metriche_rischio(prezzo, cedola_pct, scadenza, freq):
     if prezzo <= 0 or freq == 0: return None
     cedola = cedola_pct / 100; face_value = 100
     giorni = (scadenza - date.today()).days; anni = giorni / 365.25
     if anni <= 0: return None
-    
     periodi = int(anni * freq) if int(anni*freq) > 0 else 1
     t = np.arange(1, periodi + 1) / freq
     cf = np.full(periodi, (cedola * face_value) / freq)
     cf[-1] += face_value
-    
     ytm_est = (cedola + (100 - prezzo) / anni) / ((100 + prezzo) / 2)
     pv_factors = (1 + ytm_est / freq) ** (-t * freq)
     mac_duration = np.sum(t * cf * pv_factors) / prezzo
     mod_duration = mac_duration / (1 + ytm_est / freq)
     convexity = np.sum(cf * t * (t + 1/freq) * ((1 + ytm_est/freq)**(-(t*freq + 2)))) / prezzo
     dv01 = (mod_duration * prezzo * 0.0001)
-    
     return {"ytm": ytm_est * 100, "mod_dur": mod_duration, "convexity": convexity, "dv01": dv01}
 
 def stress_test(prezzo, mod_dur, convexity, shock_bps):
@@ -150,14 +171,11 @@ def processa_riga(row, info):
         desc = str(row[c_de]); ced = 0.0
         m = re.search(r'(\d+(?:[.,]\d+)?)%', desc)
         if m: ced = float(m.group(1).replace(',', '.'))
-        
         taglio = pulisci_taglio(row[c_min]) if c_min and pd.notna(row[c_min]) else 1000.0
         rating = str(row[c_rat]) if c_rat and pd.notna(row[c_rat]) else "NR"
-        
         return {"desc": desc, "pr": pr, "sc": sc, "ced": ced, "freq": info['freq'], "fonte": info['nome'], "taglio": taglio, "rating": rating}
     except: return None
 
-# --- DATABASE LOCALE ---
 def aggiorna_db():
     p = st.progress(0); s = st.empty()
     tot = sum(len(v) for v in SOURCES_MAP.values()); c=0
@@ -203,178 +221,140 @@ def genera_flussi(d, imp, tax):
     df = pd.DataFrame(flussi).sort_values("Data"); df['Cum'] = df['Flow'].cumsum()
     return df
 
-# --- APP ---
+# --- APP START ---
 def login():
     st.title("🔒 Login"); u = st.text_input("User"); p = st.text_input("Pass", type="password")
     if st.button("Go"): 
         if u==SEGRETO_UTENTE and p==SEGRETO_PASSWORD: st.session_state.logged_in=True; st.rerun()
 
 def main_app():
-    # --- SIDEBAR: NUOVA NAVIGAZIONE A BOTTONI ---
+    # --- SIDEBAR STYLE MENU ---
     with st.sidebar:
-        st.title("🏛️ MENU")
+        st.header("MENU")
         
-        # Navigazione a Bottoni (stile App)
+        # MENU DI NAVIGAZIONE TESTUALE (PULITO)
         if st.button("🔎 Scanner Singolo", use_container_width=True): st.session_state.page = "Scanner"
         if st.button("⚔️ Confronto", use_container_width=True): st.session_state.page = "Confronto"
         if st.button("💼 Portafoglio", use_container_width=True): st.session_state.page = "Portafoglio"
         
         st.divider()
-        st.subheader("STATO SISTEMA")
+        st.subheader("SISTEMA")
         
-        # 1. INFO DATA & GUIDA
         last_date = get_last_update_time()
         if last_date:
             fmt = last_date.strftime("%d/%m %H:%M")
-            if last_date.date() == date.today():
-                st.success(f"📅 Aggiornato: {fmt}")
-            else:
-                st.warning(f"⚠️ Vecchio: {fmt}")
-        else:
-            st.error("❌ Nessun Dato")
+            if last_date.date() == date.today(): st.success(f"📅 Aggiornato: {fmt}")
+            else: st.warning(f"⚠️ Vecchio: {fmt}")
+        else: st.error("❌ Nessun Dato")
             
-        # 2. TEST CONNESSIONE
         c1, c2 = st.columns([1,2])
-        if c1.button("📶"):
-            st.session_state.connection_status = check_connection_status()
+        if c1.button("📶"): st.session_state.connection_status = check_connection_status()
         c2.markdown(f"**{st.session_state.connection_status}**")
         
-        # 3. GUIDA STATO
         with st.expander("ℹ️ Legenda Stato"):
-            st.caption("""
-            **🟢 ONLINE:** Via libera! Clicca Aggiorna.
-            **🔴 BANNATO:** Stop! Riprova tra 1 ora.
-            **🔴 OFFLINE:** Controlla il tuo WiFi.
-            """)
+            st.caption("🟢 ONLINE: Puoi aggiornare.\n🔴 BANNATO: Aspetta 1 ora.")
         
-        # 4. TASTO AGGIORNAMENTO
         if st.button("🔄 Aggiorna Database (Safe Mode)", use_container_width=True):
-            if "BANNATO" in st.session_state.connection_status:
-                st.error("Non aggiornare! Sei bannato.")
-            else:
-                aggiorna_db()
+            if "BANNATO" in st.session_state.connection_status: st.error("Stop! Sei bannato.")
+            else: aggiorna_db()
         
-        st.caption(f"Files Locali: {len(os.listdir(DB_FOLDER)) if os.path.exists(DB_FOLDER) else 0}/28")
-        
+        st.caption(f"Files: {len(os.listdir(DB_FOLDER)) if os.path.exists(DB_FOLDER) else 0}/28")
         st.divider()
         if st.button("🚪 Esci"): st.session_state.logged_in=False; st.rerun()
 
-    # --- PAGINA 1: SCANNER PRO ---
+    # --- PAGINA 1: SCANNER ---
     if st.session_state.page == "Scanner":
         st.title("🔎 Scanner Obbligazionario Pro")
-        
-        with st.expander("📍 GUIDA CATEGORIE (Clicca per espandere)", expanded=False):
-            st.markdown("Ecco dove cercare il tuo titolo:")
+        with st.expander("📍 GUIDA CATEGORIE", expanded=False):
             l1, l2, l3, l4 = st.columns(4)
-            with l1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span><b>Titoli di Stato</b><br>• Italia (BTP, BOT)<br>• Germania, Francia<br>• USA, Romania<br>• EU Mix</div>""", unsafe_allow_html=True)
-            with l2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span><b>Banche</b><br>• Intesa, UniCredit<br>• Banche UE/USA<br>• Subordinate</div>""", unsafe_allow_html=True)
-            with l3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span><b>Aziende</b><br>• Eni, Stellantis<br>• Auto & Energy<br>• Telecom</div>""", unsafe_allow_html=True)
-            with l4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span><b>Misti</b><br>• Zero Coupon<br>• Callable<br>• 25+ anni</div>""", unsafe_allow_html=True)
+            with l1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span>Italia (BTP), Germania, USA, EU</div>""", unsafe_allow_html=True)
+            with l2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span>Intesa, UniCredit, Subordinate</div>""", unsafe_allow_html=True)
+            with l3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span>Eni, Stellantis, Telecom</div>""", unsafe_allow_html=True)
+            with l4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span>Zero Coupon, 25y+, Callable</div>""", unsafe_allow_html=True)
 
         st.divider()
-        c1, c2, c3 = st.columns([2, 1, 1])
+        c1, c2 = st.columns([2, 1])
         cat = c1.selectbox("Seleziona Categoria", list(SOURCES_MAP.keys()))
         isin = c2.text_input("Inserisci ISIN", placeholder="Cerca...").strip().upper()
-        # INPUT IMPORTO SPOSTATO QUI
-        importo = c3.number_input("Simula €", value=10000, step=1000)
+        # CAPITALE SIM QUI
+        importo = st.number_input("Capitale da Simulare (€)", value=10000, step=1000)
         
         if isin:
             row, info = cerca_db(isin, cat)
             d = processa_riga(row, info) if row is not None else None
-            
             if d:
                 tax = determina_tasse(d['fonte'], d['desc'])
                 risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                 df_flussi = genera_flussi(d, importo, tax)
-                profitto = df_flussi['Flow'].sum() - importo
                 
-                st.markdown(f"""
-                <div style="background-color: #1e2130; padding: 20px; border-radius: 10px; border-left: 6px solid #00CC96; margin: 20px 0;">
-                    <div class="main-header">{d['desc']}</div>
-                    <div class="sub-header">ISIN: {isin} | Fonte: {d['fonte']} | Rating: {d['rating']}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"""<div style="background-color:#1e2130;padding:20px;border-radius:10px;border-left:6px solid #00CC96;margin:20px 0;"><div class="main-header">{d['desc']}</div><div class="sub-header">ISIN: {isin} | Fonte: {d['fonte']} | Rating: {d['rating']}</div></div>""", unsafe_allow_html=True)
 
                 m1, m2, m3, m4, m5 = st.columns(5)
                 m1.metric("Prezzo", f"{d['pr']}€")
                 ytm = risk['ytm'] if risk else 0
                 m2.metric("YTM (Lordo)", f"{ytm:.2f}%")
                 m3.metric("Cedola", f"{d['ced']}%")
-                dur_res = (d['sc'] - date.today()).days / 365.25
-                m4.metric("Durata Residua", f"{dur_res:.1f} Y")
-                m5.metric("Taglio Min", f"{d['taglio']:,.0f}€")
+                dur = (d['sc'] - date.today()).days / 365.25
+                m4.metric("Durata", f"{dur:.1f} Y")
+                m5.metric("Taglio", f"{d['taglio']:,.0f}€")
 
                 st.divider()
                 r1, r2 = st.columns([1, 2])
                 with r1:
-                    st.subheader("⚠️ Analisi Rischio")
-                    if risk:
-                        st.markdown(f"""
-                        <div class="metric-card"><b>Modified Duration:</b> {risk['mod_dur']:.2f}<br><span style="font-size:12px;color:#888">Sensibilità ai tassi</span></div>
-                        <div class="metric-card"><b>Convexity:</b> {risk['convexity']:.2f}</div>
-                        <div class="metric-card"><b>DV01 (10k€):</b> {risk['dv01'] * (importo/100):.2f}€</div>
-                        """, unsafe_allow_html=True)
-                
+                    st.subheader("⚠️ Rischio")
+                    if risk: st.markdown(f"""<div class="metric-card"><b>Mod. Duration:</b> {risk['mod_dur']:.2f}</div><div class="metric-card"><b>Convexity:</b> {risk['convexity']:.2f}</div><div class="metric-card"><b>DV01 (10k€):</b> {risk['dv01']*(importo/100):.2f}€</div>""", unsafe_allow_html=True)
                 with r2:
-                    st.subheader("⚡ Stress Test Tassi")
+                    st.subheader("⚡ Stress Test")
                     if risk:
                         shocks = [-100, -50, 0, +50, +100]
                         prices = [stress_test(d['pr'], risk['mod_dur'], risk['convexity'], s) for s in shocks]
                         fig = go.Figure(go.Scatter(x=shocks, y=prices, mode='lines+markers+text', text=[f"{p:.1f}" for p in prices], textposition="top center", line=dict(color='#636EFA', width=3)))
-                        fig.update_layout(height=250, margin=dict(l=0,r=0,t=20,b=0), template="plotly_dark", xaxis_title="Variazione Bps", yaxis_title="Prezzo Stimato")
+                        fig.update_layout(height=250, margin=dict(l=0,r=0,t=20,b=0), template="plotly_dark", xaxis_title="Bps", yaxis_title="Prezzo")
                         st.plotly_chart(fig, use_container_width=True)
 
                 c_flag, c_tab = st.columns([1, 2])
                 with c_flag:
-                    st.subheader("🚩 Controlli")
-                    if d['taglio'] > 50000: st.markdown('<div class="red-flag"><b>⚠️ Illiquido:</b> Taglio > 50k</div>', unsafe_allow_html=True)
-                    if d['pr'] > 105: st.markdown('<div class="red-flag"><b>⚠️ Sopra la pari:</b> Rischio minusvalenza</div>', unsafe_allow_html=True)
-                    ytm_net = ytm * (1-tax/100)
-                    if ytm_net < 2.0: st.markdown(f'<div class="red-flag"><b>⚠️ Rend. Reale Basso:</b> Netto {ytm_net:.2f}% < Inflazione</div>', unsafe_allow_html=True)
-                    else: st.markdown('<div class="green-flag">✅ Parametri nella norma</div>', unsafe_allow_html=True)
+                    st.subheader("🚩 Flags")
+                    if d['taglio'] > 50000: st.markdown('<div class="red-flag">⚠️ Taglio > 50k</div>', unsafe_allow_html=True)
+                    if d['pr'] > 105: st.markdown('<div class="red-flag">⚠️ Sopra la pari</div>', unsafe_allow_html=True)
+                    if (ytm*(1-tax/100)) < 2.0: st.markdown('<div class="red-flag">⚠️ Rend < Inflazione</div>', unsafe_allow_html=True)
+                    else: st.markdown('<div class="green-flag">✅ Ok</div>', unsafe_allow_html=True)
 
                 with c_tab:
                     t1, t2 = st.tabs(["💰 Cash Flow", "⚙️ Azioni"])
                     with t1:
-                        fig_cf = px.bar(df_flussi, x='Data', y='Flow', color='Tipo', title=f"Flussi su {importo}€", template="plotly_dark")
+                        fig_cf = px.bar(df_flussi, x='Data', y='Flow', color='Tipo', title=f"Flussi", template="plotly_dark")
                         fig_cf.update_layout(height=250, margin=dict(l=0,r=0,t=30,b=0))
                         st.plotly_chart(fig_cf, use_container_width=True)
                     with t2:
-                        if st.button("📌 Salva per Confronto"):
-                            st.session_state.confronto = d
-                            st.success("Salvato!")
-            else:
-                st.info("👈 Inserisci un ISIN. Se non trova nulla, clicca 'Aggiorna Database' nel menu.")
+                        if st.button("📌 Salva Confronto"): st.session_state.confronto = d; st.success("Salvato!")
+            else: st.info("Inserisci un ISIN. (Assicurati di aver aggiornato il DB)")
 
     # --- PAGINA 2: CONFRONTO ---
     elif st.session_state.page == "Confronto":
-        st.title("⚔️ Arena Confronto")
+        st.title("⚔️ Confronto")
         if st.session_state.confronto:
             saved = st.session_state.confronto
-            st.info(f"📌 Titolo A: **{saved['desc']}**")
-            
+            st.info(f"📌 A: **{saved['desc']}**")
             c1, c2 = st.columns(2)
-            cat_b = c1.selectbox("Categoria B", list(SOURCES_MAP.keys()))
+            cat_b = c1.selectbox("Cat B", list(SOURCES_MAP.keys()))
             isin_b = c2.text_input("ISIN B").strip().upper()
-            
             if st.button("VS") and isin_b:
                 rb, ib = cerca_db(isin_b, cat_b)
                 db = processa_riga(rb, ib) if rb is not None else None
                 if db:
                     ra = calcola_metriche_rischio(saved['pr'], saved['ced'], saved['sc'], saved['freq'])
                     rb = calcola_metriche_rischio(db['pr'], db['ced'], db['sc'], db['freq'])
-                    
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("A: YTM", f"{ra['ytm']:.2f}%")
+                    c1.metric("A YTM", f"{ra['ytm']:.2f}%")
                     c2.markdown("<h2 style='text-align:center'>VS</h2>", unsafe_allow_html=True)
-                    c3.metric("B: YTM", f"{rb['ytm']:.2f}%", delta_color="normal")
-                    
+                    c3.metric("B YTM", f"{rb['ytm']:.2f}%", delta_color="normal")
                     fig = go.Figure()
-                    fig.add_trace(go.Bar(name='A', x=['Duration'], y=[ra['mod_dur']], marker_color='#EF553B'))
-                    fig.add_trace(go.Bar(name='B', x=['Duration'], y=[rb['mod_dur']], marker_color='#00CC96'))
+                    fig.add_trace(go.Bar(name='A', x=['Dur'], y=[ra['mod_dur']], marker_color='#EF553B'))
+                    fig.add_trace(go.Bar(name='B', x=['Dur'], y=[rb['mod_dur']], marker_color='#00CC96'))
                     st.plotly_chart(fig, use_container_width=True)
                 else: st.error("B non trovato")
-        else: st.warning("Salva prima un titolo dallo scanner.")
+        else: st.warning("Salva un titolo dallo scanner.")
 
     # --- PAGINA 3: PORTAFOGLIO ---
     elif st.session_state.page == "Portafoglio":
@@ -391,12 +371,10 @@ def main_app():
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     st.session_state.portfolio.append({"ISIN": pi, "Desc": d['desc'], "Valore": (pn*d['pr'])/100, "YTM": risk['ytm']})
                     st.success("OK")
-        
         if st.session_state.portfolio:
             df = pd.DataFrame(st.session_state.portfolio)
-            tot = df['Valore'].sum()
-            w_ytm = (df['YTM'] * (df['Valore']/tot)).sum()
-            st.metric("Valore Totale", f"{tot:,.0f}€", f"YTM Ponderato: {w_ytm:.2f}%")
+            tot = df['Valore'].sum(); w_ytm = (df['YTM'] * (df['Valore']/tot)).sum()
+            st.metric("Totale", f"{tot:,.0f}€", f"YTM Pond: {w_ytm:.2f}%")
             st.dataframe(df, use_container_width=True)
             if st.button("Reset"): st.session_state.portfolio=[]; st.rerun()
 
