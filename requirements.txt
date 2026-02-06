@@ -2,8 +2,7 @@ streamlit
 pandas
 requests
 scipy
-matplotlib
-yfinance
+numpy
 lxml
 html5lib
-bs4
+plotly
