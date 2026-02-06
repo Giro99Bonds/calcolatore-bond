@@ -16,7 +16,7 @@ SEGRETO_UTENTE = "giulio"
 SEGRETO_PASSWORD = "Giulio99mac!"
 
 # --- INIZIALIZZAZIONE STATO ---
-if 'confronto' not in st.session_state: st.session_state.confronto = None # Per salvare il bond da confrontare
+if 'confronto' not in st.session_state: st.session_state.confronto = None 
 
 # --- MAPPA FONTI ---
 SOURCES_MAP = {
@@ -66,91 +66,68 @@ def determina_tasse(nome_fonte, descrizione_titolo):
     return 26.0
 
 def genera_flussi_cassa(dati, importo_investito, tax_rate):
-    """Genera la tabella dei flussi futuri"""
     flussi = []
     nominale = importo_investito
     prezzo_acquisto = (importo_investito * dati['pr']) / 100
-    
-    # Date
     oggi = date.today()
     scadenza = dati['sc']
-    freq = dati['freq'] # 1=Annuale, 2=Semestrale, 0=Zero Coupon
+    freq = dati['freq']
     
-    # 1. Flusso di Acquisto (Oggi)
+    # 1. Acquisto
     flussi.append({
         "Data": oggi.strftime("%d/%m/%Y"),
         "Tipo": "🔴 Acquisto",
-        "Importo Lordo": -prezzo_acquisto,
-        "Tasse": 0,
         "Importo Netto": -prezzo_acquisto,
-        "Capitale Cumulato": -prezzo_acquisto
+        "Cumulato": -prezzo_acquisto
     })
     
-    # 2. Cedole Intermedie
-    cedola_totale_netta = 0
+    # 2. Cedole
     if freq > 0:
         cedola_pct_annua = dati['ced']
         mesi_step = 12 // freq
         cedola_valore_lordo = (nominale * (cedola_pct_annua / 100)) / freq
         cedola_valore_netto = cedola_valore_lordo * (1 - (tax_rate/100))
         
-        # Generiamo date a ritroso dalla scadenza fino ad oggi
         cursore_data = scadenza
         date_cedole = []
         while cursore_data > today_plus_2(oggi):
             date_cedole.append(cursore_data)
-            # Sottrai mesi
             anno = cursore_data.year
             mese = cursore_data.month - mesi_step
             if mese <= 0:
                 mese += 12
                 anno -= 1
-            try:
-                cursore_data = cursore_data.replace(year=anno, month=mese)
-            except ValueError: # Gestione fine mese (es. 31 non esiste a febbraio)
-                cursore_data = cursore_data.replace(year=anno, month=mese, day=28)
+            try: cursore_data = cursore_data.replace(year=anno, month=mese)
+            except: cursore_data = cursore_data.replace(year=anno, month=mese, day=28)
         
-        date_cedole.sort() # Ordine cronologico
-        
-        # Aggiungiamo flussi cedole (tranne l'ultima che va col rimborso)
+        date_cedole.sort()
         for d in date_cedole[:-1]:
             flussi.append({
                 "Data": d.strftime("%d/%m/%Y"),
                 "Tipo": "🟢 Cedola",
-                "Importo Lordo": cedola_valore_lordo,
-                "Tasse": -(cedola_valore_lordo - cedola_valore_netto),
                 "Importo Netto": cedola_valore_netto,
-                "Capitale Cumulato": 0 # Calcolato dopo
+                "Cumulato": 0
             })
-            cedola_totale_netta += cedola_valore_netto
 
-    # 3. Rimborso Finale + Ultima Cedola
+    # 3. Rimborso
     ultima_cedola_lorda = (nominale * (dati['ced'] / 100) / freq) if freq > 0 else 0
     ultima_cedola_netta = ultima_cedola_lorda * (1 - (tax_rate/100))
-    
-    # Calcolo capital gain/loss
     plusvalenza = max(0, nominale - prezzo_acquisto)
     tassa_capital_gain = plusvalenza * (tax_rate/100)
     rimborso_netto = nominale - tassa_capital_gain
     
-    totale_finale_netto = rimborso_netto + ultima_cedola_netta
-    
     flussi.append({
         "Data": scadenza.strftime("%d/%m/%Y"),
-        "Tipo": "🏁 Rimborso + Cedola",
-        "Importo Lordo": nominale + ultima_cedola_lorda,
-        "Tasse": -(tassa_capital_gain + (ultima_cedola_lorda - ultima_cedola_netta)),
-        "Importo Netto": totale_finale_netto,
-        "Capitale Cumulato": 0
+        "Tipo": "🏁 Rimborso",
+        "Importo Netto": rimborso_netto + ultima_cedola_netta,
+        "Cumulato": 0
     })
     
-    # Calcolo Cumulato
     df = pd.DataFrame(flussi)
-    df['Capitale Cumulato'] = df['Importo Netto'].cumsum()
+    df['Cumulato'] = df['Importo Netto'].cumsum()
     return df
 
-def today_plus_2(d):
-    return d + timedelta(days=2)
+def today_plus_2(d): return d + timedelta(days=2)
 
 def get_bond_data_protected(isin, category):
     @st.cache_data(ttl=300, show_spinner=False)
@@ -187,9 +164,8 @@ def get_bond_data_protected(isin, category):
         except: continue
     return None
 
-# --- LOGIN SYSTEM ---
+# --- LOGIN ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-
 def login():
     st.title("🔐 Accesso Ricerca")
     with st.form("login"):
@@ -199,20 +175,36 @@ def login():
             if u == SEGRETO_UTENTE and p == SEGRETO_PASSWORD:
                 st.session_state.logged_in = True
                 st.rerun()
-            else: st.error("Credenziali non valide")
+            else: st.error("Credenziali Errate")
 
+# --- APP PRINCIPALE ---
 def main_app():
     st.title("🏛️ Bond Research Terminal")
     st.caption("Advanced Academic Tool for Bond Analysis & Comparison")
     st.markdown("---")
 
-    # --- SIDEBAR (Input Investimento) ---
+    # 1. LEGENDA (Rimesse le 4 colonne come piaceva a te!)
+    st.subheader("📍 Guida alla Ricerca")
+    
+    col_leg1, col_leg2, col_leg3, col_leg4 = st.columns(4)
+    with col_leg1:
+        st.success("**🏛️ GOVERNATIVI**\n\n*Stati Sovrani*\nBTP, BOT, Bund, Treasury, OAT, Romania...")
+    with col_leg2:
+        st.warning("**🏦 FINANZIARI**\n\n*Banche & Assicurazioni*\nIntesa, UniCredit, Goldman, Subordinate...")
+    with col_leg3:
+        st.info("**🏭 CORPORATE**\n\n*Aziende Industriali*\nEni, Stellantis, Telecom, Energy, Auto...")
+    with col_leg4:
+        st.error("**💎 SPECIALI**\n\n*Strutture Miste*\nZero Coupon, Callable, Green Bonds, 25Y+...")
+
+    st.divider()
+
+    # SIDEBAR
     with st.sidebar:
         st.header("💶 Simulatore")
-        importo = st.number_input("Capitale da investire (€)", value=10000, step=1000)
+        importo = st.number_input("Capitale Investito (€)", value=10000, step=1000)
         st.divider()
         if st.session_state.confronto:
-            st.info(f"📌 **In confronto:**\n{st.session_state.confronto['desc'][:15]}...")
+            st.info(f"📌 **VS:** {st.session_state.confronto['desc'][:15]}...")
             if st.button("❌ Rimuovi Confronto"):
                 st.session_state.confronto = None
                 st.rerun()
@@ -220,8 +212,7 @@ def main_app():
             st.session_state.logged_in = False
             st.rerun()
 
-    # --- INPUT RICERCA ---
-    st.subheader("🔍 Cerca Titolo")
+    # INPUT
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1: cat = st.selectbox("Categoria", list(SOURCES_MAP.keys()))
     with c2: isin = st.text_input("ISIN", placeholder="IT000...").strip().upper()
@@ -229,96 +220,64 @@ def main_app():
         st.write("")
         btn = st.button("ANALIZZA 🚀", use_container_width=True)
 
+    # RISULTATI
     if btn and isin:
-        with st.spinner("Elaborazione Dati e Simulazione Fiscale..."):
+        with st.spinner("Analisi in corso..."):
             d = get_bond_data_protected(isin, cat)
-            
             if d:
-                # Calcoli Base
+                # Calcoli
                 tax = determina_tasse(d['fonte'], d['desc'])
+                t_val = tax / 100
                 oggi = date.today()
                 valuta = oggi + timedelta(days=2)
                 anni = (d['sc'] - valuta).days / 365.25
-                t_val = tax / 100
                 rend_n = (((100 - d['pr'])*(1-t_val) + (d['ced'] * anni * (1-t_val))) / d['pr']) / anni
-                
-                # Generazione Flussi
                 df_flussi = genera_flussi_cassa(d, importo, tax)
-                profitto_netto = df_flussi['Importo Netto'].sum()
-                
-                # --- LAYOUT RISULTATI ---
-                st.success(f"Trovato: **{d['desc']}**")
-                
-                # Se c'è un confronto attivo, mostriamo la comparazione
+                profitto = df_flussi['Importo Netto'].sum() - importo
+
+                # Confronto
                 if st.session_state.confronto:
                     st.divider()
-                    st.subheader("⚔️ Confronto Diretto")
+                    st.subheader("⚔️ Confronto")
                     conf = st.session_state.confronto
-                    
-                    # Ricalcolo dati confronto per sicurezza
                     c_tax = determina_tasse(conf['fonte'], conf['desc'])
                     c_anni = (conf['sc'] - valuta).days / 365.25
-                    c_rend_n = (((100 - conf['pr'])*(1-c_tax/100) + (conf['ced'] * c_anni * (1-c_tax/100))) / conf['pr']) / c_anni
+                    c_rend = (((100 - conf['pr'])*(1-c_tax/100) + (conf['ced'] * c_anni * (1-c_tax/100))) / conf['pr']) / c_anni
                     
-                    col_a, col_b, col_c = st.columns(3)
-                    col_a.metric("Titolo A (Salvato)", f"{conf['ced']}% Cedola", f"{c_rend_n*100:.2f}% Netto")
-                    col_b.metric("VS", "⚡", "")
-                    col_c.metric("Titolo B (Attuale)", f"{d['ced']}% Cedola", f"{rend_n*100:.2f}% Netto", delta_color="normal")
-                    
-                    # Grafico Confronto
-                    fig_cmp = go.Figure()
-                    fig_cmp.add_trace(go.Bar(name='A (Salvato)', x=['Rendimento Netto'], y=[c_rend_n*100], marker_color='#EF553B'))
-                    fig_cmp.add_trace(go.Bar(name='B (Attuale)', x=['Rendimento Netto'], y=[rend_n*100], marker_color='#00CC96'))
-                    st.plotly_chart(fig_cmp, use_container_width=True)
+                    cc1, cc2, cc3 = st.columns(3)
+                    cc1.metric("TITOLO A (Salvato)", f"{c_rend*100:.2f}% Netto")
+                    cc2.metric("VS", "⚡")
+                    cc3.metric("TITOLO B (Attuale)", f"{rend_n*100:.2f}% Netto", delta_color="normal")
                     st.divider()
 
-                # TABS PER DETTAGLI
-                tab1, tab2, tab3 = st.tabs(["📊 Analisi & Grafico", "💰 Tabella Flussi Cassa", "⚙️ Azioni"])
+                st.success(f"Trovato: **{d['desc']}**")
+
+                # Tabs Dettagli
+                t1, t2, t3 = st.tabs(["📊 Analisi", "💰 Flussi Cassa", "⚙️ Azioni"])
                 
-                with tab1:
+                with t1:
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("Prezzo", f"{d['pr']}€")
-                    m2.metric("Rendimento Netto", f"{rend_n*100:.2f}%")
+                    m2.metric("Rend. Netto", f"{rend_n*100:.2f}%")
                     m3.metric("Scadenza", d['sc'].strftime('%d/%m/%Y'))
-                    m4.metric("Profitto Netto Stimato", f"{profitto_netto:.2f}€", help=f"Su {importo}€ investiti")
+                    m4.metric("Profitto Stimato", f"{profitto:.2f}€")
                     
-                    # Grafico Andamento Capitale
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=df_flussi['Data'], 
-                        y=df_flussi['Capitale Cumulato'],
-                        fill='tozeroy',
-                        mode='lines+markers',
-                        name='Capitale Netto',
-                        line=dict(color='#00CC96')
-                    ))
-                    fig.update_layout(title=f"Evoluzione dell'Investimento ({importo}€)", template="plotly_dark", height=350)
+                    fig.add_trace(go.Scatter(x=df_flussi['Data'], y=df_flussi['Cumulato'], fill='tozeroy', mode='lines+markers', line=dict(color='#00CC96')))
+                    fig.update_layout(title=f"Crescita Capitale su {importo}€", template="plotly_dark", height=300)
                     st.plotly_chart(fig, use_container_width=True)
 
-                with tab2:
-                    st.subheader(f"Piano Cedolare su {importo}€")
-                    st.dataframe(
-                        df_flussi[["Data", "Tipo", "Importo Lordo", "Tasse", "Importo Netto"]].style.format({
-                            "Importo Lordo": "{:.2f}€", 
-                            "Tasse": "{:.2f}€", 
-                            "Importo Netto": "{:.2f}€"
-                        }), 
-                        use_container_width=True
-                    )
-                    st.caption("Nota: Il calcolo è una stima che assume il mantenimento fino a scadenza.")
+                with t2:
+                    st.dataframe(df_flussi.style.format({"Importo Netto": "{:.2f}€", "Cumulato": "{:.2f}€"}), use_container_width=True)
 
-                with tab3:
-                    st.write("Cosa vuoi fare con questo titolo?")
+                with t3:
                     if st.button("📌 Salva per Confronto"):
                         st.session_state.confronto = d
-                        st.success("Titolo salvato! Ora cerca un altro titolo per confrontarli.")
+                        st.success("Salvato! Cerca un altro titolo.")
                         time.sleep(1)
                         st.rerun()
-
             else:
-                st.error("Titolo non trovato.")
-    else:
-        st.info("Inserisci un ISIN per iniziare. Esempio BTP: IT0005566408")
+                st.error("Non trovato. Controlla Categoria e ISIN.")
 
 if st.session_state.logged_in: main_app()
 else: login()
