@@ -124,12 +124,19 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIGURAZIONE SICURA ---
-# Usa variabili d'ambiente per credenziali in produzione
-SEGRETO_UTENTE = os.getenv("BOND_USER", "giulio")
-SEGRETO_PASSWORD_HASH = hashlib.sha256(
-    os.getenv("BOND_PASS", "Giulio99mac!").encode()
-).hexdigest()
+
+# --- CONFIGURAZIONE UTENTI (MODIFICATA) ---
+# Qui aggiungi tutti gli utenti che vuoi nel formato "nome": "password"
+UTENTI_IN_CHIARO = {
+    "giulio": "Giulio99mac!",
+    "guest": "mifumoleboix"  # <--- Ecco l'utente aggiunto
+}
+
+# Questo crea automaticamente la sicurezza (trasforma le password in codici segreti)
+UTENTI_ABILITATI = {
+    user: hashlib.sha256(pwd.encode()).hexdigest() 
+    for user, pwd in UTENTI_IN_CHIARO.items()
+}
 
 # CARTELLA DATABASE LOCALE
 DB_FOLDER = "bond_database"
@@ -727,22 +734,24 @@ def analizza_bond_quality(dati, risk_metrics, tax_rate):
 
 # --- APP PRINCIPALE ---
 def login():
-    """Schermata di login"""
+    """Schermata di login Multi-Utente"""
     st.title("🔒 Bond Research Terminal - Login")
     
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
         st.markdown("---")
-        username = st.text_input("👤 Username", placeholder="Inserisci username")
+        username = st.text_input("👤 Username", placeholder="Inserisci username").strip()
         password = st.text_input("🔑 Password", type="password", placeholder="Inserisci password")
         
         if st.button("🚀 Accedi", use_container_width=True):
+            # 1. Calcola il codice segreto della password inserita
             password_hash = hashlib.sha256(password.encode()).hexdigest()
             
-            if username == SEGRETO_UTENTE and password_hash == SEGRETO_PASSWORD_HASH:
+            # 2. Controlla se l'utente esiste E se la password coincide
+            if username in UTENTI_ABILITATI and UTENTI_ABILITATI[username] == password_hash:
                 st.session_state.logged_in = True
-                st.success("✅ Login effettuato!")
+                st.success(f"✅ Benvenuto {username}!")
                 time.sleep(1)
                 st.rerun()
             else:
