@@ -63,20 +63,16 @@ SOURCES_MAP = {
 
 # --- FUNZIONI CORE ---
 def get_db_last_update():
-    """Restituisce la data dell'ultimo file modificato"""
     if not os.path.exists(DB_FOLDER): return None
     files = [os.path.join(DB_FOLDER, f) for f in os.listdir(DB_FOLDER) if f.endswith('.csv')]
     if not files: return None
     newest = max(files, key=os.path.getmtime)
-    timestamp = os.path.getmtime(newest)
-    return datetime.fromtimestamp(timestamp)
+    return datetime.fromtimestamp(os.path.getmtime(newest))
 
 def aggiorna_database_locale():
     user_agents = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36']
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    total = sum(len(v) for v in SOURCES_MAP.values())
-    count = 0
+    progress_bar = st.progress(0); status_text = st.empty()
+    total = sum(len(v) for v in SOURCES_MAP.values()); count = 0
     
     for category, sources in SOURCES_MAP.items():
         for s in sources:
@@ -84,7 +80,7 @@ def aggiorna_database_locale():
             status_text.markdown(f"⏳ Scarico **{s['nome']}**... ({count}/{total})")
             progress_bar.progress(count / total)
             try:
-                time.sleep(random.uniform(3.0, 5.0)) # Anti-ban
+                time.sleep(random.uniform(3.0, 5.0)) 
                 r = requests.get(s['url'], headers={'User-Agent': random.choice(user_agents)}, timeout=20)
                 if r.status_code == 200:
                     dfs = pd.read_html(r.text, decimal=",", thousands=".")
@@ -109,12 +105,25 @@ def cerca_nel_database_locale(isin, category):
             except: continue
     return None, None
 
+def pulisci_taglio(valore_grezzo):
+    """Converte '100k', '1.000', '1k' in numero"""
+    s = str(valore_grezzo).lower().strip()
+    if 'k' in s:
+        s = s.replace('k', '')
+        return float(s) * 1000
+    return float(s.replace('.', '').replace(',', '.')) if s.replace('.', '').replace(',', '').isdigit() else 1000.0
+
 def processa_riga_bond(row, source_info):
     try:
         cols = row.index if isinstance(row, pd.Series) else row.columns
-        c_pr = next((c for c in cols if any(k in str(c).lower() for k in ['prezzo', 'last'])), None)
-        c_sc = next((c for c in cols if any(k in str(c).lower() for k in ['scadenza', 'data'])), None)
+        # Mapping Colonne Flessibile
+        c_pr = next((c for c in cols if any(k in str(c).lower() for k in ['prezzo', 'last', 'price'])), None)
+        c_sc = next((c for c in cols if any(k in str(c).lower() for k in ['scadenza', 'maturity'])), None)
         c_de = next((c for c in cols if any(k in str(c).lower() for k in ['descrizione', 'nome'])), None)
+        c_dur = next((c for c in cols if any(k in str(c).lower() for k in ['dur', 'modified'])), None)
+        c_rat = next((c for c in cols if any(k in str(c).lower() for k in ['rating', 's&p'])), None)
+        c_min = next((c for c in cols if any(k in str(c).lower() for k in ['min', 'taglio', 'lot'])), None)
+        c_vol = next((c for c in cols if any(k in str(c).lower() for k in ['vol', 'scambi'])), None)
         
         pr = float(str(row[c_pr]).replace(',', '.').replace('€', '').strip())
         sc_str = str(row[c_sc])
@@ -128,7 +137,17 @@ def processa_riga_bond(row, source_info):
         m = re.search(r'(\d+(?:[.,]\d+)?)%', desc)
         if m: ced = float(m.group(1).replace(',', '.'))
         
-        return {"desc": desc, "pr": pr, "sc": sc, "ced": ced, "freq": source_info['freq'], "fonte": source_info['nome']}
+        # Dati Extra
+        duration = float(str(row[c_dur]).replace(',', '.')) if c_dur and pd.notna(row[c_dur]) else 0.0
+        rating = str(row[c_rat]) if c_rat and pd.notna(row[c_rat]) else "N/A"
+        taglio = pulisci_taglio(row[c_min]) if c_min and pd.notna(row[c_min]) else 1000.0
+        volume = str(row[c_vol]) if c_vol and pd.notna(row[c_vol]) else "N/A"
+        
+        return {
+            "desc": desc, "pr": pr, "sc": sc, "ced": ced, 
+            "freq": source_info['freq'], "fonte": source_info['nome'],
+            "duration": duration, "rating": rating, "taglio": taglio, "volume": volume
+        }
     except: return None
 
 def determina_tasse(nome_fonte, descrizione_titolo):
@@ -186,28 +205,18 @@ def login():
 
 # --- APP NAVIGATION ---
 def main_app():
-    # BARRA LATERALE
     with st.sidebar:
         st.title("🏛️ MENU")
         page = st.radio("Vai a:", ["🔎 Scanner Singolo", "⚔️ Confronto", "💼 Portafoglio"], index=0)
         st.divider()
         st.header("⚙️ Dati")
+        last = get_db_last_update()
+        if last:
+            st.caption(f"Ultimo agg: {last.strftime('%d/%m %H:%M')}")
+            if last.date() != date.today(): st.warning("⚠️ Dati vecchi")
+            else: st.success("✅ Dati aggiornati")
         
-        # LOGICA DATA ULTIMO AGGIORNAMENTO
-        last_upd = get_db_last_update()
-        if last_upd:
-            fmt_date = last_upd.strftime("%d/%m %H:%M")
-            if last_upd.date() == date.today():
-                st.success(f"✅ Aggiornato: {fmt_date}")
-            else:
-                st.warning(f"⚠️ Vecchio: {fmt_date}")
-        else:
-            st.error("❌ Nessun Dato")
-
-        if st.button("🔄 Scarica Tutto (Safe Mode)"):
-            aggiorna_database_locale()
-            
-        st.divider()
+        if st.button("🔄 Scarica Tutto (Safe Mode)"): aggiorna_database_locale()
         if st.button("🚪 Logout"): st.session_state.logged_in = False; st.rerun()
 
     # --- PAGINA 1: RICERCA ---
@@ -226,8 +235,9 @@ def main_app():
             row, info = cerca_nel_database_locale(isin, cat)
             d = processa_riga_bond(row, info) if row is not None else None
             
+            # Fallback Online (Singolo tentativo)
             if not d:
-                with st.spinner("Cercando online..."):
+                with st.spinner("Ricerca online..."):
                     for s in SOURCES_MAP.get(cat, []):
                         try:
                             r = requests.get(s['url'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
@@ -244,105 +254,118 @@ def main_app():
                 rn, rl = calcola_rendimenti(d, tax)
                 df_flussi = genera_flussi_cassa(d, importo, tax)
                 
-                st.markdown(f"""<div style="background-color: #1e2130; padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; margin-bottom: 20px;"><h2 style="margin:0; color:white;">{d['desc']}</h2><p style="margin:0; color:#b0b3c5;">ISIN: {isin} | Tassa: {tax}%</p></div>""", unsafe_allow_html=True)
+                # --- HEADER TITOLO ---
+                st.markdown(f"""
+                <div style="background-color: #1e2130; padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                    <h2 style="margin:0; color:white; font-size: 24px;">{d['desc']}</h2>
+                    <p style="margin-top:5px; color:#b0b3c5; font-family: monospace; font-size: 14px;">
+                        ISIN: <span style="color:#fff; background:#333; padding:2px 6px; border-radius:4px;">{isin}</span> | 
+                        Fisco: <span style="color:#ffcc00;">{tax}%</span> | 
+                        Fonte: {d['fonte']}
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
 
+                # METRICHE PRINCIPALI
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Prezzo", f"{d['pr']}€")
-                col2.metric("Rend. Netto", f"{rn*100:.2f}%", delta="Annuo")
-                col3.metric("Cedola", f"{d['ced']}%")
+                col1.metric("Prezzo", f"{d['pr']}€", delta=f"Taglio: {d['taglio']:,.0f}€")
+                col2.metric("Rend. Netto", f"{rn*100:.2f}%", delta="Annuo", delta_color="normal")
+                col3.metric("Cedola Lorda", f"{d['ced']}%")
                 col4.metric("Scadenza", d['sc'].strftime('%d/%m/%Y'))
                 
-                t1, t2 = st.tabs(["📊 Grafici", "💰 Flussi"])
+                # --- SCHEDA TECNICA (NUOVA) ---
+                st.divider()
+                st.subheader("📋 Scheda Tecnica e Rischio")
+                c_tech1, c_tech2, c_tech3, c_tech4 = st.columns(4)
+                c_tech1.info(f"**Duration (Sensibilità):**\n{d['duration']:.2f}")
+                c_tech2.info(f"**Rating:**\n{d['rating']}")
+                c_tech3.info(f"**Taglio Minimo:**\n{d['taglio']:,.0f}€")
+                c_tech4.info(f"**Volume Scambi:**\n{d['volume']}")
+                
+                t1, t2 = st.tabs(["📊 Analisi Grafica", "💰 Tabella Flussi"])
                 with t1:
-                    fig = go.Figure(go.Bar(x=[rn*100, rl*100], y=['Netto', 'Lordo'], orientation='h', marker_color=['#00CC96', '#EF553B'], text=[f"{rn*100:.2f}%", f"{rl*100:.2f}%"], textposition='auto'))
-                    fig.update_layout(height=200, margin=dict(l=0,r=0,t=0,b=0), template="plotly_dark", title="Rendimento %")
-                    st.plotly_chart(fig, use_container_width=True)
+                    c_chart1, c_chart2 = st.columns([1, 2])
+                    with c_chart1:
+                        fig = go.Figure(go.Bar(x=[rl*100, rn*100], y=['Lordo', 'Netto'], orientation='h', marker_color=['#EF553B', '#00CC96'], text=[f"{rl*100:.2f}%", f"{rn*100:.2f}%"], textposition='auto'))
+                        fig.update_layout(height=250, margin=dict(l=0,r=0,t=30,b=0), template="plotly_dark", title="Rendimento %")
+                        st.plotly_chart(fig, use_container_width=True)
+                    with c_chart2:
+                        fig_area = go.Figure(go.Scatter(x=df_flussi['Data'], y=df_flussi['Capitale'], fill='tozeroy', line=dict(color='#636EFA', width=3)))
+                        fig_area.update_layout(height=250, margin=dict(l=0,r=0,t=30,b=0), template="plotly_dark", title=f"Evoluzione {importo}€")
+                        st.plotly_chart(fig_area, use_container_width=True)
                 with t2:
                     st.dataframe(df_flussi.style.format({"Netto": "{:.2f}€", "Capitale": "{:.2f}€"}), use_container_width=True)
                 
                 if st.button("📌 Salva per Confronto"):
                     st.session_state.confronto = d
-                    st.success(f"Salvato: {d['desc']}")
-            else: st.error("Non trovato.")
+                    st.success("Salvato!")
+            else: st.error("Non trovato. Prova ad aggiornare il database.")
 
     # --- PAGINA 2: CONFRONTO ---
     elif page == "⚔️ Confronto":
         st.title("⚔️ Confronto Diretto")
         if st.session_state.confronto:
             saved = st.session_state.confronto
-            st.info(f"📌 Titolo A: **{saved['desc']}**")
+            st.info(f"📌 A: **{saved['desc']}**")
             
-            cb1, cb2 = st.columns([1, 1])
-            cat_b = cb1.selectbox("Categoria B", list(SOURCES_MAP.keys()))
-            isin_b = cb2.text_input("ISIN B").strip().upper()
+            c1, c2 = st.columns(2)
+            cat_b = c1.selectbox("Categoria B", list(SOURCES_MAP.keys()))
+            isin_b = c2.text_input("ISIN B").strip().upper()
             
             if st.button("CONFRONTA ⚡", use_container_width=True) and isin_b:
                 rb, ib = cerca_nel_database_locale(isin_b, cat_b)
                 db = processa_riga_bond(rb, ib) if rb is not None else None
-                
                 if db:
                     da = saved
-                    ta = determina_tasse(da['fonte'], da['desc']); rna, rla = calcola_rendimenti(da, ta)
-                    tb = determina_tasse(db['fonte'], db['desc']); rnb, rlb = calcola_rendimenti(db, tb)
+                    rna, _ = calcola_rendimenti(da, determina_tasse(da['fonte'], da['desc']))
+                    rnb, _ = calcola_rendimenti(db, determina_tasse(db['fonte'], db['desc']))
                     
                     st.divider()
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("TITOLO A", f"{rna*100:.2f}% Netto", f"{da['ced']}% Cedola")
-                    c2.markdown("<h2 style='text-align: center;'>VS</h2>", unsafe_allow_html=True)
-                    c3.metric("TITOLO B", f"{rnb*100:.2f}% Netto", f"{db['ced']}% Cedola")
+                    cc1, cc2, cc3 = st.columns(3)
+                    cc1.metric("TITOLO A", f"{rna*100:.2f}% Netto", f"Dur: {da['duration']}")
+                    cc2.markdown("<h2 style='text-align: center;'>VS</h2>", unsafe_allow_html=True)
+                    cc3.metric("TITOLO B", f"{rnb*100:.2f}% Netto", f"Dur: {db['duration']}")
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Bar(name='A', x=['Netto'], y=[rna*100], marker_color='#EF553B', text=[f"{rna*100:.2f}%"], textposition='auto'))
-                    fig.add_trace(go.Bar(name='B', x=['Netto'], y=[rnb*100], marker_color='#00CC96', text=[f"{rnb*100:.2f}%"], textposition='auto'))
-                    fig.update_layout(title="Rendimento Annuo (%)", yaxis_title="%", template="plotly_dark", height=400)
+                    fig.add_trace(go.Bar(name='A', x=['Netto'], y=[rna*100], marker_color='#EF553B', text=[f"{rna*100:.2f}%"]))
+                    fig.add_trace(go.Bar(name='B', x=['Netto'], y=[rnb*100], marker_color='#00CC96', text=[f"{rnb*100:.2f}%"]))
+                    fig.update_layout(title="Rendimento Annuo %", template="plotly_dark", height=400)
                     st.plotly_chart(fig, use_container_width=True)
-                else: st.error("Titolo B non trovato.")
-            
-            if st.button("❌ Resetta"): st.session_state.confronto = None; st.rerun()
-        else: st.warning("Vai su 'Scanner Singolo' e salva un titolo prima.")
+                else: st.error("B non trovato.")
+            if st.button("Resetta"): st.session_state.confronto = None; st.rerun()
+        else: st.warning("Salva un titolo dallo scanner prima.")
 
     # --- PAGINA 3: PORTAFOGLIO ---
     elif page == "💼 Portafoglio":
         st.title("💼 Il Tuo Portafoglio")
-        with st.expander("➕ Aggiungi Titolo", expanded=True):
+        with st.expander("➕ Aggiungi", expanded=True):
             c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-            p_cat = c1.selectbox("Categoria", list(SOURCES_MAP.keys()), key="p_cat")
-            p_isin = c2.text_input("ISIN", key="p_isin").strip().upper()
-            p_nom = c3.number_input("Nominale (€)", value=1000, step=1000)
-            
-            if c4.button("Aggiungi", use_container_width=True) and p_isin:
-                row, info = cerca_nel_database_locale(p_isin, p_cat)
-                d = processa_riga_bond(row, info) if row is not None else None
+            p_cat = c1.selectbox("Cat", list(SOURCES_MAP.keys()))
+            p_isin = c2.text_input("ISIN").strip().upper()
+            p_nom = c3.number_input("Nominale", 1000, step=1000)
+            if c4.button("Add") and p_isin:
+                r, i = cerca_nel_database_locale(p_isin, p_cat)
+                d = processa_riga_bond(r, i) if r is not None else None
                 if d:
-                    tax = determina_tasse(d['fonte'], d['desc'])
-                    rn, rl = calcola_rendimenti(d, tax)
+                    rn, _ = calcola_rendimenti(d, determina_tasse(d['fonte'], d['desc']))
                     st.session_state.portfolio.append({
-                        "ISIN": p_isin, "Descrizione": d['desc'], "Nominale": p_nom,
-                        "Prezzo": d['pr'], "Valore Mercato": (p_nom * d['pr']) / 100,
-                        "Rend. Netto %": rn * 100, "Cedola": d['ced']
-                    })
-                    st.success("Aggiunto!")
-                else: st.error("Non trovato.")
+                        "ISIN": p_isin, "Desc": d['desc'], "Nominale": p_nom, "Prezzo": d['pr'],
+                        "Valore": (p_nom * d['pr'])/100, "Rend%": rn*100, "Cedola": d['ced'], "Duration": d['duration']
+                    }); st.success("OK")
+                else: st.error("No Data")
 
-        if len(st.session_state.portfolio) > 0:
-            st.divider()
-            df_pf = pd.DataFrame(st.session_state.portfolio)
-            tot_valore = df_pf["Valore Mercato"].sum()
-            df_pf["Peso"] = df_pf["Valore Mercato"] / tot_valore
-            w_netto = (df_pf["Rend. Netto %"] * df_pf["Peso"]).sum()
+        if st.session_state.portfolio:
+            df = pd.DataFrame(st.session_state.portfolio)
+            tot = df["Valore"].sum()
+            df["Peso"] = df["Valore"]/tot
+            wn = (df["Rend%"]*df["Peso"]).sum(); wd = (df["Duration"]*df["Peso"]).sum()
             
-            k1, k2 = st.columns(2)
-            k1.metric("Totale Portafoglio", f"{tot_valore:,.2f}€")
-            k2.metric("Rendimento Netto Ponderato", f"{w_netto:.2f}%")
-            
-            st.dataframe(df_pf[["ISIN", "Descrizione", "Nominale", "Prezzo", "Rend. Netto %"]], use_container_width=True)
-            
-            c_ch1, c_ch2 = st.columns(2)
-            with c_ch1:
-                fig = px.pie(df_pf, values='Valore Mercato', names='Descrizione', title='Allocazione')
-                st.plotly_chart(fig, use_container_width=True)
-            
-            if st.button("🗑️ Svuota Tutto"): st.session_state.portfolio = []; st.rerun()
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Totale", f"{tot:,.0f}€")
+            k2.metric("Rendimento Ponderato", f"{wn:.2f}%")
+            k3.metric("Duration Ponderata", f"{wd:.2f}")
+            st.dataframe(df[["ISIN", "Desc", "Nominale", "Rend%", "Duration"]], use_container_width=True)
+            if st.button("Reset"): st.session_state.portfolio = []; st.rerun()
 
 if st.session_state.logged_in: main_app()
 else: login()
