@@ -4,7 +4,6 @@ import requests
 import re
 from datetime import datetime, date, timedelta
 import numpy as np
-from scipy import optimize
 import time
 import random
 import plotly.graph_objects as go
@@ -15,6 +14,9 @@ st.set_page_config(page_title="Bond Research Terminal", page_icon="🏛️", lay
 # CREDENZIALI
 SEGRETO_UTENTE = "giulio"
 SEGRETO_PASSWORD = "Giulio99mac!"
+
+# --- INIZIALIZZAZIONE STATO ---
+if 'confronto' not in st.session_state: st.session_state.confronto = None # Per salvare il bond da confrontare
 
 # --- MAPPA FONTI ---
 SOURCES_MAP = {
@@ -52,34 +54,109 @@ SOURCES_MAP = {
     ]
 }
 
-# --- LOGICA TASSAZIONE AUTOMATICA ---
+# --- FUNZIONI BACKEND ---
 def determina_tasse(nome_fonte, descrizione_titolo):
-    # 1. Controllo Fonte (White List Stati)
     fonti_whitelist = ["BTP", "BOT", "BUND", "OAT", "USA", "ROMANIA", "EUROPA", "TDS", "SOVRANAZIONALI"]
     for w in fonti_whitelist:
-        if w in nome_fonte.upper():
-            return 12.5
-            
-    # 2. Controllo Nome Titolo (Se la fonte è generica, es. Green Bond)
+        if w in nome_fonte.upper(): return 12.5
     desc_upper = descrizione_titolo.upper()
-    keywords_stato = ["REPUBLIC", "REPUBBLICA", "TREASURY", "KINGDOM", "REGNO", "BTP", "CCT", "BOT", "OAT", "BUND", "BEI ", "EIB ", "WORLD BANK"]
-    
+    keywords_stato = ["REPUBLIC", "REPUBBLICA", "TREASURY", "KINGDOM", "REGNO", "BTP", "CCT", "BOT", "OAT", "BUND"]
     for k in keywords_stato:
-        if k in desc_upper:
-            return 12.5
-            
-    # 3. Default: Corporate/Banche
+        if k in desc_upper: return 12.5
     return 26.0
 
-# --- FUNZIONI BACKEND ---
+def genera_flussi_cassa(dati, importo_investito, tax_rate):
+    """Genera la tabella dei flussi futuri"""
+    flussi = []
+    nominale = importo_investito
+    prezzo_acquisto = (importo_investito * dati['pr']) / 100
+    
+    # Date
+    oggi = date.today()
+    scadenza = dati['sc']
+    freq = dati['freq'] # 1=Annuale, 2=Semestrale, 0=Zero Coupon
+    
+    # 1. Flusso di Acquisto (Oggi)
+    flussi.append({
+        "Data": oggi.strftime("%d/%m/%Y"),
+        "Tipo": "🔴 Acquisto",
+        "Importo Lordo": -prezzo_acquisto,
+        "Tasse": 0,
+        "Importo Netto": -prezzo_acquisto,
+        "Capitale Cumulato": -prezzo_acquisto
+    })
+    
+    # 2. Cedole Intermedie
+    cedola_totale_netta = 0
+    if freq > 0:
+        cedola_pct_annua = dati['ced']
+        mesi_step = 12 // freq
+        cedola_valore_lordo = (nominale * (cedola_pct_annua / 100)) / freq
+        cedola_valore_netto = cedola_valore_lordo * (1 - (tax_rate/100))
+        
+        # Generiamo date a ritroso dalla scadenza fino ad oggi
+        cursore_data = scadenza
+        date_cedole = []
+        while cursore_data > today_plus_2(oggi):
+            date_cedole.append(cursore_data)
+            # Sottrai mesi
+            anno = cursore_data.year
+            mese = cursore_data.month - mesi_step
+            if mese <= 0:
+                mese += 12
+                anno -= 1
+            try:
+                cursore_data = cursore_data.replace(year=anno, month=mese)
+            except ValueError: # Gestione fine mese (es. 31 non esiste a febbraio)
+                cursore_data = cursore_data.replace(year=anno, month=mese, day=28)
+        
+        date_cedole.sort() # Ordine cronologico
+        
+        # Aggiungiamo flussi cedole (tranne l'ultima che va col rimborso)
+        for d in date_cedole[:-1]:
+            flussi.append({
+                "Data": d.strftime("%d/%m/%Y"),
+                "Tipo": "🟢 Cedola",
+                "Importo Lordo": cedola_valore_lordo,
+                "Tasse": -(cedola_valore_lordo - cedola_valore_netto),
+                "Importo Netto": cedola_valore_netto,
+                "Capitale Cumulato": 0 # Calcolato dopo
+            })
+            cedola_totale_netta += cedola_valore_netto
+
+    # 3. Rimborso Finale + Ultima Cedola
+    ultima_cedola_lorda = (nominale * (dati['ced'] / 100) / freq) if freq > 0 else 0
+    ultima_cedola_netta = ultima_cedola_lorda * (1 - (tax_rate/100))
+    
+    # Calcolo capital gain/loss
+    plusvalenza = max(0, nominale - prezzo_acquisto)
+    tassa_capital_gain = plusvalenza * (tax_rate/100)
+    rimborso_netto = nominale - tassa_capital_gain
+    
+    totale_finale_netto = rimborso_netto + ultima_cedola_netta
+    
+    flussi.append({
+        "Data": scadenza.strftime("%d/%m/%Y"),
+        "Tipo": "🏁 Rimborso + Cedola",
+        "Importo Lordo": nominale + ultima_cedola_lorda,
+        "Tasse": -(tassa_capital_gain + (ultima_cedola_lorda - ultima_cedola_netta)),
+        "Importo Netto": totale_finale_netto,
+        "Capitale Cumulato": 0
+    })
+    
+    # Calcolo Cumulato
+    df = pd.DataFrame(flussi)
+    df['Capitale Cumulato'] = df['Importo Netto'].cumsum()
+    return df
+
+def today_plus_2(d):
+    return d + timedelta(days=2)
+
 def get_bond_data_protected(isin, category):
     @st.cache_data(ttl=300, show_spinner=False)
     def download_url(url):
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/119.0.0.0 Safari/537.36'
-        ]
-        time.sleep(random.uniform(0.4, 1.2)) 
+        user_agents = ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36']
+        time.sleep(random.uniform(0.4, 0.8))
         return requests.get(url, headers={'User-Agent': random.choice(user_agents)}, timeout=15)
 
     target_list = SOURCES_MAP.get(category, [])
@@ -102,17 +179,15 @@ def get_bond_data_protected(isin, category):
                         sc_str = str(row[c_sc])
                         try: sc = datetime.strptime(sc_str, '%Y-%m-%d').date()
                         except: sc = datetime.strptime(sc_str, '%d/%m/%Y').date()
-                        
                         desc = str(row[c_de])
                         ced = 0.0
                         m = re.search(r'(\d+(?:[.,]\d+)?)%', desc)
                         if m: ced = float(m.group(1).replace(',', '.'))
-                        
                         return {"desc": desc, "pr": pr, "sc": sc, "ced": ced, "freq": s['freq'], "fonte": s['nome']}
         except: continue
     return None
 
-# --- LOGIN ---
+# --- LOGIN SYSTEM ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 
 def login():
@@ -128,89 +203,122 @@ def login():
 
 def main_app():
     st.title("🏛️ Bond Research Terminal")
-    st.caption("Strumento di analisi obbligazionaria accademica.")
+    st.caption("Advanced Academic Tool for Bond Analysis & Comparison")
     st.markdown("---")
 
-    # --- LEGENDA ---
-    st.subheader("📍 Guida alla Ricerca")
-    col_leg1, col_leg2, col_leg3, col_leg4 = st.columns(4)
-    with col_leg1: st.success("🏛️ **GOVERNATIVI**\n\nStati: Italia, Germania, USA, Francia..."); 
-    with col_leg2: st.warning("🏦 **FINANZIARI**\n\nBanche: Intesa, UniCredit, Goldman..."); 
-    with col_leg3: st.info("🏭 **CORPORATE**\n\nAziede: Eni, Stellantis, Telecom..."); 
-    with col_leg4: st.error("💎 **SPECIALI**\n\nZero Coupon, Callable, Green..."); 
+    # --- SIDEBAR (Input Investimento) ---
+    with st.sidebar:
+        st.header("💶 Simulatore")
+        importo = st.number_input("Capitale da investire (€)", value=10000, step=1000)
+        st.divider()
+        if st.session_state.confronto:
+            st.info(f"📌 **In confronto:**\n{st.session_state.confronto['desc'][:15]}...")
+            if st.button("❌ Rimuovi Confronto"):
+                st.session_state.confronto = None
+                st.rerun()
+        if st.button("🚪 Logout"):
+            st.session_state.logged_in = False
+            st.rerun()
 
-    st.markdown("---")
-
-    # --- INPUT ---
-    col_input, col_res = st.columns([1, 2])
-
-    with col_input:
-        st.markdown("### 🔎 Parametri")
-        cat = st.selectbox("1. Categoria", list(SOURCES_MAP.keys()))
-        isin = st.text_input("2. Codice ISIN", placeholder="Es. IT0005566408").strip().upper()
-        
+    # --- INPUT RICERCA ---
+    st.subheader("🔍 Cerca Titolo")
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1: cat = st.selectbox("Categoria", list(SOURCES_MAP.keys()))
+    with c2: isin = st.text_input("ISIN", placeholder="IT000...").strip().upper()
+    with c3: 
         st.write("")
-        btn = st.button("ANALIZZA TITOLO 🚀", use_container_width=True)
-        st.caption("⚠️ La tassazione verrà rilevata automaticamente.")
+        btn = st.button("ANALIZZA 🚀", use_container_width=True)
 
-    with col_res:
-        if btn and isin:
-            with st.spinner("Scansione database e calcolo fiscale..."):
-                d = get_bond_data_protected(isin, cat)
+    if btn and isin:
+        with st.spinner("Elaborazione Dati e Simulazione Fiscale..."):
+            d = get_bond_data_protected(isin, cat)
+            
+            if d:
+                # Calcoli Base
+                tax = determina_tasse(d['fonte'], d['desc'])
+                oggi = date.today()
+                valuta = oggi + timedelta(days=2)
+                anni = (d['sc'] - valuta).days / 365.25
+                t_val = tax / 100
+                rend_n = (((100 - d['pr'])*(1-t_val) + (d['ced'] * anni * (1-t_val))) / d['pr']) / anni
                 
-                if d:
-                    # RILEVAMENTO TASSE AUTOMATICO
-                    tax_rate_perc = determina_tasse(d['fonte'], d['desc'])
-                    t_val = tax_rate_perc / 100
+                # Generazione Flussi
+                df_flussi = genera_flussi_cassa(d, importo, tax)
+                profitto_netto = df_flussi['Importo Netto'].sum()
+                
+                # --- LAYOUT RISULTATI ---
+                st.success(f"Trovato: **{d['desc']}**")
+                
+                # Se c'è un confronto attivo, mostriamo la comparazione
+                if st.session_state.confronto:
+                    st.divider()
+                    st.subheader("⚔️ Confronto Diretto")
+                    conf = st.session_state.confronto
                     
-                    # Calcoli
-                    oggi = date.today()
-                    valuta = oggi + timedelta(days=2)
-                    anni = (d['sc'] - valuta).days / 365.25
+                    # Ricalcolo dati confronto per sicurezza
+                    c_tax = determina_tasse(conf['fonte'], conf['desc'])
+                    c_anni = (conf['sc'] - valuta).days / 365.25
+                    c_rend_n = (((100 - conf['pr'])*(1-c_tax/100) + (conf['ced'] * c_anni * (1-c_tax/100))) / conf['pr']) / c_anni
                     
-                    rend_n = (((100 - d['pr'])*(1-t_val) + (d['ced'] * anni * (1-t_val))) / d['pr']) / anni
-                    rend_l = (((100 - d['pr']) + (d['ced'] * anni)) / d['pr']) / anni
+                    col_a, col_b, col_c = st.columns(3)
+                    col_a.metric("Titolo A (Salvato)", f"{conf['ced']}% Cedola", f"{c_rend_n*100:.2f}% Netto")
+                    col_b.metric("VS", "⚡", "")
+                    col_c.metric("Titolo B (Attuale)", f"{d['ced']}% Cedola", f"{rend_n*100:.2f}% Netto", delta_color="normal")
                     
-                    # Visualizzazione
-                    st.success(f"✅ Trovato: **{d['desc']}**")
+                    # Grafico Confronto
+                    fig_cmp = go.Figure()
+                    fig_cmp.add_trace(go.Bar(name='A (Salvato)', x=['Rendimento Netto'], y=[c_rend_n*100], marker_color='#EF553B'))
+                    fig_cmp.add_trace(go.Bar(name='B (Attuale)', x=['Rendimento Netto'], y=[rend_n*100], marker_color='#00CC96'))
+                    st.plotly_chart(fig_cmp, use_container_width=True)
+                    st.divider()
+
+                # TABS PER DETTAGLI
+                tab1, tab2, tab3 = st.tabs(["📊 Analisi & Grafico", "💰 Tabella Flussi Cassa", "⚙️ Azioni"])
+                
+                with tab1:
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Prezzo", f"{d['pr']}€")
+                    m2.metric("Rendimento Netto", f"{rend_n*100:.2f}%")
+                    m3.metric("Scadenza", d['sc'].strftime('%d/%m/%Y'))
+                    m4.metric("Profitto Netto Stimato", f"{profitto_netto:.2f}€", help=f"Su {importo}€ investiti")
                     
-                    # Etichetta Tasse Dinamica
-                    if tax_rate_perc == 12.5:
-                        st.markdown('<span style="background-color:#d4edda; color:#155724; padding:5px; border-radius:5px;">🏛️ Tassazione Agevolata: 12.5% (Titolo di Stato/White List)</span>', unsafe_allow_html=True)
-                    else:
-                        st.markdown('<span style="background-color:#fff3cd; color:#856404; padding:5px; border-radius:5px;">🏭 Tassazione Standard: 26% (Corporate/Bancario)</span>', unsafe_allow_html=True)
-                    
-                    st.write("")
-                    
-                    k1, k2, k3 = st.columns(3)
-                    k1.metric("Prezzo", f"{d['pr']}€")
-                    k2.metric("Rendimento Netto", f"{rend_n*100:.2f}%", delta_color="normal")
-                    k3.metric("Scadenza", d['sc'].strftime('%d/%m/%Y'))
-                    
-                    # Grafico
-                    fig = go.Figure(go.Bar(
-                        x=[rend_n*100, rend_l*100, d['ced']],
-                        y=['Rend. Netto', 'Rend. Lordo', 'Cedola'],
-                        orientation='h',
-                        marker_color=['#00CC96', '#EF553B', '#636EFA'],
-                        text=[f"{rend_n*100:.2f}%", f"{rend_l*100:.2f}%", f"{d['ced']}%"],
-                        textposition='auto'
+                    # Grafico Andamento Capitale
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=df_flussi['Data'], 
+                        y=df_flussi['Capitale Cumulato'],
+                        fill='tozeroy',
+                        mode='lines+markers',
+                        name='Capitale Netto',
+                        line=dict(color='#00CC96')
                     ))
-                    fig.update_layout(title="Analisi Rendimento", height=300, margin=dict(l=0, r=0, t=30, b=0))
+                    fig.update_layout(title=f"Evoluzione dell'Investimento ({importo}€)", template="plotly_dark", height=350)
                     st.plotly_chart(fig, use_container_width=True)
 
-                    st.info(f"🔎 Fonte: {d['fonte']}")
+                with tab2:
+                    st.subheader(f"Piano Cedolare su {importo}€")
+                    st.dataframe(
+                        df_flussi[["Data", "Tipo", "Importo Lordo", "Tasse", "Importo Netto"]].style.format({
+                            "Importo Lordo": "{:.2f}€", 
+                            "Tasse": "{:.2f}€", 
+                            "Importo Netto": "{:.2f}€"
+                        }), 
+                        use_container_width=True
+                    )
+                    st.caption("Nota: Il calcolo è una stima che assume il mantenimento fino a scadenza.")
 
-                else:
-                    st.error("❌ Titolo non trovato.")
-                    st.warning(f"Controlla di aver scelto la categoria corretta nella legenda in alto.")
-        else:
-            st.info("👈 Inserisci ISIN e Categoria per iniziare.")
+                with tab3:
+                    st.write("Cosa vuoi fare con questo titolo?")
+                    if st.button("📌 Salva per Confronto"):
+                        st.session_state.confronto = d
+                        st.success("Titolo salvato! Ora cerca un altro titolo per confrontarli.")
+                        time.sleep(1)
+                        st.rerun()
 
-    # Logout
-    if st.sidebar.button("Logout"):
-        st.session_state.logged_in = False
-        st.rerun()
+            else:
+                st.error("Titolo non trovato.")
+    else:
+        st.info("Inserisci un ISIN per iniziare. Esempio BTP: IT0005566408")
 
 if st.session_state.logged_in: main_app()
 else: login()
