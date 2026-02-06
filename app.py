@@ -124,7 +124,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
+# --- CONFIGURAZIONE SICURA ---
+# Usa variabili d'ambiente per credenziali in produzione
+SEGRETO_UTENTE = os.getenv("BOND_USER", "giulio")
+SEGRETO_PASSWORD_HASH = hashlib.sha256(
+    os.getenv("BOND_PASS", "Giulio99mac!").encode()
+).hexdigest()
 
 # CARTELLA DATABASE LOCALE
 DB_FOLDER = "bond_database"
