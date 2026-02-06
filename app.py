@@ -144,11 +144,13 @@ if not os.path.exists(DB_FOLDER):
     os.makedirs(DB_FOLDER)
 
 # --- STATO (Session State) con inizializzazione robusta ---
+# --- STATO (Session State) con inizializzazione robusta ---
 def init_session_state():
     defaults = {
         'portfolio': [],
         'confronto': None,
         'logged_in': False,
+        'current_user': "",  # <--- AGGIUNGI QUESTA RIGA QUI (ricorda la virgola alla fine)
         'connection_status': "In attesa...",
         'page': "Scanner",
         'last_scrape_time': None,
@@ -733,6 +735,7 @@ def analizza_bond_quality(dati, risk_metrics, tax_rate):
     }
 
 # --- APP PRINCIPALE ---
+# --- APP PRINCIPALE ---
 def login():
     """Schermata di login Multi-Utente"""
     st.title("🔒 Bond Research Terminal - Login")
@@ -751,6 +754,11 @@ def login():
             # 2. Controlla se l'utente esiste E se la password coincide
             if username in UTENTI_ABILITATI and UTENTI_ABILITATI[username] == password_hash:
                 st.session_state.logged_in = True
+                
+                # --- AGGIUNGI QUESTA RIGA QUI SOTTO: ---
+                st.session_state.current_user = username
+                # ---------------------------------------
+                
                 st.success(f"✅ Benvenuto {username}!")
                 time.sleep(1)
                 st.rerun()
@@ -766,6 +774,18 @@ def main_app():
     # --- SIDEBAR ---
     with st.sidebar:
         st.title("🏛️ BOND TERMINAL")
+        
+        # --- NUOVO: BOX UTENTE ---
+        # Mostra chi è loggato con uno stile professionale
+        if 'current_user' in st.session_state and st.session_state.current_user:
+            st.markdown(f"""
+            <div style="background-color: #1b2d24; padding: 10px; border-radius: 5px; border-left: 5px solid #00CC96; margin-bottom: 10px;">
+                <span style="color: #b0b3c5; font-size: 12px;">UTENTE ATTIVO</span><br>
+                <span style="color: white; font-weight: bold; font-size: 16px;">👤 {st.session_state.current_user.capitalize()}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        # -------------------------
+
         st.caption("Professional Edition")
         
         st.divider()
@@ -822,13 +842,23 @@ def main_app():
             else:
                 aggiorna_db()
         
-        # Stats
-        files_count = len(os.listdir(DB_FOLDER)) if os.path.exists(DB_FOLDER) else 0
+        # Stats & Reset
+        csv_files = [f for f in os.listdir(DB_FOLDER) if f.endswith('.csv')] if os.path.exists(DB_FOLDER) else []
         total_sources = sum(len(v) for v in SOURCES_MAP.values())
-        completeness = (files_count / total_sources * 100) if total_sources > 0 else 0
+        completeness = (len(csv_files) / total_sources * 100) if total_sources > 0 else 0
         
-        st.metric("Files", f"{files_count}/{total_sources}", f"{completeness:.0f}%")
+        st.metric("Files", f"{len(csv_files)}/{total_sources}", f"{completeness:.0f}%")
         
+        if st.button("🗑️ Reset Database", use_container_width=True, help="Pulisci tutto"):
+            try:
+                for f in os.listdir(DB_FOLDER):
+                    os.remove(os.path.join(DB_FOLDER, f))
+                st.toast("Database pulito!", icon="🧹")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Errore: {e}")
+
         if st.session_state.scrape_count > 0:
             st.caption(f"Aggiornamenti effettuati: {st.session_state.scrape_count}")
         
