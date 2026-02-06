@@ -251,7 +251,7 @@ def main_app():
     with c2: isin = st.text_input("ISIN", placeholder="IT000...").strip().upper()
     with c3: 
         st.write("")
-        btn = st.button("ANALIZZA 🚀", use_container_width=True)
+        btn = st.button("CERCA 🚀", use_container_width=True)
 
     # LOGICA RICERCA IBRIDA
     if btn and isin:
