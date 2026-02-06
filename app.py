@@ -16,7 +16,7 @@ st.set_page_config(page_title="Bond Research Terminal", page_icon="🏛️", lay
 SEGRETO_UTENTE = "giulio"
 SEGRETO_PASSWORD = "Giulio99mac!"
 
-# --- NUOVA MAPPA FONTI (Logica "SimpleTools") ---
+# --- MAPPA FONTI ---
 SOURCES_MAP = {
     "🏛️ GOVERNATIVI (Stati: Italia, Germania, USA...)": [
         {"nome": "BTP ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
@@ -52,7 +52,26 @@ SOURCES_MAP = {
     ]
 }
 
-# --- FUNZIONI BACKEND (Caching & Anti-Ban) ---
+# --- LOGICA TASSAZIONE AUTOMATICA ---
+def determina_tasse(nome_fonte, descrizione_titolo):
+    # 1. Controllo Fonte (White List Stati)
+    fonti_whitelist = ["BTP", "BOT", "BUND", "OAT", "USA", "ROMANIA", "EUROPA", "TDS", "SOVRANAZIONALI"]
+    for w in fonti_whitelist:
+        if w in nome_fonte.upper():
+            return 12.5
+            
+    # 2. Controllo Nome Titolo (Se la fonte è generica, es. Green Bond)
+    desc_upper = descrizione_titolo.upper()
+    keywords_stato = ["REPUBLIC", "REPUBBLICA", "TREASURY", "KINGDOM", "REGNO", "BTP", "CCT", "BOT", "OAT", "BUND", "BEI ", "EIB ", "WORLD BANK"]
+    
+    for k in keywords_stato:
+        if k in desc_upper:
+            return 12.5
+            
+    # 3. Default: Corporate/Banche
+    return 26.0
+
+# --- FUNZIONI BACKEND ---
 def get_bond_data_protected(isin, category):
     @st.cache_data(ttl=300, show_spinner=False)
     def download_url(url):
@@ -60,7 +79,7 @@ def get_bond_data_protected(isin, category):
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/119.0.0.0 Safari/537.36'
         ]
-        time.sleep(random.uniform(0.4, 1.2)) # Ritardo per sembrare umani
+        time.sleep(random.uniform(0.4, 1.2)) 
         return requests.get(url, headers={'User-Agent': random.choice(user_agents)}, timeout=15)
 
     target_list = SOURCES_MAP.get(category, [])
@@ -105,90 +124,63 @@ def login():
             if u == SEGRETO_UTENTE and p == SEGRETO_PASSWORD:
                 st.session_state.logged_in = True
                 st.rerun()
-            else: st.error("Errore")
+            else: st.error("Credenziali non valide")
 
 def main_app():
     st.title("🏛️ Bond Research Terminal")
     st.caption("Strumento di analisi obbligazionaria accademica.")
     st.markdown("---")
 
-    # --- LEGENDA CHIARA ---
-    st.subheader("📍 Dove devo cercare?")
-    st.info("Il sistema divide i 28 database in 4 Macro-Aree per velocità e sicurezza:")
-    
+    # --- LEGENDA ---
+    st.subheader("📍 Guida alla Ricerca")
     col_leg1, col_leg2, col_leg3, col_leg4 = st.columns(4)
-    with col_leg1:
-        st.markdown("""
-        ### 🏛️ GOVERNATIVI
-        **Tutti gli Stati Sovrani**
-        * BTP, BOT (Italia)
-        * Bund (Germania)
-        * OAT (Francia)
-        * Treasury (USA)
-        * Romania, Europa...
-        """)
-    with col_leg2:
-        st.markdown("""
-        ### 🏦 FINANZIARI
-        **Banche e Assicurazioni**
-        * Intesa, UniCredit
-        * Goldman, Deutsche Bank
-        * Banche USA/UE
-        * *Include Subordinate*
-        """)
-    with col_leg3:
-        st.markdown("""
-        ### 🏭 CORPORATE
-        **Aziende Industriali**
-        * Eni, Enel, Stellantis
-        * Telecom, Ferrari
-        * Volkswagen, Renault
-        * Settore Energia
-        """)
-    with col_leg4:
-        st.markdown("""
-        ### 💎 SPECIALI
-        **Strutture Particolari**
-        * Zero Coupon (No cedola)
-        * Green Bonds
-        * Callable
-        * Scadenze lunghissime
-        """)
+    with col_leg1: st.success("🏛️ **GOVERNATIVI**\n\nStati: Italia, Germania, USA, Francia..."); 
+    with col_leg2: st.warning("🏦 **FINANZIARI**\n\nBanche: Intesa, UniCredit, Goldman..."); 
+    with col_leg3: st.info("🏭 **CORPORATE**\n\nAziede: Eni, Stellantis, Telecom..."); 
+    with col_leg4: st.error("💎 **SPECIALI**\n\nZero Coupon, Callable, Green..."); 
 
     st.markdown("---")
 
-    # --- INTERFACCIA RICERCA ---
+    # --- INPUT ---
     col_input, col_res = st.columns([1, 2])
 
     with col_input:
-        st.markdown("### 🔎 Impostazioni")
-        # Menu con le nuove categorie pulite
-        cat = st.selectbox("1. Categoria (Vedi sopra)", list(SOURCES_MAP.keys()))
-        isin = st.text_input("2. Codice ISIN", placeholder="Es. DE000...").strip().upper()
+        st.markdown("### 🔎 Parametri")
+        cat = st.selectbox("1. Categoria", list(SOURCES_MAP.keys()))
+        isin = st.text_input("2. Codice ISIN", placeholder="Es. IT0005566408").strip().upper()
         
-        # Logica Tasse Smart
-        is_gov = "GOVERNATIVI" in cat
-        tax = st.radio("3. Tassazione", [12.5, 26.0], index=0 if is_gov else 1, horizontal=True)
-        
+        st.write("")
         btn = st.button("ANALIZZA TITOLO 🚀", use_container_width=True)
-        st.caption("⚠️ **Disclaimer:** Dati a scopo didattico. Non è consulenza finanziaria.")
+        st.caption("⚠️ La tassazione verrà rilevata automaticamente.")
 
     with col_res:
         if btn and isin:
-            with st.spinner("Connessione ai database selezionati..."):
+            with st.spinner("Scansione database e calcolo fiscale..."):
                 d = get_bond_data_protected(isin, cat)
                 
                 if d:
+                    # RILEVAMENTO TASSE AUTOMATICO
+                    tax_rate_perc = determina_tasse(d['fonte'], d['desc'])
+                    t_val = tax_rate_perc / 100
+                    
                     # Calcoli
                     oggi = date.today()
                     valuta = oggi + timedelta(days=2)
                     anni = (d['sc'] - valuta).days / 365.25
-                    t_val = tax / 100
                     
                     rend_n = (((100 - d['pr'])*(1-t_val) + (d['ced'] * anni * (1-t_val))) / d['pr']) / anni
                     rend_l = (((100 - d['pr']) + (d['ced'] * anni)) / d['pr']) / anni
                     
+                    # Visualizzazione
                     st.success(f"✅ Trovato: **{d['desc']}**")
+                    
+                    # Etichetta Tasse Dinamica
+                    if tax_rate_perc == 12.5:
+                        st.markdown('<span style="background-color:#d4edda; color:#155724; padding:5px; border-radius:5px;">🏛️ Tassazione Agevolata: 12.5% (Titolo di Stato/White List)</span>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<span style="background-color:#fff3cd; color:#856404; padding:5px; border-radius:5px;">🏭 Tassazione Standard: 26% (Corporate/Bancario)</span>', unsafe_allow_html=True)
+                    
+                    st.write("")
                     
                     k1, k2, k3 = st.columns(3)
                     k1.metric("Prezzo", f"{d['pr']}€")
@@ -204,14 +196,14 @@ def main_app():
                         text=[f"{rend_n*100:.2f}%", f"{rend_l*100:.2f}%", f"{d['ced']}%"],
                         textposition='auto'
                     ))
-                    fig.update_layout(title="Analisi Redditività", height=300, margin=dict(l=0, r=0, t=30, b=0))
+                    fig.update_layout(title="Analisi Rendimento", height=300, margin=dict(l=0, r=0, t=30, b=0))
                     st.plotly_chart(fig, use_container_width=True)
 
-                    st.info(f"🔎 Fonte: {d['fonte']} | Tipo: {cat.split(' ')[1]}")
+                    st.info(f"🔎 Fonte: {d['fonte']}")
 
                 else:
                     st.error("❌ Titolo non trovato.")
-                    st.warning(f"Hai cercato in **{cat}**. Sei sicuro che l'ISIN appartenga a questa categoria? Controlla la legenda sopra.")
+                    st.warning(f"Controlla di aver scelto la categoria corretta nella legenda in alto.")
         else:
             st.info("👈 Inserisci ISIN e Categoria per iniziare.")
 
