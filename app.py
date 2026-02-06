@@ -6,15 +6,30 @@ from datetime import datetime, date, timedelta
 import numpy as np
 from scipy import optimize
 import time
-import random
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="Bond Club Stealth", page_icon="🕵️", layout="wide")
+st.set_page_config(page_title="Bond Club", page_icon="🏦")
 
-if 'access_granted' not in st.session_state: st.session_state.access_granted = False
-if 'portfolio' not in st.session_state: st.session_state.portfolio = [] 
+# Mappa Fonti Integrata
+SOURCES_MAP = {
+    "🇮🇹 Italia": [
+        {"nome": "BTP", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
+        {"nome": "BOT", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0}
+    ],
+    "🏦 Banche & Corp": [
+        {"nome": "BANCHE ITA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "CORPORATE ITA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporateitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "INTESA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=intesasanpaolo&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "UNICREDIT", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=unicredit&yieldtype=G&timescale=DUR", "freq": 1}
+    ],
+    "🌍 Estero": [
+        {"nome": "USA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR", "freq": 2},
+        {"nome": "ROMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=romania&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "GERMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR", "freq": 1}
+    ]
+}
 
-# --- FUNZIONI MATEMATICHE ---
+# --- FUNZIONI ---
 def xirr(cashflows, dates):
     if not cashflows or not dates: return None
     def xnpv(rate, cashflows, dates):
@@ -25,61 +40,24 @@ def xirr(cashflows, dates):
         return optimize.newton(lambda r: xnpv(r, cashflows, dates), 0.05)
     except: return None
 
-# --- MOTORE DI SCRAPING AVANZATO (Anti-Block) ---
-def get_bond_data_stealth(isin_code, category_key):
-    from app_config import SOURCES_MAP # Se preferisci tenere i link separati, o usa la mappa sotto
-    
-    # Mappa fonti integrata per semplicità
-    target_sources = SOURCES_MAP.get(category_key, [])
-    if category_key == "🌍 CERCA OVUNQUE (Lento!)":
-        target_sources = [s for sublist in SOURCES_MAP.values() for s in sublist]
-
-    # Lista di User-Agent per ruotare l'identità
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-    ]
-
-    session = requests.Session()
+def get_bond_data(isin_code, category):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    target_sources = SOURCES_MAP.get(category, [])
     
     for source in target_sources:
         try:
-            # Simula un comportamento umano: aspetta un istante casuale
-            time.sleep(random.uniform(0.5, 1.5))
-            
-            headers = {
-                'User-Agent': random.choice(user_agents),
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'it-IT,it;q=0.8,en-US;q=0.5,en;q=0.3',
-                'Referer': 'https://www.google.com/',
-                'DNT': '1'
-            }
-
-            response = session.get(source["url"], headers=headers, timeout=12)
-            
-            if response.status_code == 403:
-                st.error(f"🚫 Il sito ha bloccato Streamlit (Errore 403) su {source['nome']}. Riprova tra poco.")
-                continue
-            
-            if response.status_code != 200: continue
-            
-            # Parsing tabelle
-            df_list = pd.read_html(response.text, decimal=",", thousands=".")
-            
+            r = requests.get(source["url"], headers=headers, timeout=10)
+            if r.status_code != 200: continue
+            df_list = pd.read_html(r.text, decimal=",", thousands=".")
             for df in df_list:
-                # Ricerca colonne flessibile
                 col_isin = next((c for c in df.columns if 'isin' in str(c).lower() or 'codice' in str(c).lower()), None)
-                
                 if col_isin:
                     match = df[df[col_isin].astype(str).str.contains(isin_code, na=False)]
                     if not match.empty:
                         row = match.iloc[0]
-                        
-                        # Estrazione intelligente
-                        col_pr = next((c for c in df.columns if any(k in str(c).lower() for k in ['prezzo', 'price', 'last'])), None)
-                        col_scad = next((c for c in df.columns if any(k in str(c).lower() for k in ['scadenza', 'maturity', 'date'])), None)
-                        col_desc = next((c for c in df.columns if any(k in str(c).lower() for k in ['descrizione', 'nome'])), None)
+                        col_pr = next((c for c in df.columns if 'prezzo' in str(c).lower()), None)
+                        col_scad = next((c for c in df.columns if 'scadenza' in str(c).lower()), None)
+                        col_desc = next((c for c in df.columns if 'descrizione' in str(c).lower()), None)
                         
                         pr = float(str(row[col_pr]).replace(',', '.'))
                         scad_str = str(row[col_scad])
@@ -92,20 +70,27 @@ def get_bond_data_stealth(isin_code, category_key):
                         if m: ced = float(m.group(1).replace(',', '.'))
                         
                         return {"source": source["nome"], "freq": source["freq"], "prezzo": pr, "scadenza": scad, "cedola": ced, "desc": desc}
-        except Exception as e:
-            continue
+        except: continue
     return None
 
-# --- RE-INSERISCO LA MAPPA FONTI (Spostala qui se l'hai tolta) ---
-SOURCES_MAP = {
-    "🇮🇹 BTP & Italia": [
-        {"nome": "BTP (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
-        {"nome": "BOT (Italia)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0}
-    ],
-    # ... Aggiungi qui le altre 26 fonti che abbiamo visto prima ...
-}
+# --- UI ---
+st.title("🏛️ Bond Club Console")
 
-# ==========================================
-#              INTERFACCIA
-# ==========================================
-# (Mantieni la logica del Gatekeeper e delle Pagine viste nel messaggio precedente)
+if 'access' not in st.session_state: st.session_state.access = False
+
+if not st.session_state.access:
+    if st.button("ENTRA NEL CLUB"):
+        st.session_state.access = True
+        st.rerun()
+else:
+    cat = st.selectbox("Seleziona Mercato", options=list(SOURCES_MAP.keys()))
+    isin = st.text_input("Inserisci ISIN").strip().upper()
+    
+    if st.button("ANALIZZA") and isin:
+        with st.spinner("Ricerca in corso..."):
+            d = get_bond_data(isin, cat)
+            if d:
+                st.success(f"Trovato: {d['desc']}")
+                st.write(f"Prezzo: {d['prezzo']} | Cedola: {d['cedola']}% | Scadenza: {d[ 'scadenza']}")
+            else:
+                st.error("Titolo non trovato in questa categoria.")
