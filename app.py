@@ -15,29 +15,76 @@ st.set_page_config(page_title="Bond Research Terminal", page_icon="🏛️", lay
 
 st.markdown("""
 <style>
-    /* Stile Card e Bandierine */
-    .metric-card {background-color: #1e2130; padding: 15px; border-radius: 8px; border: 1px solid #3e445b; margin-bottom: 10px;}
-    .red-flag {border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px;}
-    .green-flag {border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px;}
-    .main-header {font-size: 24px; font-weight: bold; color: white;}
-    .sub-header {font-size: 14px; color: #b0b3c5;}
-    .legend-box { padding: 10px; border-radius: 5px; margin-bottom: 10px; font-size: 14px; }
-    .gov { background-color: #155724; border-left: 5px solid #28a745; color: #d4edda; }
-    .bank { background-color: #383d41; border-left: 5px solid #e2e3e5; color: #e2e3e5; }
-    .corp { background-color: #0c5460; border-left: 5px solid #17a2b8; color: #d1ecf1; }
-    .spec { background-color: #3e243f; border-left: 5px solid #d63384; color: #f8d7da; }
+    /* --- 1. STILE CARD RISCHIO (TESTO BIANCO) --- */
+    .metric-card {
+        background-color: #1e2130; 
+        padding: 15px; 
+        border-radius: 8px; 
+        border: 1px solid #3e445b; 
+        margin-bottom: 10px;
+        color: #ffffff !important; /* FORZATO BIANCO */
+    }
+    .metric-card b {
+        color: #00CC96; /* Etichette in verde brillante */
+    }
 
-    /* MENU CLEAN LOOK */
+    /* --- 2. MENU SIDEBAR (TESTO NERO) --- */
     [data-testid="stSidebar"] div.stButton > button {
-        background-color: transparent; border: none; text-align: left; color: #b0b3c5;
-        box-shadow: none; padding-left: 0; font-size: 16px; transition: all 0.2s;
+        background-color: transparent; 
+        border: none; 
+        text-align: left; 
+        color: #000000 !important; /* TESTO NERO */
+        box-shadow: none; 
+        padding-left: 0; 
+        font-size: 16px; 
+        font-weight: 600;
+        transition: all 0.2s;
     }
     [data-testid="stSidebar"] div.stButton > button:hover {
-        color: #ffffff; padding-left: 10px; background-color: transparent; border: none;
+        color: #333333 !important; /* Grigio scuro al passaggio */
+        padding-left: 10px; 
+        background-color: rgba(0,0,0,0.05); 
+        border-radius: 5px;
     }
     [data-testid="stSidebar"] div.stButton > button:focus {
-        box-shadow: none; color: #00CC96; font-weight: bold;
+        box-shadow: none; 
+        color: #000000 !important; 
+        font-weight: bold;
+        border-left: 3px solid #00CC96;
     }
+
+    /* --- 3. LEGENDA MIGLIORATA --- */
+    .legend-box { 
+        padding: 15px; 
+        border-radius: 8px; 
+        margin-bottom: 10px; 
+        font-size: 14px; 
+        color: white; 
+        height: 100%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        line-height: 1.5;
+    }
+    .legend-title { 
+        font-weight: bold; 
+        font-size: 16px; 
+        display: block; 
+        margin-bottom: 8px; 
+        border-bottom: 1px solid rgba(255,255,255,0.3); 
+        padding-bottom: 4px;
+        text-transform: uppercase;
+    }
+    
+    /* Colori Categorie Legenda */
+    .gov { background-color: #1a4a2e; border: 1px solid #28a745; } /* Verde Scuro */
+    .bank { background-color: #2c3e50; border: 1px solid #8e9aaf; } /* Blu Notte */
+    .corp { background-color: #1e3a5f; border: 1px solid #17a2b8; } /* Blu Petrolio */
+    .spec { background-color: #581845; border: 1px solid #d63384; } /* Viola Scuro */
+
+    /* Altri Stili Generali */
+    .red-flag {border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px; color: white;}
+    .green-flag {border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px; color: white;}
+    .main-header {font-size: 24px; font-weight: bold; color: white;}
+    .sub-header {font-size: 14px; color: #b0b3c5;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -49,12 +96,12 @@ SEGRETO_PASSWORD = "Giulio99mac!"
 DB_FOLDER = "bond_database"
 if not os.path.exists(DB_FOLDER): os.makedirs(DB_FOLDER)
 
-# --- STATO ---
+# --- STATO (Session State) ---
 if 'portfolio' not in st.session_state: st.session_state.portfolio = []
 if 'confronto' not in st.session_state: st.session_state.confronto = None
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'connection_status' not in st.session_state: st.session_state.connection_status = "In attesa..."
-if 'page' not in st.session_state: st.session_state.page = "Scanner" 
+if 'page' not in st.session_state: st.session_state.page = "Scanner" # Pagina Default
 
 # --- MAPPA FONTI ---
 SOURCES_MAP = {
@@ -87,7 +134,7 @@ SOURCES_MAP = {
     ]
 }
 
-# --- GESTIONE FILES ---
+# --- GESTIONE FILES & CONNESSIONE ---
 def get_last_update_time():
     try:
         if not os.path.exists(DB_FOLDER): return None
@@ -106,7 +153,7 @@ def check_connection_status():
         else: return f"🟡 STATUS {r.status_code}"
     except: return "🔴 OFFLINE"
 
-# --- RISK ENGINE ---
+# --- RISK ENGINE (CALCOLI FINANZIARI) ---
 def calcola_metriche_rischio(prezzo, cedola_pct, scadenza, freq):
     if prezzo <= 0 or freq == 0: return None
     cedola = cedola_pct / 100; face_value = 100
@@ -162,6 +209,7 @@ def processa_riga(row, info):
         return {"desc": desc, "pr": pr, "sc": sc, "ced": ced, "freq": info['freq'], "fonte": info['nome'], "taglio": taglio, "rating": rating}
     except: return None
 
+# --- AGGIORNAMENTO DB ---
 def aggiorna_db():
     p = st.progress(0); s = st.empty()
     tot = sum(len(v) for v in SOURCES_MAP.values()); c=0
@@ -207,18 +255,17 @@ def genera_flussi(d, imp, tax):
     df = pd.DataFrame(flussi).sort_values("Data"); df['Cum'] = df['Flow'].cumsum()
     return df
 
-# --- APP START ---
+# --- APP PRINCIPALE ---
 def login():
     st.title("🔒 Login"); u = st.text_input("User"); p = st.text_input("Pass", type="password")
     if st.button("Go"): 
         if u==SEGRETO_UTENTE and p==SEGRETO_PASSWORD: st.session_state.logged_in=True; st.rerun()
 
 def main_app():
-    # --- SIDEBAR MENU ---
+    # --- SIDEBAR (TESTO NERO) ---
     with st.sidebar:
-        st.header("MENU")
+        st.title("🏛️ MENU")
         
-        # MENU TESTUALE
         if st.button("🔎 Scanner Singolo", use_container_width=True): st.session_state.page = "Scanner"
         if st.button("⚔️ Confronto", use_container_width=True): st.session_state.page = "Confronto"
         if st.button("💼 Portafoglio", use_container_width=True): st.session_state.page = "Portafoglio"
@@ -250,16 +297,55 @@ def main_app():
 
     # --- PAGINA 1: SCANNER ---
     if st.session_state.page == "Scanner":
-        st.title("🔎 Scanner Obbligazionario Pro")
-        with st.expander("📍 GUIDA CATEGORIE", expanded=False):
-            l1, l2, l3, l4 = st.columns(4)
-            with l1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span>Italia (BTP), Germania, USA, EU</div>""", unsafe_allow_html=True)
-            with l2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span>Intesa, UniCredit, Subordinate</div>""", unsafe_allow_html=True)
-            with l3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span>Eni, Stellantis, Telecom</div>""", unsafe_allow_html=True)
-            with l4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span>Zero Coupon, 25y+, Callable</div>""", unsafe_allow_html=True)
+        st.title("🔎 Scanner Obbligazionario")
+        
+        # --- LEGENDA FISSA ESPLICITA (RICHIESTA) ---
+        st.markdown("### 📍 Guida alle Categorie")
+        st.caption("Usa questa guida per scegliere la categoria corretta nel menu qui sotto.")
+        
+        l1, l2, l3, l4 = st.columns(4)
+        
+        with l1:
+            st.markdown("""
+            <div class="legend-box gov">
+                <span class="legend-title">🏛️ GOVERNATIVI</span>
+                <b>Titoli di Stato (Sovrani)</b><br>
+                Qui trovi i debiti pubblici nazionali.<br>
+                👉 <i>Italia (BTP, BOT), Germania (Bund), Francia (OAT), USA (Treasury), Romania, EU.</i>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with l2:
+            st.markdown("""
+            <div class="legend-box bank">
+                <span class="legend-title">🏦 FINANZIARI</span>
+                <b>Banche & Assicurazioni</b><br>
+                Obbligazioni emesse da istituti finanziari.<br>
+                👉 <i>Intesa, UniCredit, Mediobanca, Goldman Sachs e titoli Subordinati.</i>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with l3:
+            st.markdown("""
+            <div class="legend-box corp">
+                <span class="legend-title">🏭 CORPORATE</span>
+                <b>Aziende (Industria/Servizi)</b><br>
+                Debito emesso da società private.<br>
+                👉 <i>Eni, Enel, Stellantis, Settore Auto, Energia, Telecomunicazioni.</i>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with l4:
+            st.markdown("""
+            <div class="legend-box spec">
+                <span class="legend-title">💎 SPECIALI</span>
+                <b>Strutture Particolari</b><br>
+                Titoli con caratteristiche uniche.<br>
+                👉 <i>Zero Coupon (senza cedola), Callable (richiamabili), Green Bonds, 25+ anni.</i>
+            </div>
+            """, unsafe_allow_html=True)
 
         st.divider()
-        # --- RICERCA TITOLO (SENZA IMPORTO) ---
         c1, c2 = st.columns([2, 1])
         cat = c1.selectbox("Seleziona Categoria", list(SOURCES_MAP.keys()))
         isin = c2.text_input("Inserisci ISIN", placeholder="Cerca...").strip().upper()
@@ -269,11 +355,11 @@ def main_app():
             d = processa_riga(row, info) if row is not None else None
             
             if d:
-                # Titolo Trovato -> Calcoli Iniziali
+                # Calcoli
                 tax = determina_tasse(d['fonte'], d['desc'])
                 risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                 
-                # --- VISUALIZZAZIONE DATI (PRIMA DELLA SIMULAZIONE) ---
+                # HEADER
                 st.markdown(f"""
                 <div style="background-color: #1e2130; padding: 20px; border-radius: 10px; border-left: 6px solid #00CC96; margin: 20px 0;">
                     <div class="main-header">{d['desc']}</div>
@@ -290,29 +376,30 @@ def main_app():
                 m4.metric("Durata", f"{dur:.1f} Y")
                 m5.metric("Taglio", f"{d['taglio']:,.0f}€")
 
-                # --- NUOVA SEZIONE: SIMULATORE CAPITALE ---
+                # --- SIMULATORE SPOSTATO QUI ---
                 st.divider()
                 st.subheader("💶 Simulatore Rendimento")
-                st.caption("Inserisci quanto vuoi investire per vedere i flussi di cassa reali.")
-                
+                st.caption("Quanto vuoi investire?")
                 col_sim1, col_sim2 = st.columns([1, 2])
                 with col_sim1:
-                    importo = st.number_input("Capitale da Investire (€)", value=10000, step=1000)
+                    importo = st.number_input("Capitale (€)", value=10000, step=1000)
                 
-                # Calcolo Flussi basato sull'importo scelto
                 df_flussi = genera_flussi(d, importo, tax)
                 profitto = df_flussi['Flow'].sum() - importo
                 
                 with col_sim2:
-                    st.metric("Profitto Netto Stimato", f"{profitto:+.2f}€", f"Su {importo:,.0f}€ investiti")
+                    st.metric("Profitto Netto Totale", f"{profitto:+.2f}€", f"Su {importo:,.0f}€")
 
                 st.divider()
-                
-                # SEZIONI SOTTOSTANTI
+                # RISCHIO (TESTO BIANCO)
                 r1, r2 = st.columns([1, 2])
                 with r1:
                     st.subheader("⚠️ Rischio")
-                    if risk: st.markdown(f"""<div class="metric-card"><b>Mod. Duration:</b> {risk['mod_dur']:.2f}</div><div class="metric-card"><b>Convexity:</b> {risk['convexity']:.2f}</div><div class="metric-card"><b>DV01:</b> {risk['dv01']*(importo/100):.2f}€</div>""", unsafe_allow_html=True)
+                    if risk: st.markdown(f"""
+                        <div class="metric-card"><b>Mod. Duration:</b> {risk['mod_dur']:.2f}<br><span style="font-size:12px;color:#cccccc">Sensibilità ai tassi</span></div>
+                        <div class="metric-card"><b>Convexity:</b> {risk['convexity']:.2f}</div>
+                        <div class="metric-card"><b>DV01 (10k€):</b> {risk['dv01']*(importo/100):.2f}€</div>
+                        """, unsafe_allow_html=True)
                 with r2:
                     st.subheader("⚡ Stress Test")
                     if risk:
