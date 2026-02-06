@@ -10,49 +10,49 @@ import random
 import plotly.graph_objects as go
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="Bond Research Terminal", page_icon="🧭", layout="wide")
+st.set_page_config(page_title="Bond Research Terminal", page_icon="🏛️", layout="wide")
 
-# CREDENZIALI PERSONALIZZATE
+# CREDENZIALI
 SEGRETO_UTENTE = "giulio"
 SEGRETO_PASSWORD = "Giulio99mac!"
 
-# --- MAPPA FONTI ---
+# --- NUOVA MAPPA FONTI (Logica "SimpleTools") ---
 SOURCES_MAP = {
-    "🇮🇹 Titoli di Stato (BTP, BOT)": [
+    "🏛️ GOVERNATIVI (Stati: Italia, Germania, USA...)": [
         {"nome": "BTP ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
-        {"nome": "BOT", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0},
+        {"nome": "BOT ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0},
+        {"nome": "BUND GERMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "OAT FRANCIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=francia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "USA TREASURIES", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR", "freq": 2},
+        {"nome": "ROMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=romania&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "EUROPA MIX", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=europa&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "TDS 2026", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=sovtds2026&yieldtype=G&timescale=DUR", "freq": 1}
     ],
-    "🏦 Banche Italiane (Intesa, UniCredit)": [
-        {"nome": "BANCHE ITA MIX", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
+    "🏦 FINANZIARI (Banche & Subordinate)": [
+        {"nome": "BANCHE ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "INTESA SANPAOLO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=intesasanpaolo&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "UNICREDIT", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=unicredit&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "MEDIOBANCA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=mediobanca&yieldtype=G&timescale=DUR", "freq": 1}
-    ],
-    "🏭 Aziende (Eni, Auto, Telecom)": [
-        {"nome": "CORPORATE ITA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporateitalia&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "CORPORATE GEN", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "TELECOM", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=telecom&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "AUTOMOTIVE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=automotive&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "ENERGY", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=petrolio&yieldtype=G&timescale=DUR", "freq": 1}
-    ],
-    "🌍 Estero (USA, Goldman, Bund)": [
-        {"nome": "USA TREASURY", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR", "freq": 2},
+        {"nome": "MEDIOBANCA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=mediobanca&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "BANCHE EUROPA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheeuropee&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BANCHE USA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheusa&yieldtype=G&timescale=DUR", "freq": 2},
-        {"nome": "BANCHE EU", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheeuropee&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "BUND", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "ROMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=romania&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "EUROPA MIX", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=europa&yieldtype=G&timescale=DUR", "freq": 1}
+        {"nome": "SUBORDINATE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=subordinate&yieldtype=G&timescale=DUR", "freq": 1}
     ],
-    "💎 Speciali (Sub, Zero, Green)": [
-        {"nome": "SUBORDINATE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=subordinate&yieldtype=G&timescale=DUR", "freq": 1},
+    "🏭 CORPORATE (Aziende Industriali)": [
+        {"nome": "CORPORATE ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporateitalia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "CORPORATE MONDO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "AUTOMOTIVE (Auto)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=automotive&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ENERGY (Petrolio)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=petrolio&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "TELECOM (Tlc)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=telecom&yieldtype=G&timescale=DUR", "freq": 1}
+    ],
+    "💎 SPECIALI (Zero Coupon, Green, ecc.)": [
         {"nome": "ZERO COUPON", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=zerocoupon&yieldtype=G&timescale=DUR", "freq": 0},
         {"nome": "CALLABLE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=callable&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "GREEN BONDS", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=greenbond&yieldtype=G&timescale=DUR", "freq": 1}
+        {"nome": "GREEN BONDS", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=greenbond&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "LUNGHISSIMI (25Y+)", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=25yearsEUR&yieldtype=G&timescale=DUR", "freq": 1}
     ]
 }
 
-# --- FUNZIONI BACKEND ---
+# --- FUNZIONI BACKEND (Caching & Anti-Ban) ---
 def get_bond_data_protected(isin, category):
     @st.cache_data(ttl=300, show_spinner=False)
     def download_url(url):
@@ -60,7 +60,7 @@ def get_bond_data_protected(isin, category):
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/119.0.0.0 Safari/537.36'
         ]
-        time.sleep(random.uniform(0.4, 1.2)) # Ritardo umano
+        time.sleep(random.uniform(0.4, 1.2)) # Ritardo per sembrare umani
         return requests.get(url, headers={'User-Agent': random.choice(user_agents)}, timeout=15)
 
     target_list = SOURCES_MAP.get(category, [])
@@ -105,47 +105,77 @@ def login():
             if u == SEGRETO_UTENTE and p == SEGRETO_PASSWORD:
                 st.session_state.logged_in = True
                 st.rerun()
-            else: st.error("Credenziali non valide")
+            else: st.error("Errore")
 
 def main_app():
-    st.title("🧭 Bond Research Compass")
-    st.caption("Strumento di analisi comparativa per investitori privati.")
+    st.title("🏛️ Bond Research Terminal")
+    st.caption("Strumento di analisi obbligazionaria accademica.")
     st.markdown("---")
 
-    # --- LEGENDA VISIVA ---
-    st.subheader("💡 Come scegliere la categoria giusta?")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.info("**🇮🇹 Titoli di Stato**\n\nScegli se cerchi:\n* BTP / BTP Valore\n* BOT / CCT\n* *ISIN inizia con IT*")
-    with c2:
-        st.info("**🏦 Banche Italiane**\n\nScegli se cerchi:\n* Intesa Sanpaolo\n* UniCredit\n* Mediobanca")
-    with c3:
-        st.info("**🏭 Aziende**\n\nScegli se cerchi:\n* Eni, Enel, Ferrari\n* Telecom, Stellantis\n* *Corporate Bond*")
-    with c4:
-        st.info("**🌍 Estero / Mix**\n\nScegli se cerchi:\n* USA / Germania\n* Goldman / Deutsche\n* *ISIN stranieri*")
+    # --- LEGENDA CHIARA ---
+    st.subheader("📍 Dove devo cercare?")
+    st.info("Il sistema divide i 28 database in 4 Macro-Aree per velocità e sicurezza:")
+    
+    col_leg1, col_leg2, col_leg3, col_leg4 = st.columns(4)
+    with col_leg1:
+        st.markdown("""
+        ### 🏛️ GOVERNATIVI
+        **Tutti gli Stati Sovrani**
+        * BTP, BOT (Italia)
+        * Bund (Germania)
+        * OAT (Francia)
+        * Treasury (USA)
+        * Romania, Europa...
+        """)
+    with col_leg2:
+        st.markdown("""
+        ### 🏦 FINANZIARI
+        **Banche e Assicurazioni**
+        * Intesa, UniCredit
+        * Goldman, Deutsche Bank
+        * Banche USA/UE
+        * *Include Subordinate*
+        """)
+    with col_leg3:
+        st.markdown("""
+        ### 🏭 CORPORATE
+        **Aziende Industriali**
+        * Eni, Enel, Stellantis
+        * Telecom, Ferrari
+        * Volkswagen, Renault
+        * Settore Energia
+        """)
+    with col_leg4:
+        st.markdown("""
+        ### 💎 SPECIALI
+        **Strutture Particolari**
+        * Zero Coupon (No cedola)
+        * Green Bonds
+        * Callable
+        * Scadenze lunghissime
+        """)
 
     st.markdown("---")
 
-    # --- INTERFACCIA DI RICERCA ---
+    # --- INTERFACCIA RICERCA ---
     col_input, col_res = st.columns([1, 2])
 
     with col_input:
-        st.markdown("### 🔎 Parametri Ricerca")
-        cat = st.selectbox("1. Categoria (Vedi legenda sopra)", list(SOURCES_MAP.keys()))
-        isin = st.text_input("2. Codice ISIN", placeholder="Es. IT0005566408").strip().upper()
+        st.markdown("### 🔎 Impostazioni")
+        # Menu con le nuove categorie pulite
+        cat = st.selectbox("1. Categoria (Vedi sopra)", list(SOURCES_MAP.keys()))
+        isin = st.text_input("2. Codice ISIN", placeholder="Es. DE000...").strip().upper()
         
-        # Auto-Set Tasse
-        idx_tax = 0 if "Stato" in cat else 1
-        tax = st.radio("3. Tassazione", [12.5, 26.0], index=idx_tax, horizontal=True)
+        # Logica Tasse Smart
+        is_gov = "GOVERNATIVI" in cat
+        tax = st.radio("3. Tassazione", [12.5, 26.0], index=0 if is_gov else 1, horizontal=True)
         
         btn = st.button("ANALIZZA TITOLO 🚀", use_container_width=True)
-        
-        # Disclaimer compatto
-        st.caption("⚠️ **Disclaimer:** Dati a scopo didattico. Non è consulenza finanziaria. L'autore non è responsabile per inesattezze.")
+        st.caption("⚠️ **Disclaimer:** Dati a scopo didattico. Non è consulenza finanziaria.")
 
     with col_res:
         if btn and isin:
-            with st.spinner("Connessione ai mercati in corso..."):
+            with st.spinner("Connessione ai database selezionati..."):
                 d = get_bond_data_protected(isin, cat)
                 
                 if d:
@@ -158,7 +188,6 @@ def main_app():
                     rend_n = (((100 - d['pr'])*(1-t_val) + (d['ced'] * anni * (1-t_val))) / d['pr']) / anni
                     rend_l = (((100 - d['pr']) + (d['ced'] * anni)) / d['pr']) / anni
                     
-                    # VISUALIZZAZIONE RISULTATO
                     st.success(f"✅ Trovato: **{d['desc']}**")
                     
                     k1, k2, k3 = st.columns(3)
@@ -166,7 +195,7 @@ def main_app():
                     k2.metric("Rendimento Netto", f"{rend_n*100:.2f}%", delta_color="normal")
                     k3.metric("Scadenza", d['sc'].strftime('%d/%m/%Y'))
                     
-                    # Grafico a barre orizzontali
+                    # Grafico
                     fig = go.Figure(go.Bar(
                         x=[rend_n*100, rend_l*100, d['ced']],
                         y=['Rend. Netto', 'Rend. Lordo', 'Cedola'],
@@ -175,21 +204,16 @@ def main_app():
                         text=[f"{rend_n*100:.2f}%", f"{rend_l*100:.2f}%", f"{d['ced']}%"],
                         textposition='auto'
                     ))
-                    fig.update_layout(title="Analisi Rendimento", height=300, margin=dict(l=0, r=0, t=30, b=0))
+                    fig.update_layout(title="Analisi Redditività", height=300, margin=dict(l=0, r=0, t=30, b=0))
                     st.plotly_chart(fig, use_container_width=True)
 
-                    st.info(f"🔎 Fonte: {d['fonte']} | Frequenza: {'Annuale/Semestrale' if d['freq']>0 else 'Zero Coupon'}")
+                    st.info(f"🔎 Fonte: {d['fonte']} | Tipo: {cat.split(' ')[1]}")
 
                 else:
                     st.error("❌ Titolo non trovato.")
-                    st.markdown("""
-                    **Possibili cause:**
-                    1. Hai scelto la **categoria sbagliata**? (Controlla la legenda in alto)
-                    2. L'ISIN è corretto?
-                    3. Il titolo è appena stato emesso? (Riprova domani)
-                    """)
+                    st.warning(f"Hai cercato in **{cat}**. Sei sicuro che l'ISIN appartenga a questa categoria? Controlla la legenda sopra.")
         else:
-            st.info("👈 Inserisci i dati a sinistra per vedere l'analisi qui.")
+            st.info("👈 Inserisci ISIN e Categoria per iniziare.")
 
     # Logout
     if st.sidebar.button("Logout"):
