@@ -39,7 +39,7 @@ def calcola_rendimento(prezzo, cedola_pct, scadenza, investito, tasse_pct, freq_
     cedola_annua_netta = (cedola_pct / 100) * nominale * (1 - tasse_pct/100)
     cedola_periodica = cedola_annua_netta / (12 / freq_mesi)
     
-    cursor = today_f = oggi
+    cursor = oggi
     
     while True:
         cursor = cursor + relativedelta(months=+freq_mesi)
@@ -160,16 +160,12 @@ if submit:
         st.write("#### Piano Cedolare")
         st.dataframe(df, height=300)
     
-    # Aggiungi al portafoglio (CON STATUS)
+    # Aggiungi al portafoglio
     if st.button("➕ Aggiungi questo bond al Portafoglio"):
         st.session_state.portafoglio.append({
-            "Nome": nome, 
-            "Investito": inv, 
-            "Rendimento": res['tir'], 
-            "Flussi": res['flussi'],
-            "Status": "In attesa" # <--- NUOVA COLONNA RICHIESTA
+            "Nome": nome, "Investito": inv, "Rendimento": res['tir'], "Flussi": res['flussi']
         })
-        st.success("Aggiunto con status 'In attesa'!")
+        st.success("Aggiunto!")
         st.rerun()
 
 # --- PORTAFOGLIO ---
@@ -177,8 +173,7 @@ if st.session_state.portafoglio:
     st.divider()
     st.header(f"💼 Il tuo Portafoglio ({len(st.session_state.portafoglio)} titoli)")
     
-    # Mostra la tabella includendo la colonna Status
-    df_p = pd.DataFrame(st.session_state.portafoglio)[["Nome", "Investito", "Rendimento", "Status"]]
+    df_p = pd.DataFrame(st.session_state.portafoglio)[["Nome", "Investito", "Rendimento"]]
     st.table(df_p)
     
     # Grafico Aggregato
