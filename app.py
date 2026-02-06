@@ -20,14 +20,11 @@ st.markdown("""
     .green-flag {border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px;}
     .main-header {font-size: 24px; font-weight: bold; color: white;}
     .sub-header {font-size: 14px; color: #b0b3c5;}
-    
-    /* Stile Legenda */
-    .legend-box { padding: 15px; border-radius: 8px; margin-bottom: 15px; font-size: 14px; height: 100%; }
-    .gov { background-color: #1a472a; border: 1px solid #28a745; color: #d4edda; }
-    .bank { background-color: #2c3036; border: 1px solid #6c757d; color: #e2e3e5; }
-    .corp { background-color: #0f3d4a; border: 1px solid #17a2b8; color: #d1ecf1; }
-    .spec { background-color: #4a1d2f; border: 1px solid #d63384; color: #f8d7da; }
-    .legend-title { font-weight: bold; font-size: 16px; margin-bottom: 5px; display: block; }
+    .legend-box { padding: 10px; border-radius: 5px; margin-bottom: 10px; font-size: 14px; }
+    .gov { background-color: #155724; border-left: 5px solid #28a745; color: #d4edda; }
+    .bank { background-color: #383d41; border-left: 5px solid #e2e3e5; color: #e2e3e5; }
+    .corp { background-color: #0c5460; border-left: 5px solid #17a2b8; color: #d1ecf1; }
+    .spec { background-color: #3e243f; border-left: 5px solid #d63384; color: #f8d7da; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -43,6 +40,7 @@ if not os.path.exists(DB_FOLDER): os.makedirs(DB_FOLDER)
 if 'portfolio' not in st.session_state: st.session_state.portfolio = []
 if 'confronto' not in st.session_state: st.session_state.confronto = None
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'connection_status' not in st.session_state: st.session_state.connection_status = "In attesa..."
 
 # --- MAPPA FONTI ---
 SOURCES_MAP = {
@@ -74,6 +72,33 @@ SOURCES_MAP = {
         {"nome": "LUNGHI_25Y", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=25yearsEUR&yieldtype=G&timescale=DUR", "freq": 1}
     ]
 }
+
+# --- GESTIONE FILES & STATO ---
+def get_last_update_time():
+    """Recupera la data dell'ultimo file CSV modificato"""
+    try:
+        if not os.path.exists(DB_FOLDER): return None
+        files = [os.path.join(DB_FOLDER, f) for f in os.listdir(DB_FOLDER) if f.endswith('.csv')]
+        if not files: return None
+        newest_file = max(files, key=os.path.getmtime)
+        timestamp = os.path.getmtime(newest_file)
+        return datetime.fromtimestamp(timestamp)
+    except: return None
+
+def check_connection_status():
+    """Prova a pingare Google e poi il sito target per vedere se siamo bannati"""
+    try:
+        # Test 1: Internet Generale
+        requests.get("https://www.google.com", timeout=3)
+        
+        # Test 2: Sito Target (Solo Header per non scaricare tutto)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        r = requests.head("https://www.simpletoolsforinvestors.eu/", headers=headers, timeout=5)
+        
+        if r.status_code == 200: return "🟢 ONLINE"
+        elif r.status_code == 403 or r.status_code == 429: return "🔴 BANNATO (403/429)"
+        else: return f"🟡 STATUS {r.status_code}"
+    except: return "🔴 OFFLINE"
 
 # --- MOTORE RISK & MATH ---
 def calcola_metriche_rischio(prezzo, cedola_pct, scadenza, freq):
@@ -153,7 +178,7 @@ def aggiorna_db():
                         df.to_csv(os.path.join(DB_FOLDER, f"{src['nome']}.csv"), index=False)
                         break
             except: pass
-    s.empty(); p.empty(); st.toast("Database Aggiornato!", icon="✅")
+    s.empty(); p.empty(); st.toast("Database Aggiornato!", icon="✅"); st.rerun()
 
 def cerca_db(isin, cat):
     for src in SOURCES_MAP.get(cat, []):
@@ -189,81 +214,65 @@ def login():
         if u==SEGRETO_UTENTE and p==SEGRETO_PASSWORD: st.session_state.logged_in=True; st.rerun()
 
 def main_app():
-    # --- SIDEBAR MENU ---
+    # --- SIDEBAR: PLANCIA DI COMANDO ---
     with st.sidebar:
         st.title("🏛️ MENU")
         page = st.radio("Navigazione", ["🔎 Scanner Singolo", "⚔️ Confronto", "💼 Portafoglio"])
         
         st.divider()
-        st.header("⚙️ Dati & Sim")
-        if st.button("🔄 Aggiorna Database (Safe)"): aggiorna_db()
-        files = len(os.listdir(DB_FOLDER)) if os.path.exists(DB_FOLDER) else 0
-        st.caption(f"DB Locale: {files}/28 files")
+        st.header("⚙️ STATO SISTEMA")
         
-        importo = st.number_input("Capitale Sim (€)", value=10000, step=1000)
+        # 1. INFO DATA ULTIMO AGGIORNAMENTO
+        last_date = get_last_update_time()
+        if last_date:
+            fmt = last_date.strftime("%d/%m %H:%M")
+            if last_date.date() == date.today():
+                st.success(f"📅 Aggiornato: {fmt}")
+            else:
+                st.warning(f"⚠️ Vecchio: {fmt}")
+        else:
+            st.error("❌ Nessun Dato")
+            
+        # 2. TEST CONNESSIONE (BAN CHECK)
+        c1, c2 = st.columns([1,2])
+        if c1.button("📶"):
+            st.session_state.connection_status = check_connection_status()
+        c2.markdown(f"**{st.session_state.connection_status}**")
+        
+        # 3. TASTO AGGIORNAMENTO
+        if st.button("🔄 Aggiorna Database (Safe Mode)"):
+            if "BANNATO" in st.session_state.connection_status:
+                st.error("Non aggiornare! Sei bannato.")
+            else:
+                aggiorna_db()
+        
+        st.caption(f"Files Locali: {len(os.listdir(DB_FOLDER)) if os.path.exists(DB_FOLDER) else 0}/28")
         
         st.divider()
+        importo = st.number_input("Capitale Sim (€)", value=10000, step=1000)
         if st.button("Esci"): st.session_state.logged_in=False; st.rerun()
 
     # --- PAGINA 1: SCANNER PRO ---
     if page == "🔎 Scanner Singolo":
         st.title("🔎 Scanner Obbligazionario Pro")
         
-        # --- LEGENDA DETTAGLIATA (RICHIESTA UTENTE) ---
-        with st.expander("📍 GUIDA CATEGORIE (Clicca per espandere)", expanded=True):
+        # LEGENDA COMPLETA
+        with st.expander("📍 GUIDA CATEGORIE (Clicca per espandere)", expanded=False):
             st.markdown("Ecco dove cercare il tuo titolo:")
             l1, l2, l3, l4 = st.columns(4)
             with l1:
-                st.markdown("""
-                <div class="legend-box gov">
-                    <span class="legend-title">🏛️ GOVERNATIVI</span>
-                    <b>Titoli di Stato Sovrani</b><br>
-                    • Italia (BTP, BOT, CCT)<br>
-                    • Germania (Bund)<br>
-                    • Francia (OAT)<br>
-                    • USA (Treasury)<br>
-                    • Romania, Ungheria<br>
-                    • Unione Europea (EU Mix)
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span><b>Titoli di Stato</b><br>• Italia (BTP, BOT)<br>• Germania, Francia<br>• USA, Romania<br>• EU Mix</div>""", unsafe_allow_html=True)
             with l2:
-                st.markdown("""
-                <div class="legend-box bank">
-                    <span class="legend-title">🏦 FINANZIARI</span>
-                    <b>Banche & Assicurazioni</b><br>
-                    • Intesa, UniCredit<br>
-                    • Mediobanca<br>
-                    • Banche Europee/USA<br>
-                    • <i>Include Subordinate</i>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span><b>Banche</b><br>• Intesa, UniCredit<br>• Banche UE/USA<br>• Subordinate</div>""", unsafe_allow_html=True)
             with l3:
-                st.markdown("""
-                <div class="legend-box corp">
-                    <span class="legend-title">🏭 CORPORATE</span>
-                    <b>Aziende Industriali</b><br>
-                    • Eni, Enel, Stellantis<br>
-                    • Settore Auto & Energy<br>
-                    • Telecom<br>
-                    • Multinazionali Estere
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span><b>Aziende</b><br>• Eni, Stellantis<br>• Auto & Energy<br>• Telecom</div>""", unsafe_allow_html=True)
             with l4:
-                st.markdown("""
-                <div class="legend-box spec">
-                    <span class="legend-title">💎 SPECIALI</span>
-                    <b>Strutture Particolari</b><br>
-                    • Zero Coupon (No cedola)<br>
-                    • Callable (Richiamabili)<br>
-                    • Green Bonds<br>
-                    • Lunghissimi (25+ anni)
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span><b>Misti</b><br>• Zero Coupon<br>• Callable<br>• 25+ anni</div>""", unsafe_allow_html=True)
 
         # INPUT
         st.divider()
         c1, c2 = st.columns([2, 1])
-        cat = c1.selectbox("Seleziona Categoria Database", list(SOURCES_MAP.keys()))
+        cat = c1.selectbox("Seleziona Categoria", list(SOURCES_MAP.keys()))
         isin = c2.text_input("Inserisci ISIN", placeholder="Cerca...").strip().upper()
         
         if isin:
@@ -339,7 +348,7 @@ def main_app():
                             st.success("Salvato!")
 
             else:
-                st.info("👈 Inserisci un ISIN. Se non trova nulla, clicca 'Aggiorna Database' nel menu.")
+                st.info("👈 Inserisci un ISIN. Se non trova nulla, clicca 'Aggiorna Database' nel menu laterale.")
 
     # --- PAGINA 2: CONFRONTO ---
     elif page == "⚔️ Confronto":
