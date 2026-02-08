@@ -733,7 +733,144 @@ def analizza_bond_quality(dati, risk_metrics, tax_rate):
         "score": score,
         "ytm_netto": risk_metrics['ytm'] * (1 - tax_rate / 100) if risk_metrics else 0
     }
+============================================================================
+# 🆕 FUNZIONALITÀ AVANZATE
+# ============================================================================
 
+def smart_compare_bonds(bond_a_data, bond_b_data):
+    """Confronto intelligente con warning incompatibilità"""
+    warnings = []
+    compatibility_score = 100
+    
+    anni_a = (bond_a_data['sc'] - date.today()).days / 365.25
+    anni_b = (bond_b_data['sc'] - date.today()).days / 365.25
+    
+    year_diff = abs(anni_a - anni_b)
+    if year_diff > 5:
+        compatibility_score -= 30
+        warnings.append({
+            'level': 'warning',
+            'message': f'⚠️ Scadenze diverse: {anni_a:.1f} vs {anni_b:.1f} anni'
+        })
+    if year_diff > 15:
+        compatibility_score -= 30
+        warnings.append({
+            'level': 'error',
+            'message': f'🛑 Gap {year_diff:.0f} anni ECCESSIVO!'
+        })
+    
+    risk_levels = {'aaa': 1, 'aa': 2, 'a': 3, 'bbb': 4, 'bb': 5, 'b': 6}
+    rating_a = bond_a_data['rating'].lower()[:3]
+    rating_b = bond_b_data['rating'].lower()[:3]
+    risk_a = next((v for k,v in risk_levels.items() if k in rating_a), 5)
+    risk_b = next((v for k,v in risk_levels.items() if k in rating_b), 5)
+    
+    if abs(risk_a - risk_b) >= 2:
+        compatibility_score -= 25
+        warnings.append({
+            'level': 'warning',
+            'message': f'⚠️ Rating {bond_a_data["rating"]} vs {bond_b_data["rating"]} NON comparabili!'
+        })
+    
+    if compatibility_score >= 70:
+        verdict = "✅ CONFRONTO VALIDO"
+    elif compatibility_score >= 40:
+        verdict = "⚠️ PARZIALMENTE VALIDO"
+    else:
+        verdict = "🛑 CONFRONTO INAPPROPRIATO"
+    
+    return {
+        'verdict': verdict,
+        'compatibility_score': compatibility_score,
+        'warnings': warnings
+    }
+
+def calcola_rendimento_reale(bond_data, investment, inflation=2.0, broker_fees=0, custody_yearly=34.20):
+    """Calcola rendimento reale dopo tasse, inflazione, costi"""
+    tax_rate = determina_tasse(bond_data['fonte'], bond_data['desc'])
+    nominale = (investment * 100) / bond_data['pr']
+    anni = (bond_data['sc'] - date.today()).days / 365.25
+    
+    if anni <= 0:
+        return {'error': 'Bond scaduto'}
+    
+    risk = calcola_metriche_rischio(bond_data['pr'], bond_data['ced'], bond_data['sc'], bond_data['freq'])
+    ytm_lordo = risk['ytm'] if risk else 0
+    
+    # Cedole
+    tot_cedole_lorde = tot_cedole_nette = 0
+    if bond_data['freq'] > 0:
+        n_ced = int(anni * bond_data['freq'])
+        ced_lorda = (nominale * bond_data['ced'] / 100) / bond_data['freq']
+        tot_cedole_lorde = ced_lorda * n_ced
+        tot_cedole_nette = tot_cedole_lorde * (1 - tax_rate/100)
+    
+    # Capital gain
+    capital_gain = max(0, nominale - investment)
+    tassa_cg = capital_gain * (tax_rate / 100)
+    rimborso_netto = nominale - tassa_cg
+    
+    # Totali
+    incasso_lordo = tot_cedole_lorde + nominale
+    incasso_netto_fiscale = tot_cedole_nette + rimborso_netto
+    costi_tot = (broker_fees * 2) + (custody_yearly * anni)
+    incasso_netto_finale = incasso_netto_fiscale - costi_tot
+    
+    # Rendimenti
+    ytm_netto_finale = ((incasso_netto_finale / investment) ** (1/anni) - 1) * 100
+    ytm_reale = ytm_netto_finale - inflation
+    
+    # Potere acquisto
+    valore_reale = incasso_netto_finale / ((1 + inflation/100) ** anni)
+    
+    return {
+        'breakdown': {
+            'investimento': investment,
+            'incasso_netto_finale': incasso_netto_finale,
+            'tasse_totali': (tot_cedole_lorde - tot_cedole_nette) + tassa_cg,
+            'costi_totali': costi_tot
+        },
+        'rendimenti': {
+            'ytm_lordo': ytm_lordo,
+            'ytm_netto_finale': ytm_netto_finale,
+            'ytm_reale': ytm_reale
+        },
+        'potere_acquisto': {
+            'valore_reale': valore_reale,
+            'perdita_pct': ((investment - valore_reale) / investment * 100) if valore_reale < investment else 0
+        }
+    }
+
+@st.cache_data(ttl=300)
+def carica_tutti_bond_db():
+    """Carica tutti i bond in un DataFrame"""
+    all_bonds = []
+    
+    for categoria, sources in SOURCES_MAP.items():
+        for src in sources:
+            filepath = os.path.join(DB_FOLDER, f"{src['nome']}.csv")
+            if not os.path.exists(filepath):
+                continue
+            
+            try:
+                df = pd.read_csv(filepath)
+                for _, row in df.iterrows():
+                    bond = processa_riga(row, src)
+                    if bond:
+                        col_isin = next((c for c in df.columns if 'ISIN' in str(c).upper()), None)
+                        bond['ISIN'] = str(row[col_isin]) if col_isin else "N/A"
+                        bond['Categoria'] = categoria
+                        bond['Anni_Scadenza'] = (bond['sc'] - date.today()).days / 365.25
+                        
+                        risk = calcola_metriche_rischio(bond['pr'], bond['ced'], bond['sc'], bond['freq'])
+                        bond['YTM'] = risk['ytm'] if risk else 0
+                        bond['Duration'] = risk['mod_dur'] if risk else 0
+                        
+                        all_bonds.append(bond)
+            except:
+                continue
+    
+    return pd.DataFrame(all_bonds) if all_bonds else pd.DataFrame()
 # --- APP PRINCIPALE ---
 # --- APP PRINCIPALE ---
 def login():
@@ -747,27 +884,42 @@ def login():
         username = st.text_input("👤 Username", placeholder="Inserisci username").strip()
         password = st.text_input("🔑 Password", type="password", placeholder="Inserisci password")
         
-        if st.button("🚀 Accedi", use_container_width=True):
-            # 1. Calcola il codice segreto della password inserita
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
-            
-            # 2. Controlla se l'utente esiste E se la password coincide
-            if username in UTENTI_ABILITATI and UTENTI_ABILITATI[username] == password_hash:
-                st.session_state.logged_in = True
-                
-                # --- AGGIUNGI QUESTA RIGA QUI SOTTO: ---
-                st.session_state.current_user = username
-                # ---------------------------------------
-                
-                st.success(f"✅ Benvenuto {username}!")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("❌ Credenziali errate")
+  if st.button("⚔️ Confronta", type="primary", use_container_width=True) and isin_b:
+    if not valida_isin(isin_b):
+        st.error("❌ ISIN B non valido!")
+    else:
+        row_b, info_b = cerca_db(isin_b, cat_b)
+        bond_b = processa_riga(row_b, info_b) if row_b else None
         
-        st.markdown("---")
-        st.caption("💡 Versione 2.0 - Bond Terminal Pro")
-
+        if bond_b:
+            # 🆕 SMART COMPARE
+            smart_result = smart_compare_bonds(bond_a, bond_b)
+            
+            # Mostra verdict
+            if smart_result['compatibility_score'] >= 70:
+                st.success(f"## {smart_result['verdict']}")
+            elif smart_result['compatibility_score'] >= 40:
+                st.warning(f"## {smart_result['verdict']}")
+            else:
+                st.error(f"## {smart_result['verdict']}")
+            
+            st.metric("Compatibility Score", f"{smart_result['compatibility_score']}/100")
+            
+            # Warnings
+            for warn in smart_result['warnings']:
+                if warn['level'] == 'error':
+                    st.error(warn['message'])
+                elif warn['level'] == 'warning':
+                    st.warning(warn['message'])
+            
+            # Blocca se incompatibile
+            if smart_result['compatibility_score'] < 30:
+                st.error("🛑 Confronto troppo diverso. Scegli bond simili.")
+                st.stop()
+            
+            st.divider()
+            
+            # ... continua con il confronto normale esistente ...
 def main_app():
     """Applicazione principale"""
     
@@ -806,6 +958,15 @@ def main_app():
             st.rerun()
         
         st.divider()
+st.subheader("💎 ADVANCED")
+
+if st.button("💸 Tax Calculator", use_container_width=True):
+    st.session_state.page = "TaxCalc"
+    st.rerun()
+
+if st.button("🎯 Opportunity Finder", use_container_width=True):
+    st.session_state.page = "Opportunities"
+    st.rerun()
         
         # System Status
         st.subheader("⚙️ SISTEMA")
@@ -1612,6 +1773,119 @@ def main_app():
             """)
 
 # --- ENTRY POINT ---
+def render_tax_calculator():
+    st.title("💸 Tax Impact Calculator")
+    st.markdown("Scopri quanto guadagni DAVVERO dopo tasse, inflazione e costi.")
+    
+    col_cat, col_isin = st.columns([2, 1])
+    cat = col_cat.selectbox("Categoria", list(SOURCES_MAP.keys()), key="tc_cat")
+    isin = col_isin.text_input("ISIN", key="tc_isin").strip().upper()
+    
+    if isin and valida_isin(isin):
+        row, info = cerca_db(isin, cat)
+        bond = processa_riga(row, info) if row else None
+        
+        if bond:
+            st.success(f"✅ {bond['desc']}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            inv = col1.number_input("Capitale (€)", value=10000.0, step=1000.0)
+            infl = col2.number_input("Inflazione %", value=2.0, step=0.5)
+            broker = col3.number_input("Broker Fee (€)", value=0.0)
+            bollo = col4.number_input("Bollo/anno (€)", value=34.20)
+            
+            if st.button("📊 Calcola Rendimento Reale", type="primary"):
+                result = calcola_rendimento_reale(bond, inv, infl, broker, bollo)
+                
+                if 'error' not in result:
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("YTM Lordo", f"{result['rendimenti']['ytm_lordo']:.2f}%")
+                    m2.metric("YTM Netto", f"{result['rendimenti']['ytm_netto_finale']:.2f}%")
+                    m3.metric("YTM Reale", f"{result['rendimenti']['ytm_reale']:.2f}%")
+                    m4.metric("Valore Reale", f"{result['potere_acquisto']['valore_reale']:,.0f}€")
+                    
+                    st.divider()
+                    
+                    col_left, col_right = st.columns(2)
+                    
+                    with col_left:
+                        st.markdown("### 💰 Breakdown")
+                        st.write(f"**Investimento:** {result['breakdown']['investimento']:,.0f}€")
+                        st.write(f"**- Tasse:** {result['breakdown']['tasse_totali']:,.0f}€")
+                        st.write(f"**- Costi:** {result['breakdown']['costi_totali']:,.0f}€")
+                        st.write(f"**= Incasso Finale:** {result['breakdown']['incasso_netto_finale']:,.0f}€")
+                    
+                    with col_right:
+                        st.markdown("### 📉 Impatto Inflazione")
+                        st.error(f"Perdi {result['potere_acquisto']['perdita_pct']:.1f}% di potere d'acquisto per inflazione!")
+                        st.info(f"I tuoi {result['breakdown']['incasso_netto_finale']:,.0f}€ varranno solo {result['potere_acquisto']['valore_reale']:,.0f}€ di oggi.")
+    else:
+        st.info("👆 Seleziona categoria e inserisci ISIN")
+
+def render_opportunity_finder():
+    st.title("🎯 Opportunity Finder")
+    st.markdown("Trova automaticamente i **migliori bond** per il tuo profilo.")
+    
+    st.subheader("👤 Il Tuo Profilo")
+    
+    col1, col2, col3 = st.columns(3)
+    capitale = col1.number_input("Capitale (€)", value=10000.0, step=1000.0)
+    anni = col2.slider("Orizzonte (anni)", 1, 30, 5)
+    ytm_min = col3.number_input("YTM Minimo %", value=2.5, step=0.5)
+    
+    col4, col5 = st.columns(2)
+    rischio = col4.select_slider("Rischio", ['basso', 'medio', 'alto'], value='medio')
+    solo_gov = col5.checkbox("Solo Governativi", value=False)
+    
+    if st.button("🔍 Cerca Opportunità", type="primary"):
+        with st.spinner("Analizzo database..."):
+            df_bonds = carica_tutti_bond_db()
+            
+            if df_bonds.empty:
+                st.error("❌ Database vuoto. Aggiorna prima il database.")
+            else:
+                # Filtra
+                filtered = df_bonds[df_bonds['taglio'] <= capitale]
+                
+                min_a = anni * 0.7
+                max_a = anni * 1.3
+                filtered = filtered[(filtered['Anni_Scadenza'] >= min_a) & (filtered['Anni_Scadenza'] <= max_a)]
+                filtered = filtered[filtered['YTM'] >= ytm_min]
+                
+                if rischio == 'basso':
+                    filtered = filtered[filtered['rating'].str.contains('AAA|AA|A', case=False, na=False)]
+                elif rischio == 'medio':
+                    filtered = filtered[filtered['rating'].str.contains('AAA|AA|A|BBB', case=False, na=False)]
+                
+                if solo_gov:
+                    filtered = filtered[filtered['Categoria'].str.contains('GOVERNATIVI', na=False)]
+                
+                if filtered.empty:
+                    st.warning("⚠️ Nessun bond trovato. Rilassa i filtri.")
+                else:
+                    # Top 10
+                    best = filtered.nlargest(10, 'YTM')
+                    
+                    st.success(f"✅ Trovati {len(best)} bond interessanti!")
+                    
+                    st.dataframe(
+                        best[['ISIN', 'desc', 'YTM', 'Anni_Scadenza', 'rating', 'taglio']].style.format({
+                            'YTM': '{:.2f}%',
+                            'Anni_Scadenza': '{:.1f}',
+                            'taglio': '{:,.0f}€'
+                        }),
+                        use_container_width=True
+                    )
+                    
+                    # Grafico
+                    fig = px.scatter(
+                        best, x='Anni_Scadenza', y='YTM',
+                        size='YTM', color='rating',
+                        hover_data=['desc'],
+                        title='Opportunità: YTM vs Scadenza',
+                        template='plotly_dark'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
 if __name__ == "__main__":
     if st.session_state.logged_in:
         main_app()
