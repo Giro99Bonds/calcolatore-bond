@@ -285,7 +285,7 @@ def stress_test(prezzo, mod_dur, convexity, shock_bps):
     return prezzo + delta
 
 def determina_tasse(nome, desc):
-    keys = ["BTP", "BOT", "BUND", "OAT", "USA", "ROMANIA", "EUROPA", "REPUBLIC", "TREASURY"]
+    keys = ["BTP", "BOT", "BUND", "OAT", "USA", "ROMANIA", "EUROPA", "REPUBLIC", "TREASURY", "BEI", "EU"]
     if any(k in nome.upper() or k in desc.upper() for k in keys): return 12.5
     return 26.0
 
@@ -319,7 +319,7 @@ def analizza_bond_quality(dati, risk, tax):
     return {"flags": flags, "score": max(0, min(100, score)), "ytm_netto": ytm_net}
 
 # ==============================================================================
-# 6. MOTORE SMART ANALYSIS (NUOVO)
+# 6. MOTORE SMART ANALYSIS (AGGIORNATO RETAIL-SAFE)
 # ==============================================================================
 
 def calcola_rendimento_grezzo(prezzo, cedola, scadenza):
@@ -379,21 +379,50 @@ def carica_dati_mercato():
             
     return pd.DataFrame(all_bonds)
 
+def categorizza_rischio(nome, desc, rating):
+    """Assegna un livello di rischio semplificato per il retail"""
+    nome = nome.upper(); desc = desc.upper()
+    gov_safe = ["GERMANIA", "BUND", "FRANCIA", "OAT", "USA", "TREASURY", "BEI", "EU", "EUROPA"]
+    if any(k in nome or k in desc for k in gov_safe): return 1
+    gov_mid = ["ITALIA", "BTP", "BOT", "CCT", "SPAGNA", "BONOS"]
+    if any(k in nome or k in desc for k in gov_mid): return 2
+    if "INTESA" in nome or "UNICREDIT" in nome: return 2
+    if "SUBORDINAT" in nome or "SUB" in desc: return 4
+    if "ROMANIA" in nome or "TURCHIA" in nome: return 4
+    return 3 # Default Corporate
+
 def trova_alternative_migliori(bond_target, df_mercato):
+    """Logica Retail Safe: Confronta solo Netto e Rischio <= Target"""
     if df_mercato.empty: return pd.DataFrame()
     
     anni_target = (bond_target['sc'] - date.today()).days / 365.25
-    ytm_target = calcola_rendimento_grezzo(bond_target['pr'], bond_target['ced'], bond_target['sc'])
+    tax_target = determina_tasse(bond_target['fonte'], bond_target['desc'])
+    ytm_netto_target = calcola_rendimento_grezzo(bond_target['pr'], bond_target['ced'], bond_target['sc']) * (1 - tax_target/100)
+    rischio_target = categorizza_rischio(bond_target['fonte'], bond_target['desc'], bond_target['rating'])
     
-    mask_durata = (df_mercato['Anni'] >= anni_target - 2) & (df_mercato['Anni'] <= anni_target + 2)
-    mask_yield = df_mercato['YTM_Grezzo'] > ytm_target + 0.20 
-    mask_prezzo = df_mercato['Prezzo'] < 110
-    mask_diverso = df_mercato['ISIN'] != bond_target.get('isin', '') # Non se stesso
-    
-    alternative = df_mercato[mask_durata & mask_yield & mask_prezzo & mask_diverso].copy()
-    if not alternative.empty:
-        alternative['Extra_Yield'] = alternative['YTM_Grezzo'] - ytm_target
-        return alternative.sort_values('Extra_Yield', ascending=False).head(5)
+    alternative = []
+    for _, row in df_mercato.iterrows():
+        # 1. Filtro Durata (+/- 1.5 anni)
+        if not (anni_target - 1.5 <= row['Anni'] <= anni_target + 1.5): continue
+        # 2. Filtro Prezzo (< 105)
+        if row['Prezzo'] > 105: continue
+        # 3. Filtro Rischio (Mai maggiore)
+        rischio_alt = categorizza_rischio(row['Fonte'], row['Desc'], "NR")
+        if rischio_alt > rischio_target: continue
+        
+        # 4. Confronto Netto
+        tax_alt = determina_tasse(row['Fonte'], row['Desc'])
+        ytm_netto_alt = row['YTM_Grezzo'] * (1 - tax_alt/100)
+        
+        extra = ytm_netto_alt - ytm_netto_target
+        if extra > 0.25: # Almeno 0.25% in più
+            row['YTM_Netto'] = ytm_netto_alt
+            row['Extra_Yield_Netto'] = extra
+            alternative.append(row)
+            
+    df_alt = pd.DataFrame(alternative)
+    if not df_alt.empty:
+        return df_alt.sort_values('Extra_Yield_Netto', ascending=False).head(5)
     return pd.DataFrame()
 
 # ==============================================================================
@@ -624,13 +653,13 @@ def main_app():
                             
                     st.divider()
                     st.subheader("🔄 Alternative Migliori (Smart Switch)")
-                    st.caption("Bond con scadenza simile (+/- 2 anni) ma rendimento superiore.")
+                    st.caption("Bond con scadenza simile (+/- 1.5 anni), rischio non superiore e rendimento netto migliore.")
                     
                     alternative = trova_alternative_migliori(d_smart, df_market)
                     
                     if not alternative.empty:
-                        st.dataframe(alternative[['ISIN', 'Desc', 'Prezzo', 'Cedola', 'YTM_Grezzo', 'Extra_Yield']].style.format({'Prezzo': '{:.2f}€', 'Cedola': '{:.2f}%', 'YTM_Grezzo': '{:.2f}%', 'Extra_Yield': '+{:.2f}%'}), use_container_width=True)
-                    else: st.success("🏆 Complimenti! Non abbiamo trovato alternative nettamente migliori.")
+                        st.dataframe(alternative[['ISIN', 'Desc', 'Prezzo', 'YTM_Netto', 'Extra_Yield_Netto']].style.format({'Prezzo': '{:.2f}€', 'YTM_Netto': '{:.2f}%', 'Extra_Yield_Netto': '+{:.2f}%'}), use_container_width=True)
+                    else: st.success("🏆 Complimenti! Non ci sono alternative più sicure e redditizie nel database.")
                 else: st.error("ISIN non trovato.")
             else: st.info("Inserisci un ISIN per iniziare.")
 
@@ -646,12 +675,20 @@ def main_app():
                 rb, info = cerca_db(ib, cb)
                 b = processa_riga(rb, info) if rb is not None else None
                 if b:
+                    # SAFETY CHECKS
+                    diff_anni = abs(((a['sc'] - date.today()).days/365.25) - ((b['sc'] - date.today()).days/365.25))
+                    tax_a = determina_tasse(a['fonte'], a['desc'])
+                    tax_b = determina_tasse(b['fonte'], b['desc'])
+                    
+                    if diff_anni > 5: st.warning(f"⚠️ Attenzione: Confronti bond con scadenza molto diversa ({diff_anni:.1f} anni diff).")
+                    if tax_a != tax_b: st.info("ℹ️ Nota: Tassazioni diverse. Guarda il YTM Netto.")
+                    
                     ra = calcola_metriche_rischio(a['pr'], a['ced'], a['sc'], a['freq'])
                     rb = calcola_metriche_rischio(b['pr'], b['ced'], b['sc'], b['freq'])
                     k1, k2, k3 = st.columns(3)
-                    k1.metric("A YTM Net", f"{analizza_bond_quality(a, ra, determina_tasse(a['fonte'], a['desc']))['ytm_netto']:.2f}%")
+                    k1.metric("A YTM Net", f"{analizza_bond_quality(a, ra, tax_a)['ytm_netto']:.2f}%")
                     k2.markdown("<h2>VS</h2>", unsafe_allow_html=True)
-                    k3.metric("B YTM Net", f"{analizza_bond_quality(b, rb, determina_tasse(b['fonte'], b['desc']))['ytm_netto']:.2f}%")
+                    k3.metric("B YTM Net", f"{analizza_bond_quality(b, rb, tax_b)['ytm_netto']:.2f}%")
                 else: st.error("B non trovato")
         else: st.warning("Salva un bond prima.")
 
