@@ -46,7 +46,7 @@ st.markdown("""
         background-color: rgba(0,0,0,0.05); border-radius: 5px;
     }
 
-    /* --- LEGENDA (RIMESSA) --- */
+    /* --- LEGENDA --- */
     .legend-box { padding: 15px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: white; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
     .legend-title { font-weight: bold; font-size: 16px; display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 4px; text-transform: uppercase; }
     
@@ -315,7 +315,7 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
     score += punti
     breakdown.append({"cat": "🏛️ Tassazione", "val": f"{tax}%", "msg": msg, "pts": punti, "col": colore})
 
-    # Flags per compatibilità vecchia
+    # Flags per compatibilità
     flags = []
     if score < 50: flags.append(("red", "Score Basso"))
     return {"score": max(0, min(100, score)), "breakdown": breakdown, "ytm_netto": ytm_net, "flags": flags}
@@ -500,7 +500,7 @@ def main_app():
         st.write("💰 **Il tuo Patrimonio**")
         st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0)
         
-        # --- SEZIONE SISTEMA RIPRISTINATA ---
+        # --- SEZIONE SISTEMA ---
         st.divider(); st.subheader("⚙️ SISTEMA")
         last = get_last_update_time()
         if last: 
@@ -520,7 +520,6 @@ def main_app():
         csv_files = [f for f in os.listdir(DB_FOLDER) if f.endswith('.csv')] if os.path.exists(DB_FOLDER) else []
         tot_sources = sum(len(v) for v in SOURCES_MAP.values())
         st.caption(f"Files: {len(csv_files)}/{tot_sources}")
-        # ------------------------------------
         
         if st.session_state.current_user in ["giulio", "guest"]:
              if st.button("🗑️ Reset Database", use_container_width=True):
@@ -535,14 +534,13 @@ def main_app():
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Inserisci un ISIN per analizzare il bond.")
         
-        # --- LEGENDA RIMESSA E VISIBILE ---
+        # --- LEGENDA ---
         l1, l2, l3, l4 = st.columns(4)
         with l1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span><b>Stati</b><br>Italia, Germania, USA, Francia</div>""", unsafe_allow_html=True)
         with l2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span><b>Banche</b><br>Intesa, UniCredit, Subordinate</div>""", unsafe_allow_html=True)
         with l3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span><b>Aziende</b><br>Eni, Stellantis, Telecom</div>""", unsafe_allow_html=True)
         with l4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span><b>Misti</b><br>Zero Coupon, 25y+, Callable</div>""", unsafe_allow_html=True)
         st.divider()
-        # ----------------------------------
         
         c1, c2 = st.columns([2, 1])
         cat = c1.selectbox("Categoria", list(SOURCES_MAP.keys()))
@@ -557,10 +555,8 @@ def main_app():
                 if d:
                     tax = determina_tasse(d['fonte'], d['desc'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
-                    # USIAMO LA NUOVA FUNZIONE DETTAGLIATA
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
                     
-                    # HEADER
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px;">
                         <h3 style="color:white; margin:0;">{d['desc']}</h3>
@@ -570,7 +566,6 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # COLONNE PRINCIPALI
                     col_metrics, col_score = st.columns([2, 1])
                     
                     with col_metrics:
@@ -590,24 +585,38 @@ def main_app():
                             else: st.error(f"Perdita Reale: {real:.2f}%")
                         
                         with t2:
-                            st.write("📉 **Cosa succede se vendo prima?**")
+                            st.warning("🔮 **Sfera di Cristallo:** Cosa succede se vendi PRIMA della scadenza e i tassi cambiano?")
                             if risk:
-                                hold = st.slider("Anni detenzione", 1, max(1, int((d['sc'] - date.today()).days/365.25)), 1)
-                                shock = st.slider("Variazione Tassi", -3.0, 3.0, 0.0, 0.5)
-                                dur_res = max(0, risk['mod_dur'] - hold)
-                                p_fut = d['pr'] - (dur_res * (shock/100) * d['pr']) + ((100-d['pr']) * (hold/risk['mod_dur']))
-                                st.metric("Prezzo Stimato", f"{p_fut:.2f}€", delta=f"{p_fut-d['pr']:.2f}")
+                                # Calcolo anni residui esatti
+                                anni_residui_float = (d['sc'] - date.today()).days / 365.25
+                                max_anni_slider = int(anni_residui_float)
+                                
+                                # FIX PER ERRORI SLIDER
+                                if max_anni_slider < 1:
+                                    st.info("ℹ️ Il bond scade tra meno di un anno. Simulazione non necessaria.")
+                                else:
+                                    cw1, cw2 = st.columns(2)
+                                    with cw1:
+                                        if max_anni_slider == 1:
+                                            st.write("Anni detenzione: **1 anno**")
+                                            hold = 1
+                                        else:
+                                            hold = st.slider("Anni detenzione", 1, max_anni_slider, 1)
+                                    with cw2:
+                                        shock = st.slider("Variazione Tassi", -3.0, 3.0, 0.0, 0.5)
+                                    
+                                    dur_res = max(0, risk['mod_dur'] - hold)
+                                    p_fut = d['pr'] - (dur_res * (shock/100) * d['pr']) + ((100-d['pr']) * (hold/anni_residui_float))
+                                    st.metric("Prezzo Stimato", f"{p_fut:.2f}€", delta=f"{p_fut-d['pr']:.2f}")
+                            else: st.error("Dati insufficienti")
                         
                         with t3:
                             st.write("📅 **Calendario Incassi**")
                             df_cf = genera_flussi(d, 10000, tax)
                             st.dataframe(df_cf[df_cf['Data'] > date.today()].style.format({'Flow': '{:.2f}€'}), use_container_width=True)
 
-                    # --- SEZIONE SCORECARD TRASPARENTE ---
                     with col_score:
                         st.markdown(f"### 🏆 Score: {qual['score']}/100")
-                        
-                        # Visualizzazione Punti
                         for item in qual['breakdown']:
                             st.markdown(f"""
                             <div class="score-row">
@@ -618,7 +627,6 @@ def main_app():
                                 <div class="{item['col']}">{item['pts']:+d}</div>
                             </div>
                             """, unsafe_allow_html=True)
-                        
                         st.write("")
                         if st.button("💼 Aggiungi a Portafoglio", use_container_width=True):
                             st.session_state.portfolio.append(d)
@@ -704,11 +712,10 @@ def main_app():
                     ra = calcola_metriche_rischio(a['pr'], a['ced'], a['sc'], a['freq'])
                     rb = calcola_metriche_rischio(b['pr'], b['ced'], b['sc'], b['freq'])
                     k1, k2, k3 = st.columns(3)
-                    # Use session state for patrimony in manual comparison too, or default
-                    pat = st.session_state.patrimonio
-                    k1.metric("A YTM Net", f"{analizza_bond_quality_dettagliata(a, ra, tax_a, pat)['ytm_netto']:.2f}%")
+                    # Usa patrimonio utente
+                    k1.metric("A YTM Net", f"{analizza_bond_quality_dettagliata(a, ra, tax_a, st.session_state.patrimonio)['ytm_netto']:.2f}%")
                     k2.markdown("<h2>VS</h2>", unsafe_allow_html=True)
-                    k3.metric("B YTM Net", f"{analizza_bond_quality_dettagliata(b, rb, tax_b, pat)['ytm_netto']:.2f}%")
+                    k3.metric("B YTM Net", f"{analizza_bond_quality_dettagliata(b, rb, tax_b, st.session_state.patrimonio)['ytm_netto']:.2f}%")
                 else: st.error("B non trovato")
         else: st.warning("Salva un bond prima.")
 
