@@ -46,6 +46,15 @@ st.markdown("""
         background-color: rgba(0,0,0,0.05); border-radius: 5px;
     }
 
+    /* --- LEGENDA (RIMESSA) --- */
+    .legend-box { padding: 15px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: white; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+    .legend-title { font-weight: bold; font-size: 16px; display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 4px; text-transform: uppercase; }
+    
+    .gov { background-color: #1a4a2e; border: 1px solid #28a745; }
+    .bank { background-color: #2c3e50; border: 1px solid #8e9aaf; }
+    .corp { background-color: #1e3a5f; border: 1px solid #17a2b8; }
+    .spec { background-color: #581845; border: 1px solid #d63384; }
+
     /* --- SCORECARD TRASPARENTE --- */
     .score-row {
         display: flex; justify-content: space-between; align-items: center;
@@ -55,6 +64,11 @@ st.markdown("""
     .score-bad { color: #FF4B4B; font-weight: bold; }
     .score-neutral { color: #FFAA00; font-weight: bold; }
     
+    /* --- FLAGS --- */
+    .red-flag { border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
+    .green-flag { border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
+    .warning-flag { border-left: 5px solid #ffa500; background-color: #2d2a1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
+
     /* --- BOX UTENTE --- */
     .user-box { padding: 10px; background-color: #e8f5e9; border-left: 5px solid #00CC96; border-radius: 5px; margin-bottom: 20px; color: #1b5e20; font-weight: bold; }
     
@@ -90,6 +104,7 @@ def init_session_state():
     if 'page' not in st.session_state: st.session_state.page = "Scanner"
     if 'last_scrape_time' not in st.session_state: st.session_state.last_scrape_time = None
     if 'patrimonio' not in st.session_state: st.session_state.patrimonio = 50000.0
+    if 'scrape_count' not in st.session_state: st.session_state.scrape_count = 0
 
 init_session_state()
 
@@ -115,6 +130,11 @@ SOURCES_MAP = {
         {"nome": "CORP_ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporateitalia&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "CORP_MONDO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "AUTOMOTIVE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=automotive&yieldtype=G&timescale=DUR", "freq": 1}
+    ],
+    "💎 SPECIALI": [
+        {"nome": "ZERO_COUPON", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=zerocoupon&yieldtype=G&timescale=DUR", "freq": 0},
+        {"nome": "CALLABLE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=callable&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "LUNGHI_25Y", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=25yearsEUR&yieldtype=G&timescale=DUR", "freq": 1}
     ]
 }
 
@@ -125,6 +145,25 @@ SOURCES_MAP = {
 def valida_isin(isin):
     if not isin or len(isin) != 12: return False
     return isin[:2].isalpha() and isin[2:].isalnum()
+
+def get_last_update_time():
+    try:
+        if not os.path.exists(DB_FOLDER): return None
+        files = [os.path.join(DB_FOLDER, f) for f in os.listdir(DB_FOLDER) if f.endswith('.csv')]
+        if not files: return None
+        latest_file = max(files, key=os.path.getmtime)
+        return datetime.fromtimestamp(os.path.getmtime(latest_file))
+    except: return None
+
+def check_connection_status():
+    try:
+        requests.get("https://www.google.com", timeout=3)
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.head("https://www.simpletoolsforinvestors.eu/", headers=headers, timeout=5)
+        if r.status_code == 200: return "🟢 ONLINE"
+        elif r.status_code in [403, 429]: return "🔴 BANNATO (403/429)"
+        else: return f"🟡 STATUS {r.status_code}"
+    except: return "🔴 OFFLINE"
 
 def pulisci_taglio(valore):
     s = str(valore).lower().strip()
@@ -207,11 +246,8 @@ def determina_tasse(nome, desc):
     return 26.0
 
 def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
-    """
-    Restituisce non solo lo score, ma il breakdown dei punti
-    """
     breakdown = []
-    score = 100 # Partiamo da 100
+    score = 100
     
     # 1. SOSTENIBILITÀ (Concentrazione)
     peso_bond = (dati['taglio'] / patrimonio) * 100
@@ -227,14 +263,13 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
         punti = 0
         msg = f"Taglio sostenibile: pesa il {peso_bond:.1f}%"
         colore = "score-good"
-    
     score += punti
     breakdown.append({"cat": "🏗️ Sostenibilità", "val": f"{dati['taglio']/1000:.0f}k €", "msg": msg, "pts": punti, "col": colore})
 
-    # 2. PREZZO (Efficienza)
+    # 2. PREZZO
     if dati['pr'] > 110:
         punti = -15
-        msg = "Molto sopra la pari (Minusvalenza a scadenza)"
+        msg = "Molto sopra la pari (Minusvalenza)"
         colore = "score-bad"
     elif dati['pr'] > 102:
         punti = -5
@@ -248,11 +283,10 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
         punti = 0
         msg = "Prezzo Fair (Vicino a 100)"
         colore = "score-good"
-
     score += punti
     breakdown.append({"cat": "🏷️ Prezzo", "val": f"{dati['pr']:.2f}", "msg": msg, "pts": punti, "col": colore})
 
-    # 3. RENDIMENTO (Profitto)
+    # 3. RENDIMENTO
     ytm_net = risk['ytm'] * (1 - tax / 100) if risk else 0
     if ytm_net < 1.5:
         punti = -20
@@ -266,7 +300,6 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
         punti = 0
         msg = "Rendimento nella media"
         colore = "score-neutral"
-        
     score += punti
     breakdown.append({"cat": "📈 Rendimento", "val": f"{ytm_net:.2f}%", "msg": msg, "pts": punti, "col": colore})
 
@@ -279,22 +312,121 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
         punti = -5
         msg = "Tassazione piena (Corporate)"
         colore = "score-neutral"
-
     score += punti
     breakdown.append({"cat": "🏛️ Tassazione", "val": f"{tax}%", "msg": msg, "pts": punti, "col": colore})
 
-    return {"score": max(0, min(100, score)), "breakdown": breakdown, "ytm_netto": ytm_net}
+    # Flags per compatibilità vecchia
+    flags = []
+    if score < 50: flags.append(("red", "Score Basso"))
+    return {"score": max(0, min(100, score)), "breakdown": breakdown, "ytm_netto": ytm_net, "flags": flags}
 
 # ==============================================================================
 # 6. LOGICHE SMART & DB
 # ==============================================================================
+
+def calcola_rendimento_grezzo(prezzo, cedola, scadenza):
+    try:
+        anni = (scadenza - date.today()).days / 365.25
+        if anni <= 0 or prezzo <= 0: return 0
+        gain_annuo = (100 - prezzo) / anni
+        rendimento = (cedola + gain_annuo) / prezzo * 100
+        return round(rendimento, 2)
+    except: return 0
+
+def carica_dati_mercato():
+    all_bonds = []
+    if not os.path.exists(DB_FOLDER): return pd.DataFrame()
+
+    for filename in os.listdir(DB_FOLDER):
+        if filename.endswith(".csv"):
+            try:
+                path = os.path.join(DB_FOLDER, filename)
+                df = pd.read_csv(path)
+                
+                cols = df.columns
+                c_pr = next((c for c in cols if any(k in str(c).lower() for k in ['prezzo', 'last', 'price'])), None)
+                c_sc = next((c for c in cols if 'scadenza' in str(c).lower()), None)
+                c_de = next((c for c in cols if 'desc' in str(c).lower()), None)
+                c_isin = next((c for c in cols if 'isin' in str(c).lower()), None)
+                
+                if all([c_pr, c_sc, c_de, c_isin]):
+                    df = df.dropna(subset=[c_pr, c_sc])
+                    for _, row in df.iterrows():
+                        try:
+                            sc_str = str(row[c_sc]).strip()
+                            try: sc = datetime.strptime(sc_str, '%Y-%m-%d').date()
+                            except: sc = datetime.strptime(sc_str, '%d/%m/%Y').date()
+                            if sc <= date.today(): continue
+                            
+                            pr = float(str(row[c_pr]).replace(',', '.').replace('€', '').strip())
+                            desc = str(row[c_de])
+                            ced = 0.0
+                            m = re.search(r'(\d+(?:[.,]\d+)?)\s*%', desc)
+                            if m: ced = float(m.group(1).replace(',', '.'))
+                            
+                            all_bonds.append({
+                                "ISIN": str(row[c_isin]),
+                                "Desc": desc,
+                                "Prezzo": pr,
+                                "Scadenza": sc,
+                                "Cedola": ced,
+                                "YTM_Grezzo": calcola_rendimento_grezzo(pr, ced, sc),
+                                "Anni": (sc - date.today()).days / 365.25,
+                                "Fonte": filename.replace('.csv', '')
+                            })
+                        except: continue
+            except: continue
+            
+    return pd.DataFrame(all_bonds)
+
+def categorizza_rischio(nome, desc, rating):
+    nome = nome.upper(); desc = desc.upper()
+    gov_safe = ["GERMANIA", "BUND", "FRANCIA", "OAT", "USA", "TREASURY", "BEI", "EU", "EUROPA"]
+    if any(k in nome or k in desc for k in gov_safe): return 1
+    gov_mid = ["ITALIA", "BTP", "BOT", "CCT", "SPAGNA", "BONOS"]
+    if any(k in nome or k in desc for k in gov_mid): return 2
+    if "INTESA" in nome or "UNICREDIT" in nome: return 2
+    if "SUBORDINAT" in nome or "SUB" in desc: return 4
+    if "ROMANIA" in nome or "TURCHIA" in nome: return 4
+    return 3 # Default Corporate
+
+def trova_alternative_migliori(bond_target, df_mercato):
+    if df_mercato.empty: return pd.DataFrame()
+    
+    anni_target = (bond_target['sc'] - date.today()).days / 365.25
+    tax_target = determina_tasse(bond_target['fonte'], bond_target['desc'])
+    ytm_netto_target = calcola_rendimento_grezzo(bond_target['pr'], bond_target['ced'], bond_target['sc']) * (1 - tax_target/100)
+    rischio_target = categorizza_rischio(bond_target['fonte'], bond_target['desc'], bond_target['rating'])
+    
+    alternative = []
+    for _, row in df_mercato.iterrows():
+        if not (anni_target - 1.5 <= row['Anni'] <= anni_target + 1.5): continue
+        if row['Prezzo'] > 105: continue
+        
+        rischio_alt = categorizza_rischio(row['Fonte'], row['Desc'], "NR")
+        if rischio_alt > rischio_target: continue
+        
+        tax_alt = determina_tasse(row['Fonte'], row['Desc'])
+        ytm_netto_alt = row['YTM_Grezzo'] * (1 - tax_alt/100)
+        
+        extra = ytm_netto_alt - ytm_netto_target
+        if extra > 0.25: 
+            row['YTM_Netto'] = ytm_netto_alt
+            row['Extra_Yield_Netto'] = extra
+            alternative.append(row)
+            
+    df_alt = pd.DataFrame(alternative)
+    if not df_alt.empty:
+        return df_alt.sort_values('Extra_Yield_Netto', ascending=False).head(5)
+    return pd.DataFrame()
 
 def aggiorna_db():
     p = st.progress(0); s = st.empty()
     tot = sum(len(v) for v in SOURCES_MAP.values()); c = 0; ok = 0
     for cat, sources in SOURCES_MAP.items():
         for src in sources:
-            c += 1; p.progress(c/tot)
+            c += 1; s.text(f"Scarico {src['nome']} ({c}/{tot})...")
+            p.progress(c/tot)
             try:
                 r = requests.get(src['url'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
                 dfs = pd.read_html(r.text, decimal=",", thousands=".")
@@ -303,6 +435,7 @@ def aggiorna_db():
                         df.to_csv(os.path.join(DB_FOLDER, f"{src['nome']}.csv"), index=False)
                         ok += 1; break
             except: pass
+    st.session_state.last_scrape_time = datetime.now()
     s.empty(); p.empty(); st.toast(f"Aggiornati {ok} files"); st.rerun()
 
 def cerca_db(isin, cat):
@@ -359,6 +492,7 @@ def main_app():
             st.markdown(f"""<div class="user-box">👤 {st.session_state.current_user.capitalize()}</div>""", unsafe_allow_html=True)
         
         if st.button("🔎 Scanner", use_container_width=True): st.session_state.page = "Scanner"; st.rerun()
+        if st.button("🧠 Smart Analysis", use_container_width=True): st.session_state.page = "SmartAnalysis"; st.rerun()
         if st.button("⚔️ Confronto", use_container_width=True): st.session_state.page = "Confronto"; st.rerun()
         if st.button("💼 Portafoglio", use_container_width=True): st.session_state.page = "Portafoglio"; st.rerun()
         
@@ -366,13 +500,49 @@ def main_app():
         st.write("💰 **Il tuo Patrimonio**")
         st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0)
         
-        st.divider()
-        if st.button("🔄 Aggiorna DB"): aggiorna_db()
+        # --- SEZIONE SISTEMA RIPRISTINATA ---
+        st.divider(); st.subheader("⚙️ SISTEMA")
+        last = get_last_update_time()
+        if last: 
+            delta = (datetime.now() - last).total_seconds() / 3600
+            color = "green" if delta < 24 else "orange"
+            st.markdown(f"📅 Aggiornato: :{color}[{last.strftime('%d/%m %H:%M')}]")
+        else: st.error("❌ Nessun Dato")
+        
+        c1, c2 = st.columns([1, 2])
+        if c1.button("📶"): st.session_state.connection_status = check_connection_status()
+        c2.markdown(f"**{st.session_state.connection_status}**")
+        
+        if st.button("🔄 Aggiorna Database", use_container_width=True):
+            if "BANNATO" in st.session_state.connection_status: st.error("Sei bannato! Aspetta.")
+            else: aggiorna_db()
+            
+        csv_files = [f for f in os.listdir(DB_FOLDER) if f.endswith('.csv')] if os.path.exists(DB_FOLDER) else []
+        tot_sources = sum(len(v) for v in SOURCES_MAP.values())
+        st.caption(f"Files: {len(csv_files)}/{tot_sources}")
+        # ------------------------------------
+        
+        if st.session_state.current_user in ["giulio", "guest"]:
+             if st.button("🗑️ Reset Database", use_container_width=True):
+                try:
+                    for f in os.listdir(DB_FOLDER): os.remove(os.path.join(DB_FOLDER, f))
+                    st.toast("Pulito!", icon="🧹"); time.sleep(1); st.rerun()
+                except: pass
+        st.divider(); 
         if st.button("🚪 Logout"): st.session_state.logged_in = False; st.rerun()
 
     if st.session_state.page == "Scanner":
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Inserisci un ISIN per analizzare il bond.")
+        
+        # --- LEGENDA RIMESSA E VISIBILE ---
+        l1, l2, l3, l4 = st.columns(4)
+        with l1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span><b>Stati</b><br>Italia, Germania, USA, Francia</div>""", unsafe_allow_html=True)
+        with l2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span><b>Banche</b><br>Intesa, UniCredit, Subordinate</div>""", unsafe_allow_html=True)
+        with l3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span><b>Aziende</b><br>Eni, Stellantis, Telecom</div>""", unsafe_allow_html=True)
+        with l4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span><b>Misti</b><br>Zero Coupon, 25y+, Callable</div>""", unsafe_allow_html=True)
+        st.divider()
+        # ----------------------------------
         
         c1, c2 = st.columns([2, 1])
         cat = c1.selectbox("Categoria", list(SOURCES_MAP.keys()))
@@ -455,6 +625,92 @@ def main_app():
                             st.toast("Aggiunto!")
 
                 else: st.warning("Bond non trovato. Aggiorna il DB.")
+
+    elif st.session_state.page == "SmartAnalysis":
+        st.title("🧠 Smart Analysis & Fair Value")
+        st.caption("Strumenti avanzati per investitori Retail per valutare il posizionamento di mercato.")
+        with st.spinner("Analizzando l'intero mercato obbligazionario..."):
+            df_market = carica_dati_mercato()
+        
+        if df_market.empty: st.warning("⚠️ Database vuoto. Vai su 'Aggiorna Database' nella sidebar.")
+        else:
+            col_search, col_kpi = st.columns([1, 3])
+            with col_search:
+                st.markdown("#### 🎯 Analizza Bond")
+                isin_smart = st.text_input("Inserisci ISIN", placeholder="Cerca...").strip().upper()
+                cat_smart = st.selectbox("Categoria", list(SOURCES_MAP.keys()))
+                
+            if isin_smart and valida_isin(isin_smart):
+                row, info = cerca_db(isin_smart, cat_smart)
+                d_smart = processa_riga(row, info) if row is not None else None
+                
+                if d_smart:
+                    d_smart['isin'] = isin_smart
+                    ytm_s = calcola_rendimento_grezzo(d_smart['pr'], d_smart['ced'], d_smart['sc'])
+                    dur_s = (d_smart['sc'] - date.today()).days / 365.25
+                    
+                    st.divider()
+                    st.subheader("📊 Dove si trova il tuo Bond?")
+                    st.markdown(f"Il grafico mostra il tuo bond (**🔴 Rosso**) rispetto a tutti gli altri bond censiti (**🔵 Blu**).")
+                    
+                    df_clean = df_market[(df_market['Prezzo'] > 50) & (df_market['Prezzo'] < 150) & (df_market['YTM_Grezzo'] < 15)]
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=df_clean['Anni'], y=df_clean['YTM_Grezzo'], mode='markers', name='Mercato', text=df_clean['Desc'], marker=dict(color='#1f77b4', size=6, opacity=0.4)))
+                    fig.add_trace(go.Scatter(x=[dur_s], y=[ytm_s], mode='markers+text', name='TUO BOND', text=['📍 TU SEI QUI'], textposition="top center", marker=dict(color='red', size=15, symbol='star')))
+                    fig.update_layout(title="Curva dei Rendimenti (Yield Curve)", xaxis_title="Durata (Anni)", yaxis_title="Rendimento Annuo Stimato (%)", template="plotly_dark", height=400, showlegend=True)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    avg_yield_cluster = df_clean[(df_clean['Anni'] > dur_s-1) & (df_clean['Anni'] < dur_s+1)]['YTM_Grezzo'].mean()
+                    delta = ytm_s - avg_yield_cluster
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if delta > 0.5: st.success(f"✅ **Occasione?** Questo bond rende il **{delta:.2f}% in più** della media.")
+                        elif delta < -0.5: st.error(f"❌ **Caro.** Questo bond rende il **{abs(delta):.2f}% in meno** della media.")
+                        else: st.info("⚖️ **Fair Value.** Il rendimento è in linea con il mercato.")
+                            
+                    st.divider()
+                    st.subheader("🔄 Alternative Migliori (Smart Switch)")
+                    st.caption("Bond con scadenza simile (+/- 1.5 anni), rischio non superiore e rendimento netto migliore.")
+                    
+                    alternative = trova_alternative_migliori(d_smart, df_market)
+                    
+                    if not alternative.empty:
+                        st.dataframe(alternative[['ISIN', 'Desc', 'Prezzo', 'YTM_Netto', 'Extra_Yield_Netto']].style.format({'Prezzo': '{:.2f}€', 'YTM_Netto': '{:.2f}%', 'Extra_Yield_Netto': '+{:.2f}%'}), use_container_width=True)
+                    else: st.success("🏆 Complimenti! Non ci sono alternative più sicure e redditizie nel database.")
+                else: st.error("ISIN non trovato.")
+            else: st.info("Inserisci un ISIN per iniziare.")
+
+    elif st.session_state.page == "Confronto":
+        st.title("⚔️ Confronto")
+        if st.session_state.confronto:
+            a = st.session_state.confronto
+            st.info(f"📌 A: {a['desc']}")
+            c1, c2 = st.columns(2)
+            cb = c1.selectbox("Cat B", list(SOURCES_MAP.keys()))
+            ib = c2.text_input("ISIN B").strip().upper()
+            if st.button("VS") and ib:
+                rb, info = cerca_db(ib, cb)
+                b = processa_riga(rb, info) if rb is not None else None
+                if b:
+                    diff_anni = abs(((a['sc'] - date.today()).days/365.25) - ((b['sc'] - date.today()).days/365.25))
+                    tax_a = determina_tasse(a['fonte'], a['desc'])
+                    tax_b = determina_tasse(b['fonte'], b['desc'])
+                    
+                    if diff_anni > 5: st.warning(f"⚠️ Attenzione: Confronti bond con scadenza molto diversa ({diff_anni:.1f} anni diff).")
+                    if tax_a != tax_b: st.info("ℹ️ Nota: Tassazioni diverse. Guarda il YTM Netto.")
+                    
+                    ra = calcola_metriche_rischio(a['pr'], a['ced'], a['sc'], a['freq'])
+                    rb = calcola_metriche_rischio(b['pr'], b['ced'], b['sc'], b['freq'])
+                    k1, k2, k3 = st.columns(3)
+                    # Use session state for patrimony in manual comparison too, or default
+                    pat = st.session_state.patrimonio
+                    k1.metric("A YTM Net", f"{analizza_bond_quality_dettagliata(a, ra, tax_a, pat)['ytm_netto']:.2f}%")
+                    k2.markdown("<h2>VS</h2>", unsafe_allow_html=True)
+                    k3.metric("B YTM Net", f"{analizza_bond_quality_dettagliata(b, rb, tax_b, pat)['ytm_netto']:.2f}%")
+                else: st.error("B non trovato")
+        else: st.warning("Salva un bond prima.")
 
     elif st.session_state.page == "Portafoglio":
         st.title("💼 Portafoglio")
