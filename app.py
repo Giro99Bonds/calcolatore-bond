@@ -536,74 +536,147 @@ def main_app():
         if st.button("🚪 Logout"): st.session_state.logged_in = False; st.rerun()
 
     # --- PAGES ---
+    # --- PAGINA 1: SCANNER (POTENZIATO PER RETAIL) ---
     if st.session_state.page == "Scanner":
-        st.title("🔎 Scanner Obbligazionario")
-        st.markdown("### 📍 Guida alle Categorie")
-        l1, l2, l3, l4 = st.columns(4)
-        with l1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span><b>Stati</b><br>Italia, Germania, USA, Francia</div>""", unsafe_allow_html=True)
-        with l2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span><b>Banche</b><br>Intesa, UniCredit, Subordinate</div>""", unsafe_allow_html=True)
-        with l3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span><b>Aziende</b><br>Eni, Stellantis, Telecom</div>""", unsafe_allow_html=True)
-        with l4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span><b>Misti</b><br>Zero Coupon, 25y+, Callable</div>""", unsafe_allow_html=True)
+        st.title("🔎 Scanner Obbligazionario Pro")
+        st.caption("Analisi approfondita per l'investitore consapevole.")
+        
+        # Legenda categorie (Rimpicciolita per pulizia)
+        with st.expander("ℹ️ Legenda Categorie"):
+            l1, l2, l3, l4 = st.columns(4)
+            with l1: st.markdown("🏛️ **GOVERNATIVI**: Stati (BTP, Bund)")
+            with l2: st.markdown("🏦 **FINANZIARI**: Banche (Intesa, UniCredit)")
+            with l3: st.markdown("🏭 **CORPORATE**: Aziende (Eni, Stellantis)")
+            with l4: st.markdown("💎 **SPECIALI**: Zero Coupon, ecc.")
         
         st.divider()
-        c1, c2 = st.columns([2, 1])
-        cat = c1.selectbox("Categoria", list(SOURCES_MAP.keys()))
-        isin = c2.text_input("ISIN", placeholder="IT...").strip().upper()
         
-        if isin:
-            if not valida_isin(isin): st.error("ISIN invalido")
+        # Input area
+        col_cat, col_isin = st.columns([2, 1])
+        with col_cat:
+            categoria = st.selectbox("Categoria Bond", list(SOURCES_MAP.keys()))
+        with col_isin:
+            isin_input = st.text_input("Inserisci ISIN", placeholder="IT...").strip().upper()
+        
+        if isin_input:
+            if not valida_isin(isin_input):
+                st.error("❌ ISIN non valido")
             else:
-                with st.spinner("Cercando..."):
-                    row, info = cerca_db(isin, cat)
+                with st.spinner("Recupero dati e calcolo metriche..."):
+                    row, info = cerca_db(isin_input, categoria)
                     d = processa_riga(row, info) if row is not None else None
+                
                 if d:
+                    # Calcoli Base
                     tax = determina_tasse(d['fonte'], d['desc'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     qual = analizza_bond_quality(d, risk, tax)
-                    st.markdown(f"""<div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 25px; border-radius: 12px; border-left: 6px solid #00CC96; margin: 20px 0;"><div class="main-header">{d['desc']}</div><div class="sub-header">ISIN: {isin} | Rating: {d['rating']} | Tax: {tax}%</div><div style="margin-top:10px;font-size:18px;color:#00CC96;">Score: {qual['score']}/100</div></div>""", unsafe_allow_html=True)
                     
-                    m1, m2, m3, m4, m5 = st.columns(5)
-                    m1.metric("Prezzo", f"{d['pr']}€")
-                    m2.metric("YTM Lordo", f"{risk['ytm']:.2f}%" if risk else "N/A")
-                    m3.metric("YTM Netto", f"{qual['ytm_netto']:.2f}%")
-                    m4.metric("Cedola", f"{d['ced']}%")
-                    m5.metric("Durata", f"{(d['sc'] - date.today()).days / 365.25:.1f} Y")
+                    # HEADER INFORMATIVO
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin: 20px 0;">
+                        <h3 style="color:white; margin:0;">{d['desc']}</h3>
+                        <div style="color:#b0b3c5; font-size:14px; margin-top:5px;">
+                            ISIN: <b>{isin_input}</b> | Prezzo: <b>{d['pr']}€</b> | Scadenza: <b>{d['sc'].strftime('%d/%m/%Y')}</b> | Tax: <b>{tax}%</b>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    st.divider(); st.subheader("💶 Simulatore"); c_sim1, c_sim2 = st.columns([1, 2])
-                    with c_sim1: imp = st.number_input("Capitale (€)", value=10000, step=1000)
-                    df_flussi = genera_flussi(d, imp, tax)
-                    prof = df_flussi['Flow'].sum() - imp
-                    with c_sim2: st.metric("Profitto Netto", f"{prof:+.2f}€", f"Su {imp:,.0f}€")
+                    # TABS PER ANALISI A LIVELLI
+                    tab_main, tab_real, tab_whatif, tab_cedole = st.tabs([
+                        "📊 Analisi Base", 
+                        "🍔 Rendimento Reale", 
+                        "🔮 Simulatore 'What If'", 
+                        "📅 Cedolario"
+                    ])
                     
-                    st.divider(); r1, r2 = st.columns([1, 2])
-                    with r1:
-                        st.subheader("⚠️ Rischio")
-                        if risk: st.markdown(f"""<div class="metric-card"><b>Duration:</b> {risk['mod_dur']:.2f}</div><div class="metric-card"><b>Convexity:</b> {risk['convexity']:.2f}</div>""", unsafe_allow_html=True)
-                    with r2:
-                        st.subheader("⚡ Stress Test")
+                    # --- TAB 1: ANALISI BASE ---
+                    with tab_main:
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("YTM Lordo", f"{risk['ytm']:.2f}%" if risk else "N/A")
+                        m2.metric("YTM Netto", f"{qual['ytm_netto']:.2f}%", help="Rendimento annuo pulito dalle tasse")
+                        m3.metric("Cedola", f"{d['ced']}%")
+                        m4.metric("Duration", f"{risk['mod_dur']:.2f}" if risk else "N/A", help="Sensibilità ai tassi")
+                        
+                        st.subheader("🚩 Analisi Qualità")
+                        c_flg, c_score = st.columns([2, 1])
+                        with c_flg:
+                            for ft, txt in qual['flags']:
+                                color = "red-flag" if ft=="red" else "warning-flag" if ft=="warning" else "green-flag"
+                                st.markdown(f'<div class="{color}">{txt}</div>', unsafe_allow_html=True)
+                            if not qual['flags']: st.markdown('<div class="green-flag">✅ Nessuna criticità rilevata</div>', unsafe_allow_html=True)
+                        with c_score:
+                            st.metric("Punteggio Quality", f"{qual['score']}/100")
+
+                        # Azioni rapide
+                        c_btn1, c_btn2 = st.columns(2)
+                        if c_btn1.button("📌 Salva per Confronto", use_container_width=True):
+                            st.session_state.confronto = d; st.success("Salvato!")
+                        if c_btn2.button("💼 Aggiungi a Portafoglio", use_container_width=True):
+                            st.session_state.portfolio.append({"ISIN": isin_input, "Desc": d['desc'], "Nominale": 10000, "Valore": (10000*d['pr'])/100, "YTM": risk['ytm'] if risk else 0, "Scadenza": d['sc']})
+                            st.success("Aggiunto (Nominale 10k)!")
+
+                    # --- TAB 2: RENDIMENTO REALE ---
+                    with tab_real:
+                        st.info("💡 **Il nemico è l'inflazione.** Se il bond rende il 3% ma l'inflazione è al 4%, stai perdendo potere d'acquisto.")
+                        
+                        col_inf, col_res = st.columns([1, 2])
+                        with col_inf:
+                            inflazione_attesa = st.slider("Inflazione Media Attesa (%)", 0.0, 10.0, 2.0, 0.5)
+                        
+                        with col_res:
+                            ytm_netto = qual['ytm_netto']
+                            rendimento_reale = ytm_netto - inflazione_attesa
+                            
+                            if rendimento_reale > 0:
+                                st.success(f"✅ **Guadagno Reale:** +{rendimento_reale:.2f}%")
+                                st.caption("Il tuo capitale cresce più del costo della vita.")
+                            else:
+                                st.error(f"❌ **Perdita Reale:** {rendimento_reale:.2f}%")
+                                st.caption("Attenzione: Il rendimento non copre l'aumento dei prezzi.")
+
+                    # --- TAB 3: SIMULATORE 'WHAT IF' ---
+                    with tab_whatif:
+                        st.warning("🔮 **Sfera di Cristallo:** Cosa succede se vendi PRIMA della scadenza e i tassi cambiano?")
+                        
                         if risk:
-                            shocks = [-100, -50, 0, +50, +100]
-                            prices = [stress_test(d['pr'], risk['mod_dur'], risk['convexity'], s) for s in shocks]
-                            fig = go.Figure(go.Scatter(x=shocks, y=prices, mode='lines+markers+text', text=[f"{p:.1f}" for p in prices], textposition="top center", line=dict(color='#636EFA', width=3)))
-                            fig.update_layout(height=250, margin=dict(t=20,b=0), template="plotly_dark")
-                            st.plotly_chart(fig, use_container_width=True)
-                    
-                    c_flg, c_cf = st.columns([1, 2])
-                    with c_flg:
-                        st.subheader("🚩 Flags")
-                        for ft, txt in qual['flags']:
-                            color = "red-flag" if ft=="red" else "warning-flag" if ft=="warning" else "green-flag"
-                            st.markdown(f'<div class="{color}">{txt}</div>', unsafe_allow_html=True)
-                        if not qual['flags']: st.markdown('<div class="green-flag">✅ Ok</div>', unsafe_allow_html=True)
-                    with c_cf:
-                        t1, t2 = st.tabs(["💰 Flussi", "⚙️ Azioni"])
-                        with t1: st.dataframe(df_flussi, use_container_width=True)
-                        with t2:
-                            if st.button("📌 Salva Confronto"): st.session_state.confronto = d; st.success("Ok")
-                            if st.button("💼 Aggiungi Portafoglio"):
-                                st.session_state.portfolio.append({"ISIN": isin, "Desc": d['desc'], "Nominale": imp, "Valore": (imp*d['pr'])/100, "YTM": risk['ytm'] if risk else 0, "Scadenza": d['sc']})
-                                st.success("Ok")
-                else: st.info("Non trovato. Aggiorna DB.")
+                            cw1, cw2 = st.columns(2)
+                            with cw1:
+                                anni_hold = st.slider("Tra quanti anni vendi?", 1, int((d['sc'] - date.today()).days/365.25), 1)
+                            with cw2:
+                                delta_tassi = st.slider("Variazione Tassi di Mercato", -3.0, +3.0, 0.0, 0.5, format="%+.1f%%")
+                            
+                            # Calcolo Semplificato Prezzo Futuro
+                            duration_residua = max(0, risk['mod_dur'] - anni_hold)
+                            impatto_tassi = -(duration_residua * (delta_tassi / 100)) * d['pr']
+                            pull_to_par = (100 - d['pr']) * (anni_hold / ((d['sc'] - date.today()).days/365.25))
+                            
+                            prezzo_futuro_stimato = d['pr'] + impatto_tassi + pull_to_par
+                            
+                            col_p1, col_p2 = st.columns(2)
+                            col_p1.metric("Prezzo Oggi", f"{d['pr']:.2f}")
+                            col_p2.metric("Prezzo Stimato Vendita", f"{prezzo_futuro_stimato:.2f}", delta=f"{prezzo_futuro_stimato - d['pr']:.2f}")
+                            
+                            st.write(f"**Spiegazione:** Se i tassi salgono del **{delta_tassi}%**, il prezzo del bond scende per adeguarsi. Più lunga è la scadenza (Duration), più il prezzo oscilla.")
+                        else:
+                            st.error("Dati insufficienti per la simulazione.")
+
+                    # --- TAB 4: CEDOLARIO ---
+                    with tab_cedole:
+                        st.write("📅 **I tuoi flussi di cassa (Esempio su 10.000€)**")
+                        df_cf = genera_flussi(d, 10000, tax)
+                        df_future = df_cf[df_cf['Data'] > date.today()]
+                        
+                        fig_timeline = px.bar(df_future, x='Data', y='Flow', color='Tipo', 
+                                            text_auto='.0f', title="Calendario Incassi", template='plotly_dark',
+                                            color_discrete_map={'Cedola': '#00CC96', 'Rimborso': '#EF553B'})
+                        st.plotly_chart(fig_timeline, use_container_width=True)
+                        
+                        with st.expander("Vedi tabella dettagliata"):
+                            st.dataframe(df_future.style.format({'Flow': '{:+.2f}€', 'Cum': '{:.2f}€'}), use_container_width=True)
+
+                else:
+                    st.info("ISIN non trovato nel database o dati incompleti.")
 
     elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Fair Value")
