@@ -441,35 +441,33 @@ def cerca_db(isin, cat):
 def calcola_rateo(dati):
     """Calcola il rateo maturato in percentuale"""
     try:
+        today_dt = date.today()
         if dati['freq'] == 0: return 0.0
-        oggi = date.today()
-        # Logica semplificata: andiamo indietro dalla scadenza per trovare l'ultima cedola
         giorni_cedola = 365 / dati['freq']
         data_ced = dati['sc']
+        # Trova la data di inizio godimento della cedola corrente
         while data_ced > today_dt:
             data_ced -= timedelta(days=int(giorni_cedola))
-        # Se data_ced è oggi o futuro prossimo (imprecisione), correggiamo
-        today_dt = date.today()
-        if data_ced > today_dt: data_ced -= timedelta(days=int(giorni_cedola))
         
+        # data_ced è ora la data di stacco precedente
         giorni_trascorsi = (today_dt - data_ced).days
+        
+        # Correzione se siamo esattamente sul giorno cedola o calcoli strani
+        if giorni_trascorsi < 0: giorni_trascorsi = 0
+        
         rateo = (dati['ced'] / dati['freq']) * (giorni_trascorsi / giorni_cedola)
         return max(0.0, rateo)
-    except: 
-        # Fallback molto grezzo se date falliscono: 0.5 di una cedola
-        return (dati['ced'] / dati['freq']) * 0.5 if dati['freq'] > 0 else 0
+    except: return 0.0
 
 def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
     flussi = []
     # 1. Costi
-    # Stima Rateo: simuliamo che siamo a metà periodo se calcolo fallisce, o usiamo funzione
     rateo_pct = calcola_rateo(dati)
     costo_titolo = (nominale * prezzo_acquisto) / 100
     costo_rateo_lordo = (nominale * rateo_pct) / 100
-    # Tassazione rateo: solitamente paghi il netto al venditore se sostituto d'imposta, 
-    # ma qui mostriamo uscita lorda per prudenza o netto. 
-    # Facciamo Netto per essere precisi: Rateo Netto = Rateo Lordo * (1 - tax)
-    costo_rateo_netto = costo_rateo * (1 - tax_rate/100)
+    # Nota: il rateo si paga al netto se l'intermediario è sostituto, ma per semplicità retail qui mostriamo l'impatto fiscale corretto dopo
+    # Standard italiano: si paga rateo netto (rateo lordo * (1 - tax))
+    costo_rateo_netto = costo_rateo_lordo * (1 - tax_rate/100)
     
     spesa_totale = costo_titolo + costo_rateo_netto + commissioni
     flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto + Rateo + Comm."})
@@ -491,11 +489,13 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
                 totale_incassato += cedola_netta
                 
     # 3. Rimborso
-    # Capital Gain Tax: (Nominale - Costo_Titolo_Fiscale) * 12.5%
-    # Assumiamo Prezzo Fiscale = Prezzo Acquisto
-    plusvalenza = max(0, nominale - costo_titolo)
-    tassa_cg = plusvalenza * (tax_rate/100)
-    rimborso_netto = nominale - tassa_cg
+    # Tassazione sul Capital Gain (Prezzo Rimborso 100 - Prezzo Acquisto)
+    # Se Prezzo Acquisto > 100, genera Minusvalenza (credito fiscale), qui non lo contiamo come cash flow positivo per prudenza
+    # Se Prezzo Acquisto < 100, si paga il 12.5% sulla differenza
+    gain = max(0, 100 - prezzo_acquisto) 
+    tassa_gain = (gain / 100 * nominale) * (tax_rate/100)
+    
+    rimborso_netto = nominale - tassa_gain
     
     ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
     flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA", "Importo": rimborso_netto + ultima_ced, "Dettagli": "Rimborso + Ultima Cedola"})
@@ -665,7 +665,6 @@ def main_app():
                     
                     df_flussi, spesa_tot, incasso_tot, costo_rateo = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
                     guadagno_netto = incasso_tot - spesa_tot
-                    # Calcolo rendimento semplice
                     anni_durata = (d['sc'] - date.today()).days / 365.25
                     rend_annuo_semplice = (guadagno_netto / spesa_tot / anni_durata) * 100 if anni_durata > 0 else 0
                     
