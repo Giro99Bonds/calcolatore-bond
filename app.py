@@ -456,36 +456,47 @@ def aggiorna_db():
                 if os.path.isfile(file_path):
                     os.unlink(file_path)
             except Exception as e:
-                print(f"Errore eliminazione {f}: {e}")
+                pass # Ignora errori di cancellazione
     
-    # 2. DOWNLOAD: Scarica i nuovi file
-    p = st.progress(0); s = st.empty()
-    tot = sum(len(v) for v in SOURCES_MAP.values()); c = 0; ok = 0
+    # 2. DOWNLOAD: Scarica i nuovi file con PAUSA ANTI-BAN
+    p = st.progress(0)
+    s = st.empty()
+    tot = sum(len(v) for v in SOURCES_MAP.values())
+    c = 0
+    ok = 0
     
     for cat, sources in SOURCES_MAP.items():
         for src in sources:
-            c += 1; s.text(f"Scarico {src['nome']} ({c}/{tot})...")
+            c += 1
+            
+            # --- MODIFICA ANTI-BAN: Pausa casuale tra 1.5 e 3.5 secondi ---
+            # Simula il tempo di "lettura" umano tra un click e l'altro
+            sleep_time = random.uniform(1.5, 3.5)
+            s.text(f"⏳ Attesa prudenziale ({sleep_time:.1f}s) -> Scarico {src['nome']} ({c}/{tot})...")
+            time.sleep(sleep_time) 
+            # ---------------------------------------------------------------
+
             p.progress(c/tot)
             try:
-                r = requests.get(src['url'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-                # Forza il parsing delle tabelle con il decimale corretto
+                r = requests.get(src['url'], headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}, timeout=15)
+                
+                # Forza il parsing delle tabelle
                 dfs = pd.read_html(r.text, decimal=",", thousands=".")
-                found = False
                 for df in dfs:
-                    # Cerca la tabella giusta controllando le colonne
+                    # Cerca la tabella giusta
                     if any('ISIN' in str(col).upper() for col in df.columns):
-                        # Pulizia base del dataframe
                         df.to_csv(os.path.join(DB_FOLDER, f"{src['nome']}.csv"), index=False)
                         ok += 1
-                        found = True
                         break
             except Exception as e:
-                # print(f"Errore su {src['nome']}: {e}") # Debug opzionale
+                # Se fallisce, aspetta un po' di più prima di riprovare col prossimo
+                time.sleep(2)
                 pass
                 
     st.session_state.last_scrape_time = datetime.now()
-    s.empty(); p.empty(); 
-    st.toast(f"Database Rigenerato: {ok}/{tot} files scaricati corretti.", icon="✅")
+    s.empty()
+    p.empty()
+    st.toast(f"Database Rigenerato in sicurezza: {ok}/{tot} files.", icon="🛡️")
     time.sleep(1)
     st.rerun()
 
