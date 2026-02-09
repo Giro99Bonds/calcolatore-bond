@@ -473,7 +473,7 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
     flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto + Rateo + Comm."})
     
     # 2. Cedole
-    totale_incassato = 0
+    totale_cedole_nette = 0
     if dati['freq'] > 0:
         cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
         curr = dati['sc']
@@ -486,23 +486,31 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
         for d in date_cedole:
             if d != dati['sc']:
                 flussi.append({"Data": d, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola Netta"})
-                totale_incassato += cedola_netta
+                totale_cedole_nette += cedola_netta
                 
     # 3. Rimborso
     # Capital Gain Tax: (Prezzo Rimborso (100) - Prezzo Acquisto) * 12.5%
-    # Se prezzo acquisto > 100, genera minusvalenza (qui ignorata per prudenza nel cash flow)
     gain = max(0, 100 - prezzo_acquisto)
-    # Il gain è su 100 di nominale, quindi proporzioniamo al nominale investito
+    # Gain in Euro sul nominale investito
     gain_euro = (gain / 100) * nominale
     tassa_gain = gain_euro * (tax_rate/100)
+    
+    # Plusvalenza netta reale (Gain Lordo - Tasse)
+    plusvalenza_netta = gain_euro - tassa_gain
     
     rimborso_netto = nominale - tassa_gain
     
     ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
     flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA", "Importo": rimborso_netto + ultima_ced, "Dettagli": "Rimborso + Ultima Cedola"})
-    totale_incassato += (rimborso_netto + ultima_ced)
     
-    return pd.DataFrame(flussi), spesa_totale, totale_incassato, costo_rateo_netto
+    # Per il calcolo del ritorno totale, sommiamo tutto ciò che entra
+    # Totale Entrate = Somma cedole intermedie + Rimborso finale + Ultima cedola
+    incasso_totale = totale_cedole_nette + rimborso_netto + ultima_ced
+    
+    # Aggiungiamo l'ultima cedola al contatore delle cedole per la visualizzazione breakdown
+    totale_cedole_nette += ultima_ced
+
+    return pd.DataFrame(flussi), spesa_totale, incasso_totale, costo_rateo_netto, totale_cedole_nette, plusvalenza_netta
 
 # ==============================================================================
 # 7. INTERFACCIA UTENTE
@@ -632,15 +640,26 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 1. METRICS DASHBOARD (RIPRISTINATO E POTENZIATO)
+                    # 1. METRICS DASHBOARD (CON TOOLTIPS EDUCATIVI)
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
-                    c1.metric("Prezzo", f"{d['pr']}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari")
-                    c2.metric("Rendimento Netto", f"{qual['ytm_netto']:.2f}%")
-                    c3.metric("Rendimento Lordo", f"{risk['ytm']:.2f}%")
-                    c4.metric("Cedola", f"{d['ced']}%")
-                    c5.metric("Taglio Minimo", f"{d['taglio']:,.0f}€")
-                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni")
+                    c1.metric("Prezzo", f"{d['pr']}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari", 
+                              help="💰 **Cosa significa?**\n\n• **Sotto la Pari (<100):** Paghi meno del valore che ti rimborseranno. Es: paghi 90, ricevi 100. La differenza è guadagno extra.\n• **Sopra la Pari (>100):** Paghi di più. Es: paghi 105, ricevi 100. È normale se la cedola è alta.")
+                    
+                    c2.metric("Rendimento Netto", f"{qual['ytm_netto']:.2f}%", 
+                              help="📈 **Cosa significa?**\n\nÈ il guadagno reale annuo che ti rimane in tasca, GIA' SOTTRATTE le tasse (12.5% o 26%). È il numero più importante da guardare.")
+                    
+                    c3.metric("Rendimento Lordo", f"{risk['ytm']:.2f}%",
+                              help="È il guadagno annuo PRIMA delle tasse. Serve per confrontare bond con tassazione diversa.")
+                    
+                    c4.metric("Cedola", f"{d['ced']}%", 
+                              help="💸 **Cosa significa?**\n\nÈ l'interesse periodico (il bonifico) che l'emittente ti paga. Es: 4% su 1.000€ = 40€ lordi l'anno.")
+                    
+                    c5.metric("Taglio Minimo", f"{d['taglio']:,.0f}€", 
+                              help="🧱 **Cosa significa?**\n\nÈ la quantità minima che puoi comprare. Se è 1.000€, non puoi investirne 500€.")
+                    
+                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni", 
+                              help="📉 **Cosa significa?**\n\nIndica quanto è rischioso il prezzo. Se la Duration è 6 anni, e i tassi salgono dell'1%, il prezzo del bond scenderà circa del 6%.")
 
                     # 2. ANALISI IN BREVE
                     st.subheader("💡 Analisi in Breve")
@@ -657,7 +676,6 @@ def main_app():
                         st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
                         cedola_netta_euro = (1000 * (d['ced']/100) * (1 - tax/100))
                         
-                        # Logica frequenza cedole
                         if d['freq'] == 1: freq_txt = "in un'unica soluzione annuale"
                         elif d['freq'] == 2: freq_txt = f"in 2 cedole semestrali da {cedola_netta_euro/2:.2f}€"
                         elif d['freq'] == 4: freq_txt = f"in 4 cedole trimestrali da {cedola_netta_euro/4:.2f}€"
@@ -683,7 +701,7 @@ def main_app():
                         investimento = st.number_input("Quanto vuoi investire? (€)", value=10000, step=1000)
                         commissioni = st.number_input("Commissioni Banca (€)", value=5.0, step=1.0, help="Non lo sai? Se hai una banca online (Fineco, Directa) metti 5-10€. Se hai una banca fisica, spesso è lo 0.19% del capitale (es. 19€ su 10k).")
                     
-                    df_flussi, spesa_tot, incasso_tot, costo_rateo = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
+                    df_flussi, spesa_tot, incasso_tot, costo_rateo, totale_cedole_nette, plusvalenza_netta = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
                     guadagno_netto = incasso_tot - spesa_tot
                     anni_durata = (d['sc'] - date.today()).days / 365.25
                     rend_annuo_semplice = (guadagno_netto / spesa_tot / anni_durata) * 100 if anni_durata > 0 else 0
@@ -710,6 +728,16 @@ def main_app():
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
+                        
+                        st.info(f"""
+                        ℹ️ **Perché questo rendimento ({rend_annuo_semplice:.2f}%) è diverso da quello sopra ({qual['ytm_netto']:.2f}%)?**
+                        Perché qui stiamo calcolando i costi reali incluse le **Commissioni Bancarie ({commissioni}€)** che abbassano leggermente il rendimento finale.
+                        
+                        **Composizione del Guadagno ({guadagno_netto:.2f}€):**
+                        1. 🎫 Cedole Nette Totali: +{totale_cedole_nette:.2f}€
+                        2. 📈 Guadagno sul Prezzo (Capital Gain): +{plusvalenza_netta:.2f}€
+                        3. 🏦 Meno Costi (Commissioni): -{commissioni:.2f}€
+                        """)
 
                     with st.expander("📅 Vedi tutti i pagamenti futuri (Cedolario)"):
                         st.dataframe(df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style.format({'Importo': '{:+.2f}€'}), use_container_width=True)
