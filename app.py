@@ -820,11 +820,13 @@ def main_app():
 
     elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Relative Value")
-        st.caption("Analisi professionale del posizionamento rispetto alla curva dei rendimenti.")
-        with st.spinner("Calcolo curve di rendimento..."):
+        st.caption("Confronto professionale con la curva dei rendimenti di mercato.")
+        
+        with st.spinner("Analisi curve in corso..."):
             df_market = carica_dati_mercato()
         
-        if df_market.empty: st.warning("⚠️ Database vuoto. Aggiorna i dati dalla sidebar.")
+        if df_market.empty: 
+            st.warning("⚠️ Database vuoto. Aggiorna i dati dalla sidebar.")
         else:
             col_search, col_kpi = st.columns([1, 3])
             with col_search:
@@ -836,6 +838,7 @@ def main_app():
                 d_smart = processa_riga(row, info) if row is not None else None
                 
                 if d_smart:
+                    # RILEVAMENTO CATEGORIA
                     cat_target = "Altro"
                     if "BTP" in d_smart['desc'].upper() or "BOT" in d_smart['desc'].upper() or "ITALIA" in d_smart['fonte'].upper(): cat_target = "Governativo"
                     elif "BUND" in d_smart['desc'].upper() or "GERMANIA" in d_smart['desc'].upper(): cat_target = "Governativo"
@@ -850,39 +853,49 @@ def main_app():
                     d_smart['isin'] = isin_smart
                     d_smart['Categoria'] = cat_target
                     ytm_s = calcola_rendimento_grezzo(d_smart['pr'], d_smart['ced'], d_smart['sc'])
-                    dur_s = (d_smart['sc'] - date.today()).days / 365.25
+                    anni_scadenza = (d_smart['sc'] - date.today()).days / 365.25 # Usiamo questo come asse X
                     
                     st.divider()
-                    st.subheader(f"📊 Mappa del Mercato: {cat_target} vs Tutti")
-                    st.markdown(f"""
-                    Stai visualizzando il posizionamento di **{d_smart['desc']}** ({cat_target}).
+                    st.subheader(f"📊 Mappa del Mercato: {cat_target}")
                     
-                    * **Stella Rossa:** Il tuo Bond.
-                    * **Punti Verdi:** Titoli di Stato (Rischio Basso).
-                    * **Punti Blu/Viola:** Corporate e Banche (Rischio Medio/Alto - Rendimento maggiore).
+                    # BOX GUIDA GRAFICO
+                    st.info("""
+                    **👀 Come leggere il grafico:**
+                    * **Asse X (Orizzontale):** Scadenza (Tra quanti anni riprendi i soldi).
+                    * **Asse Y (Verticale):** Rendimento Annuo Lordo (Quanto paga il mercato).
+                    * **Puntini:** Più sono in alto, più rendono (ma spesso indicano più rischio).
                     """)
                     
                     range_zoom = 4
                     df_zoom = df_market[
-                        (df_market['Anni'] >= dur_s - range_zoom) & 
-                        (df_market['Anni'] <= dur_s + range_zoom) &
+                        (df_market['Anni'] >= anni_scadenza - range_zoom) & 
+                        (df_market['Anni'] <= anni_scadenza + range_zoom) &
                         (df_market['YTM_Grezzo'] > -2) & (df_market['YTM_Grezzo'] < 15)
                     ].copy()
                     
+                    # GRAFICO MIGLIORATO
                     fig = px.scatter(
                         df_zoom, x='Anni', y='YTM_Grezzo', 
                         color='Categoria', 
-                        hover_data=['ISIN', 'Desc', 'Prezzo'],
+                        hover_data={
+                            'ISIN': True, 
+                            'Desc': True, 
+                            'Prezzo': ':.2f', 
+                            'Anni': ':.1f', 
+                            'YTM_Grezzo': ':.2f',
+                            'Categoria': False
+                        },
                         color_discrete_map={
                             "Governativo": "#00CC96", 
                             "Bancario": "#AB63FA",    
                             "Corporate": "#636EFA",   
                             "Altro": "#EF553B"        
                         },
-                        opacity=0.6,
-                        labels={'Anni': 'Duration (Anni)', 'YTM_Grezzo': 'Rendimento Lordo (%)'}
+                        opacity=0.7,
+                        labels={'Anni': 'Anni alla Scadenza', 'YTM_Grezzo': 'Rendimento Lordo (%)'}
                     )
                     
+                    # Trendline Categoria Specifica
                     df_cat_specific = df_zoom[df_zoom['Categoria'] == cat_target]
                     if len(df_cat_specific) > 5:
                         z = np.polyfit(df_cat_specific['Anni'], df_cat_specific['YTM_Grezzo'], 2)
@@ -890,13 +903,14 @@ def main_app():
                         x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
                         fig.add_trace(go.Scatter(x=x_trend, y=p(x_trend), mode='lines', name=f'Media {cat_target}', line=dict(color='yellow', width=3, dash='dot')))
                         
-                        fair_yield = p(dur_s)
+                        fair_yield = p(anni_scadenza)
                         delta_spread = ytm_s - fair_yield
                         sigma = np.std(df_cat_specific['YTM_Grezzo'] - p(df_cat_specific['Anni']))
                         z_score = delta_spread / sigma if sigma > 0 else 0
                     else:
                         fair_yield = ytm_s; delta_spread = 0; z_score = 0; sigma = 0
 
+                    # Benchmark Governativo (se non lo è già)
                     if cat_target != "Governativo":
                         df_gov = df_zoom[df_zoom['Categoria'] == "Governativo"]
                         if len(df_gov) > 5:
@@ -905,9 +919,14 @@ def main_app():
                             x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
                             fig.add_trace(go.Scatter(x=x_trend, y=p_gov(x_trend), mode='lines', name='Risk Free (Stati)', line=dict(color='#00CC96', width=2)))
 
-                    fig.add_trace(go.Scatter(x=[dur_s], y=[ytm_s], mode='markers+text', name='TUO BOND', text=['📍 TU'], textposition="top center", marker=dict(color='red', size=20, symbol='star')))
+                    fig.add_trace(go.Scatter(x=[anni_scadenza], y=[ytm_s], mode='markers+text', name='TUO BOND', text=['📍 TU'], textposition="top center", marker=dict(color='red', size=22, symbol='star')))
                     
-                    fig.update_layout(template="plotly_dark", height=550, title=dict(text="Market Landscape: Rischio vs Rendimento", font=dict(size=20)))
+                    fig.update_layout(
+                        template="plotly_dark", 
+                        height=500,
+                        hovermode="closest",
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
                     
                     selected_point = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
                     if selected_point and len(selected_point['selection']['points']) > 0:
@@ -919,44 +938,53 @@ def main_app():
                                 st.rerun()
                         except: pass
 
+                    # --- ANALISI DEL VALORE (CON SPIEGAZIONI) ---
                     st.divider()
-                    st.subheader("🌡️ Analisi del Valore (Relativo alla Categoria)")
+                    st.subheader("🌡️ Analisi del Valore")
                     
                     c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
                     
-                    c_kpi1.metric("Rendimento Tuo Bond", f"{ytm_s:.2f}%")
-                    c_kpi2.metric(f"Fair Value ({cat_target})", f"{fair_yield:.2f}%", help=f"Quanto dovrebbe rendere un bond {cat_target} con questa durata secondo la media matematica.")
+                    c_kpi1.metric("Rendimento Lordo (Tuo)", f"{ytm_s:.2f}%", help="Rendimento annuo prima delle tasse.")
+                    c_kpi2.metric(f"Fair Value ({cat_target})", f"{fair_yield:.2f}%", help=f"La 'Media Matematica' di quanto rendono oggi i bond {cat_target} con scadenza {anni_scadenza:.1f} anni.")
                     
                     verdetto = ""; colore_box = ""; spiegazione = ""
                     
                     if z_score > 1.2:
                         verdetto = "💎 SOTTOVALUTATO (Cheap)"; colore_box = "rgba(0, 204, 150, 0.2)"
-                        spiegazione = f"Rende il **{delta_spread:+.2f}%** in più rispetto alla media dei {cat_target}. Ottimo potenziale, ma verifica che l'emittente non sia in crisi."
+                        spiegazione = f"Questo bond offre un **premio del {delta_spread:+.2f}%** rispetto alla media della sua categoria. È statisticamente 'economico'. Potrebbe essere un'ottima occasione o l'emittente è percepito leggermente più a rischio degli altri."
                     elif z_score > 0.4:
                         verdetto = "✅ BUON VALORE"; colore_box = "rgba(0, 204, 150, 0.1)" 
-                        spiegazione = f"Rende leggermente sopra la media ({delta_spread:+.2f}%). Un buon acquisto difensivo."
+                        spiegazione = f"Rende leggermente più della media ({delta_spread:+.2f}%). È posizionato bene sulla curva dei rendimenti."
                     elif z_score < -1.2:
                         verdetto = "❌ SOPRAVALUTATO (Rich)"; colore_box = "rgba(255, 75, 75, 0.2)"
-                        spiegazione = f"Rende molto meno ({delta_spread:+.2f}%) della media. È caro. Probabilmente è un emittente ultra-sicuro (es. Germania) o molto richiesto."
+                        spiegazione = f"Rende molto meno della media ({delta_spread:+.2f}%). Significa che è 'caro'. Di solito succede con bond ultra-sicuri (es. Germania) o molto liquidi."
                     elif z_score < -0.4:
                         verdetto = "⚠️ RENDIMENTO BASSO"; colore_box = "rgba(255, 170, 0, 0.1)"
-                        spiegazione = f"Rende sotto la media ({delta_spread:+.2f}%). Ci sono alternative più redditizie a parità di rischio."
+                        spiegazione = f"Rende sotto la media ({delta_spread:+.2f}%). A parità di rischio e scadenza, il mercato offre alternative migliori."
                     else:
                         verdetto = "⚖️ FAIR VALUE (In Linea)"; colore_box = "rgba(128, 128, 128, 0.1)"
-                        spiegazione = "Il prezzo è corretto e allineato al mercato."
+                        spiegazione = "Il prezzo è corretto. Il rendimento è esattamente quello che ci si aspetta dal mercato oggi."
 
-                    c_kpi3.metric("Spread vs Categoria", f"{delta_spread:+.2f}%", delta_color="normal")
+                    c_kpi3.metric("Spread vs Media", f"{delta_spread:+.2f}%", delta_color="normal", help="Differenza tra il rendimento del tuo bond e il Fair Value.")
 
                     st.markdown(f"""
                     <div style="background-color: {colore_box}; padding: 20px; border-radius: 10px; border-left: 5px solid white;">
                         <h3 style="margin:0;">{verdetto}</h3>
-                        <p style="margin-top:10px; font-size:16px;">{spiegazione}</p>
+                        <p style="margin-top:10px; font-size:15px;">{spiegazione}</p>
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    with st.expander("🎓 Come leggere questi dati (Clicca per info)"):
+                        st.markdown("""
+                        * **Fair Value:** Immaginalo come il "prezzo giusto" calcolato guardando tutti gli altri bond simili.
+                        * **Spread vs Media:** Se è positivo (+), guadagni più della media. Se è negativo (-), guadagni meno.
+                        * **Nota:** Confrontiamo sempre "Mele con Mele" (es. BTP con BTP, Corporate con Corporate) per non darti falsi segnali.
+                        """)
 
+                    # --- ALTERNATIVE ---
                     st.divider()
                     st.subheader(f"🔄 Alternative Smart ({cat_target})")
-                    st.caption(f"Bond {cat_target} con durata simile che offrono un rendimento migliore.")
+                    st.caption("Bond della stessa categoria, con scadenza simile, che offrono un rendimento migliore.")
                     
                     alternative = trova_alternative_migliori(d_smart, df_market, categoria_obbligatoria=cat_target)
                     
@@ -964,16 +992,17 @@ def main_app():
                         st.dataframe(
                             alternative[['Tipologia', 'ISIN', 'Desc', 'Prezzo', 'YTM_Netto', 'Extra', 'Link']],
                             column_config={
-                                "Link": st.column_config.LinkColumn("Scheda", display_text="🔗 Apri"),
-                                "YTM_Netto": st.column_config.NumberColumn("YTM Netto", format="%.2f%%"),
-                                "Extra": st.column_config.NumberColumn("Delta Yield", format="%+.2f%%", help="Guadagno extra annuo rispetto al tuo bond"),
-                                "Prezzo": st.column_config.NumberColumn("Prezzo", format="%.2f€")
+                                "Link": st.column_config.LinkColumn("Scheda", display_text="🔗 Cerca su Google"),
+                                "YTM_Netto": st.column_config.NumberColumn("Rend. Netto", format="%.2f%%"),
+                                "Extra": st.column_config.NumberColumn("Guadagno Extra", format="%+.2f%%", help="Quanto rendimento netto in più ottieni cambiando bond"),
+                                "Prezzo": st.column_config.NumberColumn("Prezzo", format="%.2f€"),
+                                "Desc": "Descrizione Bond"
                             },
                             use_container_width=True,
                             hide_index=True
                         )
                     else:
-                        st.success(f"🏆 Il tuo bond è già tra i migliori {cat_target} per questa scadenza.")
+                        st.success(f"🏆 Ottima scelta! Al momento non ci sono {cat_target} con scadenza simile che rendono nettamente di più.")
 
                 else: st.error("ISIN non trovato nel database.")
             else: st.info("Inserisci un ISIN per iniziare l'analisi.")
