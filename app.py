@@ -863,20 +863,85 @@ def main_app():
                         3. 🏦 Meno Costi (Commissioni): -{commissioni:.2f}€
                         """)
 
-                    st.subheader("📈 Curva del Recupero Capitale (Breakeven)")
+                    st.divider()
+                    st.subheader("🗓️ Quando recupero i miei soldi?")
                     
                     df_flussi['Cumulativo'] = df_flussi['Importo'].cumsum()
                     
-                    fig_pnl = px.area(
-                        df_flussi, x='Data', y='Cumulativo',
-                        title="Andamento del saldo nel tempo (Quando recupero i soldi?)",
-                        template="plotly_dark",
-                        labels={'Cumulativo': 'Saldo Portafoglio (€)'}
+                    # 1. Calcolo esatto data pareggio
+                    data_pareggio = "A Scadenza"
+                    giorni_pareggio = 0
+                    
+                    # Cerca il primo momento in cui il cumulativo diventa >= 0 (escludendo oggi)
+                    df_pos = df_flussi[(df_flussi['Cumulativo'] >= 0) & (df_flussi['Data'] > date.today())]
+                    
+                    if not df_pos.empty:
+                        data_p = df_pos.iloc[0]['Data']
+                        data_pareggio = data_p.strftime('%d/%m/%Y')
+                        giorni_pareggio = (data_p - date.today()).days
+                        msg_pareggio = f"Tra **{giorni_pareggio} giorni** ({data_pareggio}) avrai recuperato tutto il capitale investito."
+                        color_msg = "rgba(0, 204, 150, 0.1)" # Verde
+                        icona = "✅"
+                    else:
+                        msg_pareggio = "Recupererai il capitale solo alla scadenza del titolo (con il rimborso finale)."
+                        color_msg = "rgba(255, 170, 0, 0.1)" # Arancio
+                        icona = "⏳"
+
+                    # 2. Box Parlante
+                    st.markdown(f"""
+                    <div style="background-color: {color_msg}; padding: 15px; border-radius: 10px; border-left: 5px solid white; margin-bottom: 15px;">
+                        <span style="font-size: 20px;">{icona}</span> <span style="font-size: 16px;">{msg_pareggio}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # 3. Grafico Visuale Rosso/Verde
+                    fig_pnl = go.Figure()
+
+                    # Area Rossa (Sotto zero - "Zona Debito")
+                    # Creiamo una copia dei dati dove mettiamo a 0 tutto ciò che è positivo per colorare solo il negativo
+                    y_neg = df_flussi['Cumulativo'].copy()
+                    y_neg[y_neg > 0] = 0
+                    
+                    fig_pnl.add_trace(go.Scatter(
+                        x=df_flussi['Data'], y=y_neg,
+                        fill='tozeroy', mode='lines', name='Recupero',
+                        line=dict(color='#FF4B4B', width=0), # Linea invisibile, solo riempimento
+                        fillcolor='rgba(255, 75, 75, 0.3)', # Rosso trasparente
+                        hoverinfo='skip'
+                    ))
+
+                    # Area Verde (Sopra zero - "Zona Guadagno")
+                    y_pos = df_flussi['Cumulativo'].copy()
+                    y_pos[y_pos < 0] = 0
+                    
+                    fig_pnl.add_trace(go.Scatter(
+                        x=df_flussi['Data'], y=y_pos,
+                        fill='tozeroy', mode='lines', name='Guadagno',
+                        line=dict(color='#00CC96', width=0),
+                        fillcolor='rgba(0, 204, 150, 0.3)', # Verde trasparente
+                        hoverinfo='skip'
+                    ))
+
+                    # Linea Principale Bianca (Il percorso del saldo)
+                    fig_pnl.add_trace(go.Scatter(
+                        x=df_flussi['Data'], y=df_flussi['Cumulativo'],
+                        mode='lines+markers', name='Saldo Netto',
+                        line=dict(color='white', width=2),
+                        marker=dict(size=6, color='white'),
+                        hovertemplate='<b>Data:</b> %{x|%d/%m/%Y}<br><b>Saldo:</b> %{y:+.2f}€<extra></extra>'
+                    ))
+
+                    fig_pnl.add_hline(y=0, line_dash="dash", line_color="gray")
+                    
+                    fig_pnl.update_layout(
+                        template="plotly_dark", 
+                        height=350, 
+                        showlegend=False,
+                        title=dict(text="Andamento del tuo Saldo (Rosso=Sotto, Verde=Guadagno)", font=dict(size=14)),
+                        yaxis=dict(title="Saldo Portafoglio (€)", zeroline=False),
+                        margin=dict(l=20, r=20, t=40, b=20)
                     )
                     
-                    fig_pnl.add_hline(y=0, line_dash="dash", line_color="white", annotation_text="Pareggio (0€)")
-                    
-                    fig_pnl.update_traces(line_color='#00CC96', fillcolor='rgba(0, 204, 150, 0.2)')
                     st.plotly_chart(fig_pnl, use_container_width=True)
 
                     st.divider()
