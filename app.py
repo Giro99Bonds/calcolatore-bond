@@ -1199,7 +1199,7 @@ def main_app():
         if st.session_state.current_user:
             st.markdown(f"""<div class="user-box">👤 {st.session_state.current_user.capitalize()}</div>""", unsafe_allow_html=True)
         
-        st.subheader("🧭 NAVIGAZIONE")
+        st.subheader("⚙️ TOOLS")
         
         # MENU UNIFICATO
         if st.button("🔎 Scanner Singolo", use_container_width=True): st.session_state.page = "Scanner"; st.rerun()
