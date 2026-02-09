@@ -1485,10 +1485,10 @@ def main_app():
                     st.divider()
                     st.subheader(f"📊 Il tuo Bond vs Il Mercato ({cat_target})")
                     st.info("""
-                    **Guida alla lettura per Marco:**
-                    * **💎 Diamante VIOLA:** È il tuo bond.
-                    * **🔴 Linea ROSSA:** È il rendimento "sicuro" (Germania). La distanza è il tuo guadagno extra per il rischio.
-                    * **🟡 Linea GIALLA:** È la media di mercato. Se sei sopra, il bond rende bene!
+                    **Guida alla lettura:**
+                    * **Rombo VIOLA GIGANTE:** È il tuo bond (Indicato dalla freccia).
+                    * **🔴 Linea ROSSA:** Rendimento "sicuro" (Germania). Se sei sopra, guadagni per il rischio che corri.
+                    * **🟡 Linea GIALLA:** Media del mercato.
                     """)
                     
                     # 2. ZOOM INTELLIGENTE (Via gli outlier assurdi)
@@ -1527,12 +1527,29 @@ def main_app():
                             fair_yield = p2(anni_scad)
                         except: pass
 
-                    # IL TUO BOND (GIGANTE)
+                    # --- MODIFICA UX: IL TUO BOND ---
+                    # 1. Il Marker (Rombo)
                     fig.add_trace(go.Scatter(
-                        x=[anni_scad], y=[ytm_s], mode='markers+text', name='TUO BOND', 
-                        text=['💎 TU'], textposition="top center", textfont=dict(size=14, color='white'),
-                        marker=dict(color='#FF00FF', size=25, symbol='diamond', line=dict(width=2, color='white'))
+                        x=[anni_scad], y=[ytm_s], 
+                        mode='markers', # SOLO MARKER, niente testo qui
+                        name='IL TUO BOND', 
+                        marker=dict(color='#FF00FF', size=25, symbol='diamond', line=dict(width=3, color='white'))
                     ))
+
+                    # 2. La Freccia (Annotation) - Molto più chiaro del testo sovrapposto
+                    fig.add_annotation(
+                        x=anni_scad, y=ytm_s,
+                        text="SEI QUI",
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowsize=1,
+                        arrowwidth=2,
+                        arrowcolor="#FF00FF",
+                        ax=0, ay=-40, # Sposta la scritta in alto di 40px
+                        font=dict(size=14, color="white", family="Arial Black"),
+                        bgcolor="#FF00FF",
+                        borderpad=4
+                    )
                     
                     fig.update_layout(template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1))
                     
@@ -1600,7 +1617,7 @@ def main_app():
 
                 else: st.error("ISIN non trovato nel database.")
             else: st.info("Inserisci un ISIN per iniziare l'analisi.")
-
+                
     elif st.session_state.page == "Screener": bond_screener_ui()
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
