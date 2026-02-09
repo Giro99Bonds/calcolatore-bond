@@ -1320,31 +1320,150 @@ def main_app():
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
     elif st.session_state.page == "Simulatore": simulatore_guadagno_ui()
-    elif st.session_state.page == "SmartAnalysis":
-        # ... (Logica Smart Analysis rimasta invariata)
-        st.title("🧠 Smart Analysis")
-        with st.spinner("Caricamento..."): df_m = carica_dati_mercato()
-        if df_m.empty: st.error("DB Vuoto."); st.stop()
-        c_s, _ = st.columns([1,3]); 
-        with c_s: 
-            i_s = st.text_input("ISIN").strip().upper()
-            c_v = st.selectbox("Filtro", list(MACRO_CATEGORIES.keys()))
-        if i_s:
-            row, info = cerca_db(i_s, c_v)
-            ds = processa_riga(row, info) if row is not None else None
-            if ds:
-                ytm = calcola_rendimento_grezzo(ds['pr'], ds['ced'], ds['sc'])
-                an = (ds['sc'] - date.today()).days / 365.25
-                st.subheader(f"📊 Analisi {ds['desc']}")
+elif st.session_state.page == "SmartAnalysis":
+        st.title("🧠 Smart Analysis & Pro Tools")
+        st.caption("Confronta il tuo bond con il mercato reale.")
+        
+        with st.spinner("Analisi curve dei tassi..."):
+            df_m = carica_dati_mercato()
+        
+        if df_m.empty: 
+            st.warning("⚠️ Database vuoto. Vai su Aggiorna Dati.")
+        else:
+            c_s, _ = st.columns([1, 3])
+            with c_s: 
+                isin_s = st.text_input("Inserisci ISIN", placeholder="IT...").strip().upper()
+                cat_v = st.selectbox("Confronta con...", list(MACRO_CATEGORIES.keys()))
+            
+            if isin_s and valida_isin(isin_s):
+                row, info = cerca_db(isin_s, cat_v)
+                ds = processa_riga(row, info) if row is not None else None
                 
-                # ... (Qui va il grafico Smart completo che ti ho dato nel codice precedente) ...
-                # Per brevità ho omesso, ma nel codice "FULL" precedente c'era tutto.
-                # Se vuoi anche questo pezzo esteso, dimmelo e te lo incollo.
-                
-                fig = px.scatter(df_m, x='Anni', y='YTM_Grezzo', color='Categoria', opacity=0.5)
-                fig.add_trace(go.Scatter(x=[an], y=[ytm], mode='markers', marker=dict(color='red', size=15, symbol='diamond'), name='TUO BOND'))
-                st.plotly_chart(fig, use_container_width=True)
-            else: st.error("Non trovato")
+                if ds:
+                    # 1. Determina Categoria e Dati
+                    cat_target = "Altro"
+                    desc_upp = ds['desc'].upper()
+                    if "BTP" in desc_upp or "BOT" in desc_upp: cat_target = "Governativo"
+                    elif "INTESA" in desc_upp or "UNICREDIT" in desc_upp: cat_target = "Bancario"
+                    elif "ENI" in desc_upp or "ENEL" in desc_upp: cat_target = "Corporate"
+                    
+                    if cat_target == "Altro": 
+                        if "GOVERNATIVI" in cat_view: cat_target = "Governativo"
+                        else: cat_target = "Corporate"
+
+                    ds['isin'] = isin_s; ds['Categoria'] = cat_target
+                    ytm_s = calcola_rendimento_grezzo(ds['pr'], ds['ced'], ds['sc'])
+                    anni_scad = (ds['sc'] - date.today()).days / 365.25
+                    
+                    st.divider()
+                    st.subheader(f"📊 Il tuo Bond vs Il Mercato ({cat_target})")
+                    st.info("""
+                    **Guida alla lettura per Marco:**
+                    * **💎 Diamante VIOLA:** È il tuo bond.
+                    * **🔴 Linea ROSSA:** È il rendimento "sicuro" (Germania). La distanza è il tuo guadagno extra per il rischio.
+                    * **🟡 Linea GIALLA:** È la media di mercato. Se sei sopra, il bond rende bene!
+                    """)
+                    
+                    # 2. ZOOM INTELLIGENTE (Via gli outlier assurdi)
+                    range_zoom = 5 # Anni +/-
+                    df_zoom = df_m[
+                        (df_m['Anni'] >= anni_scad - range_zoom) & 
+                        (df_m['Anni'] <= anni_scad + range_zoom) & 
+                        (df_m['YTM_Grezzo'] > -2) & (df_m['YTM_Grezzo'] < 12) # Taglia errori dati
+                    ].copy()
+                    
+                    # 3. COSTRUZIONE GRAFICO
+                    fig = px.scatter(
+                        df_zoom, x='Anni', y='YTM_Grezzo', color='Categoria', 
+                        hover_data={'Desc':True, 'Prezzo':':.2f'}, 
+                        color_discrete_map={"Governativo": "#00CC96", "Corporate": "#636EFA", "Bancario": "#AB63FA", "Altro": "#EF553B"}, 
+                        opacity=0.5, title=f"Posizionamento rispetto ai Competitor"
+                    )
+                    
+                    x_tr = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
+
+                    # Curva Risk Free (Bund Tedeschi)
+                    df_g = df_m[df_m['Desc'].str.contains("BUND|GERMANIA", case=False, na=False)]
+                    if len(df_g) > 3:
+                        try:
+                            z = np.polyfit(df_g['Anni'], df_g['YTM_Grezzo'], 2); p = np.poly1d(z)
+                            fig.add_trace(go.Scatter(x=x_tr, y=p(x_tr), mode='lines', name='Risk Free (Germania)', line=dict(color='#FF4B4B', width=3, dash='dash')))
+                        except: pass
+
+                    # Curva Media Categoria (Gialla)
+                    df_cat_spec = df_zoom[df_zoom['Categoria'] == cat_target]
+                    fair_yield = ytm_s # Default
+                    if len(df_cat_spec) > 5:
+                        try:
+                            z2 = np.polyfit(df_cat_spec['Anni'], df_cat_spec['YTM_Grezzo'], 2); p2 = np.poly1d(z2)
+                            fig.add_trace(go.Scatter(x=x_tr, y=p2(x_tr), mode='lines', name=f'Media {cat_target}', line=dict(color='#FFD700', width=2)))
+                            fair_yield = p2(anni_scad)
+                        except: pass
+
+                    # IL TUO BOND (GIGANTE)
+                    fig.add_trace(go.Scatter(
+                        x=[anni_scad], y=[ytm_s], mode='markers+text', name='TUO BOND', 
+                        text=['💎 TU'], textposition="top center", textfont=dict(size=14, color='white'),
+                        marker=dict(color='#FF00FF', size=25, symbol='diamond', line=dict(width=2, color='white'))
+                    ))
+                    
+                    fig.update_layout(template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1))
+                    
+                    # Interattività: Se clicchi un punto, lo selezioni
+                    selected = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+                    if selected and len(selected['selection']['points']) > 0:
+                        try:
+                            clk = selected['selection']['points'][0]['customdata'][0] # Assumendo ISIN in customdata, qui semplificato
+                            # Per ora non facciamo nulla al click per evitare errori di indice, solo visualizzazione
+                        except: pass
+
+                    # 4. ANALISI VALORE (KPI)
+                    st.divider(); st.subheader("🌡️ Termometro Valore")
+                    k1, k2, k3 = st.columns(3)
+                    
+                    spread = ytm_s - fair_yield
+                    k1.metric("Il Tuo Rendimento", f"{ytm_s:.2f}%")
+                    k2.metric("Media di Mercato", f"{fair_yield:.2f}%")
+                    k3.metric("Convenienza (Spread)", f"{spread:+.2f}%", delta_color="normal", help="Se positivo, rende più della media!")
+
+                    # Verdetto Testuale
+                    if spread > 0.5: msg = "✅ **OTTIMO:** Questo bond rende molto più della media."; box_c = "rgba(0, 204, 150, 0.2)"
+                    elif spread < -0.5: msg = "❌ **CARO:** Questo bond rende poco rispetto ai simili."; box_c = "rgba(255, 75, 75, 0.2)"
+                    else: msg = "⚖️ **FAIR:** Prezzo allineato al mercato."; box_c = "rgba(128, 128, 128, 0.2)"
+                    
+                    st.markdown(f"""<div style="background-color:{box_c}; padding:15px; border-radius:10px;">{msg}</div>""", unsafe_allow_html=True)
+
+                    # 5. STRESS TEST
+                    st.divider(); st.subheader("🌪️ Cosa succede se i tassi cambiano?")
+                    c_str, c_eff = st.columns([3, 2])
+                    with c_str:
+                        shocks = [-1.0, -0.5, 0.0, +0.5, +1.0]
+                        res = []
+                        for s in shocks:
+                            px_new = ds['pr'] * (1 - (risk_metrics['mod_dur'] * (s/100)))
+                            var = px_new - ds['pr']
+                            res.append({"Variazione Tassi": f"{s:+.1f}%", "Nuovo Prezzo": f"{px_new:.2f}€", "P&L": f"{var:+.2f}€"})
+                        
+                        st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
+                    
+                    with c_eff:
+                        eff_score = ytm_s / risk_metrics['mod_dur'] if risk_metrics['mod_dur'] > 0 else 0
+                        st.metric("Efficienza (Rendimento/Rischio)", f"{eff_score:.2f}")
+                        st.caption("Per ogni punto di rischio (duration), quanto rendimento ottieni? Sopra 0.5 è buono.")
+
+                    # 6. ALTERNATIVE MIGLIORI
+                    st.divider(); st.subheader(f"🔄 Alternative Migliori in {cat_target}")
+                    alt = trova_alternative_migliori(ds, df_m, cat_target)
+                    if not alt.empty:
+                        st.dataframe(
+                            alt[['Tipologia', 'ISIN', 'Desc', 'Prezzo', 'YTM_Netto', 'Extra']], 
+                            use_container_width=True, hide_index=True,
+                            column_config={"Extra": st.column_config.NumberColumn("Guadagno Extra", format="%+.2f%%")}
+                        )
+                    else: st.success("🏆 Complimenti! Hai selezionato uno dei migliori bond della categoria.")
+
+                else: st.error("ISIN non trovato nel database.")
+            else: st.info("Inserisci un ISIN per iniziare l'analisi.")
 
     elif st.session_state.page == "Alerts": alert_manager_ui()
 
