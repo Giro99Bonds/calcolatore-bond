@@ -125,7 +125,7 @@ def init_session_state():
 init_session_state()
 
 # ==============================================================================
-# 3. MAPPA FONTI (DATASET ESTESO - PRO VERSION)
+# 3. MAPPA FONTI (ESTESA - 29 DATASETS)
 # ==============================================================================
 
 SOURCES_MAP = {
@@ -515,8 +515,7 @@ def cerca_db(isin, cat):
                     mask = df[col].astype(str).str.contains(isin, case=False, na=False)
                     if mask.any(): 
                         row = df[mask].iloc[0]
-                        # Tentativo di rilevare la categoria reale
-                        cat_reale = "Governativo" if "BTP" in str(row) or "BOT" in str(row) else "Corporate" # Semplificato
+                        cat_reale = "Governativo" if "BTP" in str(row) or "BOT" in str(row) else "Corporate"
                         return row, {"nome": src['nome'], "freq": src['freq'], "cat_reale": c}
             except: continue
     return None, None
@@ -610,7 +609,7 @@ def main_app():
         st.write("💰 **Il tuo Patrimonio**")
         st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0)
         
-st.divider(); st.subheader("⚙️ SISTEMA")
+        st.divider(); st.subheader("⚙️ SISTEMA")
         last = get_last_update_time()
         if last: 
             # Calcolo delta su orario server (corretto per la logica semaforo)
