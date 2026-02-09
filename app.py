@@ -27,6 +27,27 @@ st.markdown("""
 <style>
     /* --- STILI GENERALI --- */
     .metric-card { background-color: #1e2130; padding: 15px; border-radius: 8px; border: 1px solid #3e445b; margin-bottom: 10px; color: #ffffff !important; }
+    
+    /* --- TRADUTTORE --- */
+    .explanation-box {
+        background-color: #262730;
+        border-left: 4px solid #00CC96;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 15px;
+    }
+    .explanation-title {
+        font-weight: bold;
+        color: #00CC96;
+        font-size: 16px;
+        margin-bottom: 5px;
+    }
+    .explanation-text {
+        font-size: 14px;
+        color: #e0e0e0;
+    }
+
+    /* --- SIDEBAR --- */
     [data-testid="stSidebar"] div.stButton > button { background-color: transparent; border: none; text-align: left; color: #000000 !important; font-weight: 600; }
     [data-testid="stSidebar"] div.stButton > button:hover { color: #333333 !important; background-color: rgba(0,0,0,0.05); }
     
@@ -70,7 +91,6 @@ if not os.path.exists(DB_FOLDER):
     os.makedirs(DB_FOLDER)
 
 def init_session_state():
-    # PERSISTENZA LOGIN TRAMITE URL
     query_params = st.query_params
     session_token = query_params.get("session", None)
     
@@ -128,7 +148,7 @@ SOURCES_MAP = {
 }
 
 # ==============================================================================
-# 4. HELPER FUNCTIONS
+# 4. FUNZIONI UTILI & DATABASE
 # ==============================================================================
 
 def valida_isin(isin):
@@ -157,12 +177,6 @@ def pulisci_taglio(valore):
         except: return 1000.0
     try: return float(s.replace('.', '').replace(',', '.'))
     except: return 1000.0
-
-def get_inflazione_ufficiale():
-    """Recupera inflazione (simulata per stabilità, ma linkata)"""
-    inflazione_corrente = 2.0 
-    fonte_url = "https://www.istat.it/it/archivio/prezzi+al+consumo"
-    return inflazione_corrente, fonte_url
 
 def processa_riga(row, info):
     try:
@@ -199,8 +213,41 @@ def processa_riga(row, info):
         return {"desc": desc, "pr": pr, "sc": sc, "ced": ced, "freq": info['freq'], "fonte": info['nome'], "taglio": taglio, "rating": rating, "isin": isin_val}
     except: return None
 
+def identikit_bond(dati):
+    """Crea un profilo semplice del bond per retail"""
+    desc = dati['desc'].upper()
+    fonte = dati['fonte'].upper()
+    
+    # Chi è?
+    if "ITALIA" in fonte or "BTP" in desc or "BOT" in desc:
+        chi = "🇮🇹 Stato Italiano"
+        tipo = "Prestito allo Stato (Basso Rischio)"
+    elif "GERMANIA" in fonte or "BUND" in desc:
+        chi = "🇩🇪 Stato Tedesco"
+        tipo = "Prestito alla Germania (Sicurezza Max)"
+    elif "USA" in fonte or "TREASURY" in desc:
+        chi = "🇺🇸 Stati Uniti"
+        tipo = "Prestito USA"
+    elif "BANCHE" in fonte or "INTESA" in desc or "UNICREDIT" in desc:
+        chi = "🏦 Banca"
+        tipo = "Obbligazione Bancaria"
+    elif "CORP" in fonte or "ENI" in desc or "ENEL" in desc:
+        chi = "🏭 Azienda"
+        tipo = "Obbligazione Aziendale (Corporate)"
+    else:
+        chi = "🌍 Emittente Internazionale"
+        tipo = "Obbligazione"
+
+    # Quanto manca?
+    diff = (dati['sc'] - date.today())
+    anni = diff.days // 365
+    mesi = (diff.days % 365) // 30
+    tempo = f"{anni} Anni e {mesi} Mesi"
+    
+    return chi, tipo, tempo
+
 # ==============================================================================
-# 5. RISK ENGINE
+# 5. RISK ENGINE E SCORECARD DETTAGLIATA
 # ==============================================================================
 
 def calcola_ytm_preciso(prezzo, cedola_pct, scadenza, freq, face_value=100):
@@ -240,12 +287,9 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
     breakdown = []
     score = 100
     peso_bond = (dati['taglio'] / patrimonio) * 100
-    if peso_bond > 20:
-        punti = -30; msg = f"Rischio alto: pesa il {peso_bond:.1f}% del patrimonio"; colore = "score-bad"
-    elif peso_bond > 10:
-        punti = -10; msg = f"Taglio impegnativo: pesa il {peso_bond:.1f}%"; colore = "score-neutral"
-    else:
-        punti = 0; msg = f"Taglio sostenibile: pesa il {peso_bond:.1f}%"; colore = "score-good"
+    if peso_bond > 20: punti = -30; msg = f"Rischio alto: pesa il {peso_bond:.1f}% del patrimonio"; colore = "score-bad"
+    elif peso_bond > 10: punti = -10; msg = f"Taglio impegnativo: pesa il {peso_bond:.1f}%"; colore = "score-neutral"
+    else: punti = 0; msg = f"Taglio sostenibile: pesa il {peso_bond:.1f}%"; colore = "score-good"
     score += punti
     breakdown.append({"cat": "🏗️ Sostenibilità", "val": f"{dati['taglio']/1000:.0f}k €", "msg": msg, "pts": punti, "col": colore})
 
@@ -344,29 +388,18 @@ def trova_alternative_migliori(bond_target, df_mercato):
     
     alternative = []
     for _, row in df_mercato.iterrows():
-        # Filtro durata stretto
         if not (anni_target - 2 <= row['Anni'] <= anni_target + 2): continue
-        if row['Prezzo'] > 108: continue # Prezzo psicologico
+        if row['Prezzo'] > 108: continue 
         
         rischio_alt = categorizza_rischio(row['ISIN'], row['Fonte'], row['Desc'])
         tax_alt = determina_tasse(row['Fonte'], row['Desc'])
         ytm_netto_alt = row['YTM_Grezzo'] * (1 - tax_alt/100)
         extra = ytm_netto_alt - ytm_netto_target
         
-        # LOGICA SMART SWITCH
         tipo_switch = ""
-        
-        # 1. Gemello Migliore: Stesso rischio, rendimento più alto
-        if rischio_alt == rischio_target and extra > 0.15:
-            tipo_switch = "✅ Gemello Migliore"
-        
-        # 2. Boost Rendimento: Rischio un po' più alto (ma non troppo), rendimento MOLTO più alto
-        elif rischio_alt == rischio_target + 1 and extra > 0.8:
-            tipo_switch = "⚠️ Boost Rendimento (Rischio+)"
-            
-        # 3. Rifugio Sicuro: Rischio più basso, rendimento simile (o poco meno)
-        elif rischio_alt < rischio_target and extra > -0.3:
-            tipo_switch = "🛡️ Rifugio Sicuro"
+        if rischio_alt == rischio_target and extra > 0.15: tipo_switch = "✅ Gemello Migliore"
+        elif rischio_alt == rischio_target + 1 and extra > 0.8: tipo_switch = "⚠️ Boost Rendimento (Rischio+)"
+        elif rischio_alt < rischio_target and extra > -0.3: tipo_switch = "🛡️ Rifugio Sicuro"
             
         if tipo_switch:
             link_isin = f"https://www.google.com/search?q={row['ISIN']}+bond"
@@ -528,67 +561,108 @@ def main_app():
                     tax = determina_tasse(d['fonte'], d['desc'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
-                    infl, link_infl = get_inflazione_ufficiale()
+                    
+                    # IDENTIKIT SEMPLICE
+                    chi, tipo, tempo = identikit_bond(d)
                     
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px;">
-                        <h3 style="color:white; margin:0;">{d['desc']}</h3>
-                        <div style="color:#b0b3c5; font-size:14px; margin-top:5px;">
-                            ISIN: <b>{isin}</b> | Prezzo: <b>{d['pr']}€</b> | Scadenza: <b>{d['sc'].strftime('%d/%m/%Y')}</b> | Tax: <b>{tax}%</b>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h3 style="color:white; margin:0;">{chi}</h3>
+                                <div style="color:#b0b3c5; font-size:16px;">{tipo}</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <h2 style="color:#00CC96; margin:0;">{d['ced']}%</h2>
+                                <div style="color:#b0b3c5; font-size:12px;">Cedola Lorda</div>
+                            </div>
+                        </div>
+                        <hr style="border-color:#3e445b; margin:15px 0;">
+                        <div style="display:flex; justify-content:space-between; color:#e0e0e0;">
+                            <div>📅 Scadenza: <b>{d['sc'].strftime('%d/%m/%Y')}</b></div>
+                            <div>⏳ Mancano: <b>{tempo}</b></div>
+                            <div>🧾 Prezzo: <b>{d['pr']}€</b></div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    col_metrics, col_score = st.columns([2, 1])
+                    # --- TRADUTTORE FINANZIARIO ---
+                    st.subheader("💡 Il Traduttore")
+                    t1, t2, t3 = st.columns(3)
                     
-                    with col_metrics:
-                        t1, t2, t3 = st.tabs(["📊 Analisi", "🔮 Simulatore", "📅 Cedole"])
+                    with t1:
+                        st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
+                        st.markdown('<div class="explanation-title">1. Quanto Rende?</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Questo include le cedole che incassi e il guadagno/perdita sul prezzo finale.</div>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
                         
-                        with t1:
-                            m1, m2, m3 = st.columns(3)
-                            m1.metric("YTM Netto", f"{qual['ytm_netto']:.2f}%")
-                            m2.metric("Cedola", f"{d['ced']}%")
-                            m3.metric("Duration", f"{risk['mod_dur']:.2f}" if risk else "N/A")
-                            
-                            st.write("---")
-                            st.caption(f"🍔 **Rendimento Reale** (Fonte: [Dati Ufficiali]({link_infl}))")
-                            inf = st.slider("Inflazione attesa", 0.0, 10.0, infl, 0.5)
-                            real = qual['ytm_netto'] - inf
-                            if real > 0: st.success(f"Guadagno Reale: +{real:.2f}%")
-                            else: st.error(f"Perdita Reale: {real:.2f}%")
+                    with t2:
+                        st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
+                        st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
+                        investimento_sim = 10000
+                        cedola_netta_euro = (investimento_sim * (d['ced']/100) * (1 - tax/100))
+                        st.markdown(f'<div class="explanation-text">Se investi <b>10.000€</b>, riceverai circa <b>{cedola_netta_euro:.2f}€</b> netti ogni anno direttamente sul conto come bonifico.</div>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
                         
-                        with t2:
-                            st.warning("🔮 **Sfera di Cristallo:** Cosa succede se vendi PRIMA della scadenza?")
-                            if risk:
-                                anni_residui_float = (d['sc'] - date.today()).days / 365.25
-                                max_anni_slider = int(anni_residui_float)
-                                if max_anni_slider < 1:
-                                    st.info("ℹ️ Il bond scade tra meno di un anno. Simulazione non necessaria.")
-                                else:
-                                    cw1, cw2 = st.columns(2)
-                                    with cw1:
-                                        hold = st.slider("Anni detenzione", 1, max_anni_slider, 1)
-                                    with cw2:
-                                        shock = st.slider("Variazione Tassi", -3.0, 3.0, 0.0, 0.5)
-                                    
-                                    dur_res = max(0, risk['mod_dur'] - hold)
-                                    p_fut = d['pr'] - (dur_res * (shock/100) * d['pr']) + ((100-d['pr']) * (hold/anni_residui_float))
-                                    st.metric("Prezzo Stimato", f"{p_fut:.2f}€", delta=f"{p_fut-d['pr']:.2f}")
-                            else: st.error("Dati insufficienti")
-                        
-                        with t3:
-                            st.write("📅 **Calendario Incassi**")
-                            df_cf = genera_flussi(d, 10000, tax)
-                            st.dataframe(df_cf[df_cf['Data'] > date.today()].style.format({'Flow': '{:.2f}€'}), use_container_width=True)
+                    with t3:
+                        st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
+                        st.markdown('<div class="explanation-title">3. Rischio Volatilità</div>', unsafe_allow_html=True)
+                        volatilita = "BASSA" if risk['mod_dur'] < 3 else "MEDIA" if risk['mod_dur'] < 7 else "ALTA"
+                        st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi salgono dell\'1%, il prezzo di questo bond potrebbe scendere temporaneamente del <b>{risk["mod_dur"]:.1f}%</b>.</div>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
 
-                    with col_score:
-                        st.markdown(f"### 🏆 Score: {qual['score']}/100")
-                        for item in qual['breakdown']:
-                            st.markdown(f"""<div class="score-row"><div><div>{item['cat']}</div><div style="font-size:12px; color:#aaa;">{item['msg']}</div></div><div class="{item['col']}">{item['pts']:+d}</div></div>""", unsafe_allow_html=True)
-                        st.write("")
-                        if st.button("💼 Aggiungi a Portafoglio", use_container_width=True):
-                            st.session_state.portfolio.append(d)
-                            st.toast("Aggiunto!")
+                    # --- DETTAGLI TECNICI (EX ANALISI BASE) ---
+                    with st.expander("📊 Vedi Dati Tecnici Completi"):
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Prezzo", f"{d['pr']:.2f}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari")
+                        m2.metric("YTM Netto", f"{qual['ytm_netto']:.2f}%", f"Tassato al {tax}%")
+                        m3.metric("Cedola", f"{d['ced']}%", f"{'Annuale' if d['freq']==1 else 'Semestrale' if d['freq']==2 else 'Trimestrale' if d['freq']==4 else 'Unica'}")
+                        m4.metric("Duration", f"{risk['mod_dur']:.2f}" if risk else "N/A")
+                        
+                        st.subheader("Punteggio Qualità")
+                        c_flg, c_score = st.columns([2, 1])
+                        with c_flg:
+                            for ft, txt in qual['flags']:
+                                color = "red-flag" if ft=="red" else "warning-flag" if ft=="warning" else "green-flag"
+                                st.markdown(f'<div class="{color}">{txt}</div>', unsafe_allow_html=True)
+                            if not qual['flags']: st.markdown('<div class="green-flag">✅ Nessuna criticità rilevata</div>', unsafe_allow_html=True)
+                        with c_score:
+                            st.metric("Score", f"{qual['score']}/100")
+
+                    # AZIONI
+                    c_btn1, c_btn2 = st.columns(2)
+                    if c_btn1.button("📌 Salva per Confronto", use_container_width=True):
+                        st.session_state.confronto = d; st.success("Salvato!")
+                    if c_btn2.button("💼 Aggiungi a Portafoglio", use_container_width=True):
+                        st.session_state.portfolio.append(d)
+                        st.success("Aggiunto!")
+
+                    # ALTRE TAB (Simulatore, Cedole)
+                    tab_whatif, tab_cedole = st.tabs(["🔮 Simulatore 'What If'", "📅 Cedolario"])
+
+                    with tab_whatif:
+                        st.warning("🔮 **Sfera di Cristallo:** Cosa succede se vendi PRIMA della scadenza?")
+                        if risk:
+                            anni_residui_float = (d['sc'] - date.today()).days / 365.25
+                            max_anni_slider = int(anni_residui_float)
+                            if max_anni_slider < 1:
+                                st.info("ℹ️ Il bond scade tra meno di un anno. Simulazione non necessaria.")
+                            else:
+                                cw1, cw2 = st.columns(2)
+                                with cw1:
+                                    hold = st.slider("Anni detenzione", 1, max_anni_slider, 1)
+                                with cw2:
+                                    shock = st.slider("Variazione Tassi", -3.0, 3.0, 0.0, 0.5)
+                                
+                                dur_res = max(0, risk['mod_dur'] - hold)
+                                p_fut = d['pr'] - (dur_res * (shock/100) * d['pr']) + ((100-d['pr']) * (hold/anni_residui_float))
+                                st.metric("Prezzo Stimato", f"{p_fut:.2f}€", delta=f"{p_fut-d['pr']:.2f}")
+                        else: st.error("Dati insufficienti")
+                    
+                    with tab_cedole:
+                        st.write("📅 **I tuoi flussi di cassa (Esempio su 10.000€)**")
+                        df_cf = genera_flussi(d, 10000, tax)
+                        st.dataframe(df_cf[df_cf['Data'] > date.today()].style.format({'Flow': '{:.2f}€'}), use_container_width=True)
 
                 else: st.warning("Bond non trovato. Aggiorna il DB.")
 
@@ -617,12 +691,12 @@ def main_app():
                     st.divider()
                     st.subheader("📊 Dove si trova il tuo Bond?")
                     
-                    # ZOOM AUTOMATICO PER RIDURRE PUNTINI (SOLO BOND VICINI +/- 3 ANNI)
+                    # ZOOM AUTOMATICO
                     range_zoom = 3
                     df_zoom = df_market[
                         (df_market['Anni'] >= dur_s - range_zoom) & 
                         (df_market['Anni'] <= dur_s + range_zoom) &
-                        (df_market['YTM_Grezzo'] < ytm_s + 5) # Filtra outlier assurdi
+                        (df_market['YTM_Grezzo'] < ytm_s + 5)
                     ]
                     
                     st.markdown(f"Visualizzo solo bond con scadenza **+/- {range_zoom} anni** dal tuo. Clicca su un punto blu per analizzarlo.")
@@ -654,7 +728,6 @@ def main_app():
                     alternative = trova_alternative_migliori(d_smart, df_market)
                     
                     if not alternative.empty:
-                        # TABELLA PULITA CON LINK CLICKABILI
                         st.dataframe(
                             alternative[['Tipologia', 'ISIN', 'Desc', 'Prezzo', 'YTM_Netto', 'Extra', 'Link']],
                             column_config={
@@ -692,6 +765,7 @@ def main_app():
                     ra = calcola_metriche_rischio(a['pr'], a['ced'], a['sc'], a['freq'])
                     rb = calcola_metriche_rischio(b['pr'], b['ced'], b['sc'], b['freq'])
                     k1, k2, k3 = st.columns(3)
+                    # Usa patrimonio utente
                     k1.metric("A YTM Net", f"{analizza_bond_quality_dettagliata(a, ra, tax_a, st.session_state.patrimonio)['ytm_netto']:.2f}%")
                     k2.markdown("<h2>VS</h2>", unsafe_allow_html=True)
                     k3.metric("B YTM Net", f"{analizza_bond_quality_dettagliata(b, rb, tax_b, st.session_state.patrimonio)['ytm_netto']:.2f}%")
@@ -700,6 +774,19 @@ def main_app():
 
     elif st.session_state.page == "Portafoglio":
         st.title("💼 Portafoglio")
+        with st.expander("➕ Aggiungi Manuale"):
+            c1, c2, c3, c4 = st.columns([2,2,2,1])
+            pc = c1.selectbox("Cat", list(SOURCES_MAP.keys()), key="p_c")
+            pi = c2.text_input("ISIN", key="p_i").strip().upper()
+            pn = c3.number_input("Nom", 1000, key="p_n")
+            if c4.button("Add") and pi:
+                r, i = cerca_db(pi, pc)
+                d = processa_riga(r, i) if r is not None else None
+                if d:
+                    risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
+                    st.session_state.portfolio.append({"ISIN": pi, "Desc": d['desc'], "Nominale": pn, "Valore": (pn*d['pr'])/100, "YTM": risk['ytm'] if risk else 0, "Scadenza": d['sc']})
+                    st.success("Ok"); st.rerun()
+        
         if st.session_state.portfolio:
             df = pd.DataFrame(st.session_state.portfolio)
             st.dataframe(df)
