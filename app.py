@@ -962,7 +962,7 @@ def main_app():
                         height=400
                     )
                     
-                    fig_timeline = px.bar(df_flussi, x='Data', y='Importo (€)', color='Tipo', 
+                    fig_timeline = px.bar(df_flussi, x='Data', y='Importo', color='Tipo', 
                                         color_discrete_map={'USCITA': '#FF4B4B', 'ENTRATA': '#00CC96'},
                                         title="Timeline Flussi di Cassa", template="plotly_dark")
                     st.plotly_chart(fig_timeline, use_container_width=True)
