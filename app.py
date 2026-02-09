@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 import plotly.figure_factory as ff
 
 # ==============================================================================
-# 1. CONFIGURAZIONE PAGINA E STILI CSS
+# 1. CONFIGURAZIONE PAGINA E STILI CSS (FULL VERSION)
 # ==============================================================================
 
 st.set_page_config(
@@ -75,10 +75,6 @@ st.markdown("""
     
     [data-testid="stSidebar"] div.stButton > button { background-color: transparent; border: none; text-align: left; color: inherit !important; font-weight: 600; }
     [data-testid="stSidebar"] div.stButton > button:hover { padding-left: 10px; background-color: rgba(128, 128, 128, 0.1); border-radius: 5px; }
-    
-    .red-flag { border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
-    .green-flag { border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
-    .warning-flag { border-left: 5px solid #ffa500; background-color: #2d2a1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -133,64 +129,65 @@ init_session_state()
 # ==============================================================================
 
 SOURCES_MAP = {
-    "🏛️ GOV - ITALIA": [
+    "GOV_IT": [
         {"nome": "BTP_FISSI", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=italia&yieldtype=G&timescale=DUR", "freq": 2},
         {"nome": "BTP_ITALIA_INF", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=btpitalia&yieldtype=G&timescale=DUR", "freq": 2},
         {"nome": "BOT_12M", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bot&yieldtype=G&timescale=DUR", "freq": 0},
         {"nome": "CCT_VARIABILI", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=cct&yieldtype=G&timescale=DUR", "freq": 2}
     ],
-    "🇪🇺 GOV - EUROPA CORE": [
+    "GOV_EU": [
         {"nome": "GERMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=germania&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "FRANCIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=francia&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "AUSTRIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=austria&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BELGIO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=belgio&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "OLANDA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=olanda&yieldtype=G&timescale=DUR", "freq": 1}
     ],
-    "🏖️ GOV - EUROPA PERIFERIA": [
+    "GOV_PERIF": [
         {"nome": "SPAGNA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=spagna&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "PORTOGALLO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=portogallo&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "GRECIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=grecia&yieldtype=G&timescale=DUR", "freq": 1}
     ],
-    "🌍 GOV - MONDO & EMERGENTI": [
+    "GOV_WORLD": [
         {"nome": "USA_TREASURY", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR", "freq": 2},
         {"nome": "ROMANIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=romania&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "TURCHIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=turchia&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "BRASILE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=brasile&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "UNGHERIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=ungheria&yieldtype=G&timescale=DUR", "freq": 1}
     ],
-    "🇪🇺 SOVRANAZIONALI (SUPRA)": [
+    "SUPRA": [
         {"nome": "EU_BEI_ESM", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=sovranazionali&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "GREEN_BONDS", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=greenbonds&yieldtype=G&timescale=DUR", "freq": 1}
     ],
-    "🏦 FINANZIARI & BANCHE": [
+    "BANCHE": [
         {"nome": "BANCHE_SENIOR", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=bancheitalia&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "SUBORDINATE_TIER2", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=subordinate&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "ASSICURATIVI", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=assicurazioni&yieldtype=G&timescale=DUR", "freq": 1}
     ],
-    "🏭 CORPORATE (AZIENDE)": [
+    "CORP": [
         {"nome": "CORP_IG_EUROPE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporate&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "CORP_ITALIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=corporateitalia&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "HIGH_YIELD_EUR", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=highyield&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "AUTOMOTIVE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=automotive&yieldtype=G&timescale=DUR", "freq": 1}
     ],
-    "💎 SPECIALI": [
+    "SPEC": [
         {"nome": "ZERO_COUPON", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=zerocoupon&yieldtype=G&timescale=DUR", "freq": 0},
         {"nome": "CALLABLE", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=callable&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "LUNGHI_25Y+", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=25yearsEUR&yieldtype=G&timescale=DUR", "freq": 1}
     ]
 }
 
-# Mapping per l'interfaccia utente semplificata
+# --- MAPPING CATEGORIE PULITO (UX) ---
+# Questo collega le voci del Menu/Legenda alle chiavi grezze dei dati
 MACRO_CATEGORIES = {
-    "🌐 TUTTE": [],
-    "🏛️ GOVERNATIVI": ["🏛️ GOV - ITALIA", "🇪🇺 GOV - EUROPA CORE", "🏖️ GOV - EUROPA PERIFERIA", "🌍 GOV - MONDO & EMERGENTI", "🇪🇺 SOVRANAZIONALI (SUPRA)"],
-    "🏦 BANCARI": ["🏦 FINANZIARI & BANCHE"],
-    "🏭 CORPORATE": ["🏭 CORPORATE (AZIENDE)"],
-    "💎 SPECIALI": ["💎 SPECIALI"]
+    "🌐 TUTTE": [], # Lista vuota = Cerca ovunque
+    "🏛️ GOVERNATIVI": ["GOV_IT", "GOV_EU", "GOV_PERIF", "GOV_WORLD", "SUPRA"],
+    "🏦 BANCARI": ["BANCHE"],
+    "🏭 CORPORATE": ["CORP"],
+    "💎 SPECIALI": ["SPEC"]
 }
 
 # ==============================================================================
-# 4. FUNZIONI UTILI & DATABASE
+# 4. FUNZIONI UTILI & DATABASE (COMPLETO)
 # ==============================================================================
 
 def valida_isin(isin):
@@ -221,9 +218,7 @@ def pulisci_taglio(valore):
     except: return 1000.0
 
 def get_inflazione_ufficiale():
-    inflazione_corrente = 2.0 
-    fonte_url = "https://www.istat.it/it/archivio/prezzi+al+consumo"
-    return inflazione_corrente, fonte_url
+    return 2.0, "https://www.istat.it/it/archivio/prezzi+al+consumo"
 
 def processa_riga(row, info):
     try:
@@ -266,29 +261,17 @@ def identikit_bond(dati):
     risk_msg = ""; chi = ""; tipo = ""
 
     if "ITALIA" in fonte or "BTP" in desc or "BOT" in desc:
-        chi = "🇮🇹 Stato Italiano"
-        tipo = "Titolo di Stato (BTP/BOT)"
-        risk_msg = "Rischio Paese: Solido ma soggetto a volatilità politica e Spread."
+        chi = "🇮🇹 STATO ITALIANO"; tipo = "Titolo di Stato"; risk_msg = "Rischio Paese: Medio"
     elif "GERMANIA" in fonte or "BUND" in desc:
-        chi = "🇩🇪 Stato Tedesco"
-        tipo = "Titolo di Stato (Bund)"
-        risk_msg = "Bene Rifugio: Rischio quasi nullo, rendimenti generalmente bassi."
+        chi = "🇩🇪 GERMANIA"; tipo = "Bund (Risk Free)"; risk_msg = "Bene Rifugio"
     elif "USA" in fonte or "TREASURY" in desc:
-        chi = "🇺🇸 Stati Uniti"
-        tipo = "Treasury Bond"
-        risk_msg = "Valuta Estera: Attenzione al rischio cambio Euro/Dollaro!"
+        chi = "🇺🇸 USA"; tipo = "Treasury Bond"; risk_msg = "Rischio Cambio"
     elif "BANCHE" in fonte or "INTESA" in desc or "UNICREDIT" in desc:
-        chi = "🏦 Settore Bancario"
-        tipo = "Obbligazione Bancaria"
-        risk_msg = "Rischio Settoriale: Legato alla solidità della banca. Se 'SUB', rischio alto."
-    elif "CORP" in fonte or "ENI" in desc or "ENEL" in desc or "STELLANTIS" in desc:
-        chi = "🏭 Azienda (Corporate)"
-        tipo = "Obbligazione Societaria"
-        risk_msg = "Rischio Aziendale: Dipende dai bilanci e dalla salute dell'azienda."
+        chi = "🏦 SETTORE BANCARIO"; tipo = "Bond Bancario"; risk_msg = "Rischio Settoriale"
+    elif "CORP" in fonte or "ENI" in desc or "ENEL" in desc:
+        chi = "🏭 AZIENDA"; tipo = "Corporate Bond"; risk_msg = "Rischio Emittente"
     else:
-        chi = "🌍 Emittente Internazionale"
-        tipo = "Obbligazione"
-        risk_msg = "Verificare il rating specifico dell'emittente."
+        chi = "🌍 EMITTENTE"; tipo = "Obbligazione"; risk_msg = "Rating da verificare"
 
     diff = (dati['sc'] - date.today())
     anni = diff.days // 365
@@ -297,7 +280,7 @@ def identikit_bond(dati):
     return chi, tipo, tempo, risk_msg
 
 # ==============================================================================
-# 5. RISK ENGINE E SCORECARD
+# 5. RISK ENGINE E SCORECARD (COMPLETO)
 # ==============================================================================
 
 def calcola_ytm_preciso(prezzo, cedola_pct, scadenza, freq, face_value=100):
@@ -367,7 +350,7 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
     return {"score": max(0, min(100, score)), "breakdown": breakdown, "ytm_netto": ytm_net, "flags": flags}
 
 # ==============================================================================
-# 6. LOGICHE SMART & DB
+# 6. LOGICHE SMART & DB (COMPLETO)
 # ==============================================================================
 
 def calcola_rendimento_grezzo(prezzo, cedola, scadenza):
@@ -408,7 +391,6 @@ def carica_dati_mercato():
                             if m: ced = float(m.group(1).replace(',', '.'))
                             isin_v = str(row[c_isin]).strip()
                             
-                            # Assegna categoria per colore
                             cat = "Altro"
                             if any(x in desc.upper() for x in ["BTP", "BOT", "BUND", "TREASURY", "OAT", "SPAGNA", "PORTOGALLO"]): cat = "Governativo"
                             elif any(x in desc.upper() for x in ["INTESA", "UNICREDIT", "BANCA", "B.", "MEDIOBANCA"]): cat = "Bancario"
@@ -424,10 +406,6 @@ def carica_dati_mercato():
             except: continue
     return pd.DataFrame(all_bonds)
 
-def categorizza_rischio(isin, nome, desc):
-    # Semplificato per robustezza
-    return 3 # Default medio
-
 def trova_alternative_migliori(bond_target, df_mercato, categoria_obbligatoria=None):
     if df_mercato.empty: return pd.DataFrame()
     anni_target = (bond_target['sc'] - date.today()).days / 365.25
@@ -439,93 +417,64 @@ def trova_alternative_migliori(bond_target, df_mercato, categoria_obbligatoria=N
 
     alternative = []
     for _, row in df_mercato.iterrows():
-        # Filtro Rigido Categoria
         if categoria_obbligatoria == "Governativo" and row['Categoria'] != "Governativo": continue
-        
         if not (anni_target - 2 <= row['Anni'] <= anni_target + 2): continue
         if row['Prezzo'] > 108: continue 
-        
         tax_alt = determina_tasse(row['Fonte'], row['Desc'])
         ytm_netto_alt = row['YTM_Grezzo'] * (1 - tax_alt/100)
         extra = ytm_netto_alt - ytm_netto_target
-        tipo_switch = ""
         
-        if extra > 0.15: tipo_switch = "✅ Miglior Rendimento"
-        elif extra > 0.05 and row['Prezzo'] < bond_target['pr']: tipo_switch = "📉 Prezzo più basso"
-        
-        if tipo_switch:
+        if extra > 0.15: 
             link_isin = f"https://www.google.com/search?q={row['ISIN']}+bond"
-            row['Tipologia'] = tipo_switch; row['YTM_Netto'] = ytm_netto_alt; row['Extra'] = extra; row['Link'] = link_isin
+            row['Tipologia'] = "✅ Miglior Rendimento"; row['YTM_Netto'] = ytm_netto_alt; row['Extra'] = extra; row['Link'] = link_isin
             alternative.append(row)
     df_alt = pd.DataFrame(alternative)
     if not df_alt.empty: return df_alt.sort_values('Extra', ascending=False).head(5)
     return pd.DataFrame()
 
 def aggiorna_db():
-    # 1. PULIZIA: Cancella tutto il contenuto della cartella prima di scaricare
     if os.path.exists(DB_FOLDER):
         for f in os.listdir(DB_FOLDER):
-            file_path = os.path.join(DB_FOLDER, f)
-            try:
-                if os.path.isfile(file_path):
-                    os.unlink(file_path)
-            except Exception as e:
-                pass # Ignora errori di cancellazione
+            try: os.unlink(os.path.join(DB_FOLDER, f))
+            except: pass
     
-    # 2. DOWNLOAD: Scarica i nuovi file con PAUSA ANTI-BAN
-    p = st.progress(0)
-    s = st.empty()
-    tot = sum(len(v) for v in SOURCES_MAP.values())
-    c = 0
-    ok = 0
+    p = st.progress(0); s = st.empty(); tot = sum(len(v) for v in SOURCES_MAP.values()); c = 0; ok = 0
     
     for cat, sources in SOURCES_MAP.items():
         for src in sources:
             c += 1
-            
-            # --- MODIFICA ANTI-BAN: Pausa casuale tra 1.5 e 3.5 secondi ---
-            # Simula il tempo di "lettura" umano tra un click e l'altro
             sleep_time = random.uniform(1.5, 3.5)
             s.text(f"⏳ Attesa prudenziale ({sleep_time:.1f}s) -> Scarico {src['nome']} ({c}/{tot})...")
             time.sleep(sleep_time) 
-            # ---------------------------------------------------------------
-
             p.progress(c/tot)
             try:
-                r = requests.get(src['url'], headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}, timeout=15)
-                
-                # Forza il parsing delle tabelle
+                r = requests.get(src['url'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
                 dfs = pd.read_html(r.text, decimal=",", thousands=".")
                 for df in dfs:
-                    # Cerca la tabella giusta
                     if any('ISIN' in str(col).upper() for col in df.columns):
                         df.to_csv(os.path.join(DB_FOLDER, f"{src['nome']}.csv"), index=False)
-                        ok += 1
-                        break
-            except Exception as e:
-                # Se fallisce, aspetta un po' di più prima di riprovare col prossimo
-                time.sleep(2)
-                pass
+                        ok += 1; break
+            except: time.sleep(2); pass
                 
     st.session_state.last_scrape_time = datetime.now()
-    s.empty()
-    p.empty()
-    st.toast(f"Database Rigenerato in sicurezza: {ok}/{tot} files.", icon="🛡️")
-    time.sleep(1)
-    st.rerun()
+    s.empty(); p.empty(); st.toast(f"Database Rigenerato: {ok}/{tot} files.", icon="🛡️"); time.sleep(1); st.rerun()
 
 def cerca_db(isin, cat_macro):
     if not valida_isin(isin): return None, None
     
-    # Recupera le sottocategorie dalla mappatura
-    # Se cat_macro è "🌐 TUTTE" (o simile), target_subcats sarà [] (lista vuota)
-    target_subcats = MACRO_CATEGORIES.get(cat_macro, [])
+    # ----------------------------------------------------
+    # FIX: LOGICA DI RICERCA CORRETTA PER MACRO CATEGORIE
+    # ----------------------------------------------------
+    search_keys = []
     
-    # Se la lista è vuota (es. TUTTE) o None, cerchiamo in TUTTE le chiavi di SOURCES_MAP
-    if not target_subcats:
+    # Se cat_macro è vuoto o "TUTTE", cerchiamo ovunque
+    if not cat_macro or cat_macro == "🌐 TUTTE":
         search_keys = list(SOURCES_MAP.keys())
+    # Altrimenti cerchiamo solo nelle sottocategorie mappate
+    elif cat_macro in MACRO_CATEGORIES:
+        search_keys = MACRO_CATEGORIES[cat_macro]
     else:
-        search_keys = target_subcats
+        search_keys = list(SOURCES_MAP.keys())
 
     # Itera sulle chiavi selezionate
     for key in search_keys:
@@ -547,66 +496,48 @@ def cerca_db(isin, cat_macro):
 
 def calcola_rateo(dati):
     try:
-        today_dt = date.today()
-        if dati['freq'] == 0: return 0.0
-        giorni_cedola = 365 / dati['freq']
+        today_dt = date.today(); days_ced = 365 / dati['freq'] if dati['freq'] > 0 else 0
+        if days_ced == 0: return 0.0
         data_ced = dati['sc']
-        while data_ced > today_dt:
-            data_ced -= timedelta(days=int(giorni_cedola))
-        if data_ced > today_dt: data_ced -= timedelta(days=int(giorni_cedola))
-        
-        giorni_trascorsi = (today_dt - data_ced).days
-        rateo = (dati['ced'] / dati['freq']) * (giorni_trascorsi / giorni_cedola)
-        return max(0.0, rateo)
+        while data_ced > today_dt: data_ced -= timedelta(days=int(days_ced))
+        return max(0.0, (dati['ced'] / dati['freq']) * ((today_dt - data_ced).days / days_ced))
     except: return 0.0
 
 def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
-    flussi = []
-    # 1. Costi
-    rateo_pct = calcola_rateo(dati)
+    flussi = []; rateo_pct = calcola_rateo(dati)
     costo_titolo = (nominale * prezzo_acquisto) / 100
-    costo_rateo_lordo = (nominale * rateo_pct) / 100
-    costo_rateo_netto = costo_rateo_lordo * (1 - tax_rate/100)
+    costo_rateo_netto = (nominale * rateo_pct) / 100 * (1 - tax_rate/100)
     spesa_totale = costo_titolo + costo_rateo_netto + commissioni
-    
-    # Flusso iniziale negativo
-    flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto + Rateo + Comm."})
+    flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto"})
     
     totale_cedole_nette = 0
     if dati['freq'] > 0:
         cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
         curr = dati['sc']
-        date_cedole = []
-        temp = curr
-        while temp > date.today():
-            date_cedole.append(temp)
-            temp -= timedelta(days=int(365 / dati['freq']))
-        date_cedole.sort()
-        for d in date_cedole:
-            if d != dati['sc']:
-                flussi.append({"Data": d, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola Netta"})
+        while curr > date.today():
+            if curr != dati['sc']: 
+                flussi.append({"Data": curr, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola"})
                 totale_cedole_nette += cedola_netta
-                
+            curr -= timedelta(days=int(365 / dati['freq']))
+            
+    flussi.sort(key=lambda x: x['Data'])
     gain = max(0, 100 - prezzo_acquisto)
-    gain_euro = (gain / 100) * nominale
-    tassa_gain = gain_euro * (tax_rate/100)
-    plusvalenza_netta = gain_euro - tassa_gain
+    tassa_gain = (gain / 100) * nominale * (tax_rate/100)
     rimborso_netto = nominale - tassa_gain
     ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
-    flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA", "Importo": rimborso_netto + ultima_ced, "Dettagli": "Rimborso + Ultima Cedola"})
+    flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA", "Importo": rimborso_netto + ultima_ced, "Dettagli": "Rimborso"})
     
     incasso_totale = totale_cedole_nette + rimborso_netto + ultima_ced
     totale_cedole_nette += ultima_ced
+    plusvalenza = (gain/100)*nominale - tassa_gain
 
-    return pd.DataFrame(flussi), spesa_totale, incasso_totale, costo_rateo_netto, totale_cedole_nette, plusvalenza_netta
+    return pd.DataFrame(flussi), spesa_totale, incasso_totale, costo_rateo_netto, totale_cedole_nette, plusvalenza
 
 # -----------------------------------------------------------------------------
-# 🆕 FUNZIONALITÀ RETAIL AVANZATE
+# 🆕 FUNZIONALITÀ RETAIL (SCREENER, DASHBOARD, ECC.)
 # -----------------------------------------------------------------------------
 
-# 1. BOND SCREENER INTELLIGENTE
 def bond_screener_ui():
-    """Interfaccia Bond Screener con filtri avanzati"""
     st.title("🎯 Bond Screener Intelligente")
     st.caption("Trova i bond perfetti per te con filtri combinati")
     
@@ -693,15 +624,6 @@ def bond_screener_ui():
                 use_container_width=True
             )
             
-            # Export CSV
-            csv = filtered.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "💾 Scarica Risultati (CSV)",
-                csv,
-                f"bond_screener_{date.today()}.csv",
-                "text/csv"
-            )
-            
             # Grafico distribuzione
             fig = px.scatter(
                 filtered.head(100), 
@@ -714,7 +636,6 @@ def bond_screener_ui():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-# 2. DASHBOARD MERCATO
 def dashboard_mercato_ui():
     """Dashboard con vista mercato completa"""
     st.title("📊 Dashboard Mercato Bond")
@@ -808,7 +729,6 @@ def dashboard_mercato_ui():
     )
     st.plotly_chart(fig_heat, use_container_width=True)
 
-# 3. CALCOLATORE DIVERSIFICAZIONE
 def diversificazione_portfolio_ui():
     """Calcolatore diversificazione automatica"""
     st.title("🧮 Calcolatore Diversificazione Portafoglio")
@@ -983,7 +903,6 @@ def diversificazione_portfolio_ui():
             else:
                 st.success(f"✅ Massimo peso: {max_peso:.1f}%. Diversificazione ottima!")
 
-# 4. SIMULATORE GUADAGNO FINALE
 def simulatore_guadagno_ui():
     """Simulatore 'Quanto avrò tra X anni?'"""
     st.title("💰 Simulatore: Quanto Guadagno DAVVERO?")
@@ -1105,7 +1024,6 @@ def simulatore_guadagno_ui():
         else:
             st.error("ISIN non trovato")
 
-# 5. SISTEMA ALERT
 def alert_manager_ui():
     """Gestione alert personalizzati"""
     st.title("🔔 Alert Intelligenti")
@@ -1173,7 +1091,7 @@ def alert_manager_ui():
         st.info("Nessun alert attivo")
 
 # ==============================================================================
-# 7. INTERFACCIA UTENTE
+# 7. INTERFACCIA UTENTE PRINCIPALE
 # ==============================================================================
 
 def login():
@@ -1210,6 +1128,9 @@ def main_app():
         if st.button("💰 Simulatore", use_container_width=True): st.session_state.page = "Simulatore"; st.rerun()
         if st.button("🔔 Alert Manager", use_container_width=True): st.session_state.page = "Alerts"; st.rerun()
 
+        st.divider()
+        st.write("💰 **Il tuo Patrimonio**")
+        st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0, label_visibility="collapsed")
         
         # --- SEZIONE SISTEMA UX 2.0 ---
         st.divider()
@@ -1334,7 +1255,7 @@ def main_app():
                         st.markdown(f'<div class="explanation-box"><div class="explanation-title">Cashflow</div><div class="explanation-text">Ricevi <b>{ced_net:.2f}€</b> ogni 1k/anno.</div></div>', unsafe_allow_html=True)
                     with t3: st.markdown(f'<div class="explanation-box"><div class="explanation-title">Rischio</div><div class="explanation-text">Duration: <b>{risk["mod_dur"]:.1f}</b>.</div></div>', unsafe_allow_html=True)
 
-                    st.divider(); st.subheader("💰 Simulatore & P&L")
+                    st.divider(); st.subheader("💰 Simulatore d'Acquisto & P&L")
                     c_sim1, c_sim2 = st.columns([1, 2])
                     with c_sim1:
                         inv = st.number_input("Investimento (€)", value=10000, step=1000)
@@ -1376,19 +1297,19 @@ def main_app():
                         def color_red(val): return f'color: {"#ff4b4b" if val < 0 else "#00cc96"}; font-weight: bold;'
                         st.dataframe(df_f[['Data', 'Tipo', 'Importo', 'Dettagli']].style.map(color_red, subset=['Importo']).format({'Importo': '{:+.2f} €', 'Data': lambda x: x.strftime('%d/%m/%Y')}), use_container_width=True)
 
-                else: st.warning("Bond non trovato. Aggiorna il DB.")
+                else: st.warning("Bond non trovato. Prova a selezionare '🌐 TUTTE' o aggiorna il DB.")
 
     elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Pro Tools")
         with st.spinner("Caricamento dati..."): df_m = carica_dati_mercato()
-        if df_m.empty: st.warning("DB Vuoto."); return
+        if df_m.empty: st.warning("DB Vuoto."); st.stop()
         
         c_s, _ = st.columns([1, 3])
         with c_s: 
             isin_s = st.text_input("ISIN", placeholder="IT...").strip().upper()
             cat_v = st.selectbox("Filtro", list(MACRO_CATEGORIES.keys()))
         
-        if isin_s and valida_isin(isin_s):
+        if isin_s:
             row, info = cerca_db(isin_s, cat_v)
             ds = processa_riga(row, info) if row is not None else None
             if ds:
@@ -1414,14 +1335,14 @@ def main_app():
                 st.plotly_chart(fig, use_container_width=True)
                 
                 st.divider(); st.subheader("🛠️ Stress Test & Efficienza")
-                c_st, c_ef = st.columns([3, 2])
+                c_st, c_eff = st.columns([3, 2])
                 with c_st:
                     shocks = [-1.0, -0.5, 0.0, +0.5, +1.0]
                     res = [{"Shock": f"{s}%", "Prezzo": f"{ds['pr']*(1-(anni*(s/100))):.2f}€"} for s in shocks]
                     st.dataframe(pd.DataFrame(res), use_container_width=True)
-                with c_ef:
+                with c_eff:
                     st.metric("Yield/Duration", f"{ytm/anni:.2f}x" if anni>0 else "0")
-            else: st.error("Non trovato.")
+            else: st.error("Non trovato")
 
     elif st.session_state.page == "Screener": bond_screener_ui()
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
