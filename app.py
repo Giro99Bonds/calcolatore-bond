@@ -403,6 +403,7 @@ def carica_dati_mercato():
                             m = re.search(r'(\d+(?:[.,]\d+)?)\s*%', desc)
                             if m: ced = float(m.group(1).replace(',', '.'))
                             isin_v = str(row[c_isin]).strip()
+                            
                             # Assegna categoria per colore
                             cat = "Altro"
                             if any(x in desc.upper() for x in ["BTP", "BOT", "BUND", "TREASURY", "OAT", "SPAGNA", "PORTOGALLO"]): cat = "Governativo"
@@ -434,7 +435,7 @@ def trova_alternative_migliori(bond_target, df_mercato, categoria_obbligatoria=N
 
     alternative = []
     for _, row in df_mercato.iterrows():
-        # Filtro Rigido Categoria (o simili)
+        # Filtro Rigido Categoria
         if categoria_obbligatoria == "Governativo" and row['Categoria'] != "Governativo": continue
         
         if not (anni_target - 2 <= row['Anni'] <= anni_target + 2): continue
@@ -741,27 +742,22 @@ def main_app():
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
                     
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
-
-# --- BOX INFORMATIVO UNICO (EMITTENTE + NOME BOND + DATI) ---
+                    
+                    # --- BOX INFORMATIVO UNICO (FIX GRAFICA) ---
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                             <div style="flex-grow: 1;">
                                 <div style="color:#b0b3c5; font-size:13px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">{chi}</div>
-                                
                                 <div style="color:white; font-size:22px; font-weight:bold; margin-bottom:6px; line-height:1.2;">{d['desc']}</div>
-                                
                                 <div style="color:#00CC96; font-size:13px;">{tipo} <span style="color:#555;">|</span> {risk_msg}</div>
                             </div>
-                            
                             <div style="text-align:right; min-width: 90px; margin-left: 10px;">
                                 <h2 style="color:#00CC96; margin:0; font-size:28px;">{d['ced']}%</h2>
                                 <div style="color:#b0b3c5; font-size:12px;">Cedola</div>
                             </div>
                         </div>
-                        
                         <hr style="border-color:rgba(255,255,255,0.1); margin:15px 0;">
-                        
                         <div style="display:flex; justify-content:space-between; color:#e0e0e0; font-size:14px;">
                             <div>📅 Scadenza: <b style="color:white;">{d['sc'].strftime('%d/%m/%Y')}</b></div>
                             <div>⏳ Manca: <b style="color:white;">{tempo}</b></div>
