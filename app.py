@@ -748,12 +748,14 @@ def main_app():
             st.write("") 
             trigger_search = st.button("🔎 Cerca", use_container_width=True)
         
-        if isin and (trigger_search or isin):
+if isin and (trigger_search or isin):
             if not valida_isin(isin): st.error("❌ ISIN non valido")
             else:
-                # Passiamo la macro categoria selezionata alla nuova funzione cerca_db
-                row, info = cerca_db(isin, cat_select)
-                row, info = cerca_db(isin, cat if not isin_default else None)
+                # CORREZIONE: Usiamo 'cat_select' invece di 'cat'
+                # Passiamo None se l'ISIN arriva dal grafico (isin_default), altrimenti il filtro scelto
+                filtro_categoria = cat_select if not isin_default else None
+                
+                row, info = cerca_db(isin, filtro_categoria)
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
