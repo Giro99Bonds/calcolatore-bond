@@ -25,49 +25,28 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* --- CARD METRICHE --- */
-    .metric-card {
-        background-color: #1e2130; 
-        padding: 15px; 
-        border-radius: 8px; 
-        border: 1px solid #3e445b; 
-        margin-bottom: 10px;
-        color: #ffffff !important;
-    }
+    /* --- STILI GENERALI --- */
+    .metric-card { background-color: #1e2130; padding: 15px; border-radius: 8px; border: 1px solid #3e445b; margin-bottom: 10px; color: #ffffff !important; }
     
-    /* --- BOX SPIEGAZIONI --- */
-    .explanation-box {
-        background-color: rgba(128, 128, 128, 0.1);
-        border-left: 4px solid #00CC96;
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 15px;
-    }
-    .explanation-title { font-weight: bold; color: #00CC96; font-size: 16px; margin-bottom: 5px; }
-    .explanation-text { font-size: 14px; color: inherit; opacity: 0.9; }
-
     /* --- SCONTRINO SIMULATORE --- */
     .receipt-box {
-        border: 1px dashed rgba(128, 128, 128, 0.5);
+        border: 2px dashed rgba(128, 128, 128, 0.3);
         padding: 20px;
         border-radius: 10px;
-        background-color: rgba(0, 0, 0, 0.02);
+        background-color: rgba(128, 128, 128, 0.05);
+        margin-top: 10px;
     }
     .receipt-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
     .receipt-total { display: flex; justify-content: space-between; margin-top: 15px; border-top: 2px solid #00CC96; padding-top: 10px; font-weight: bold; font-size: 18px; color: #00CC96; }
-    .receipt-negative { color: #FF4B4B; }
+    .receipt-sub { font-size: 12px; color: gray; text-align: right; margin-top: -5px; }
 
-    /* --- SIDEBAR --- */
-    [data-testid="stSidebar"] div.stButton > button {
-        background-color: transparent; border: none; text-align: left; 
-        color: inherit !important; box-shadow: none; padding-left: 0; 
-        font-size: 16px; font-weight: 600;
-    }
+    /* --- ALTRI STILI --- */
+    .explanation-box { background-color: rgba(128, 128, 128, 0.1); border-left: 4px solid #00CC96; padding: 15px; border-radius: 5px; margin-bottom: 15px; }
+    .explanation-title { font-weight: bold; color: #00CC96; font-size: 16px; margin-bottom: 5px; }
+    .explanation-text { font-size: 14px; color: inherit; opacity: 0.9; }
+    [data-testid="stSidebar"] div.stButton > button { background-color: transparent; border: none; text-align: left; color: inherit !important; font-weight: 600; }
     [data-testid="stSidebar"] div.stButton > button:hover { padding-left: 10px; background-color: rgba(128, 128, 128, 0.1); border-radius: 5px; }
-
-    /* --- FLAGS & LEGEND --- */
     .legend-box { padding: 15px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: white; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-    .legend-title { font-weight: bold; font-size: 16px; display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 4px; text-transform: uppercase; }
     .gov { background-color: #1a4a2e; border: 1px solid #28a745; }
     .bank { background-color: #2c3e50; border: 1px solid #8e9aaf; }
     .corp { background-color: #1e3a5f; border: 1px solid #17a2b8; }
@@ -460,87 +439,69 @@ def cerca_db(isin, cat):
     return None, None
 
 def calcola_rateo(dati):
-    """Stima il rateo maturato (interessi da pagare al venditore)"""
+    """Calcola il rateo maturato in percentuale"""
     try:
+        if dati['freq'] == 0: return 0.0
         oggi = date.today()
-        scadenza = dati['sc']
-        freq = dati['freq']
-        cedola = dati['ced']
-        
-        if freq == 0: return 0.0 # Zero coupon
-        
-        giorni_anno = 365
-        giorni_periodo = giorni_anno / freq
-        
-        # Trova la data di pagamento cedola precedente
-        # (Metodo semplificato: andiamo indietro dalla scadenza)
-        data_cedola_succ = scadenza
-        while data_cedola_succ > today_dt:
-            data_cedola_succ -= timedelta(days=int(giorni_periodo))
-        
-        # Ora data_cedola_succ è in realtà la PRECEDENTE
-        data_cedola_prec = data_cedola_succ
-        
-        # Calcolo giorni maturati
+        # Logica semplificata: andiamo indietro dalla scadenza per trovare l'ultima cedola
+        giorni_cedola = 365 / dati['freq']
+        data_ced = dati['sc']
+        while data_ced > today_dt:
+            data_ced -= timedelta(days=int(giorni_cedola))
+        # Se data_ced è oggi o futuro prossimo (imprecisione), correggiamo
         today_dt = date.today()
-        # Fix: se la data precedente è futura (scadenza breve), gestisci
-        if data_cedola_prec > today_dt:
-             data_cedola_prec -= timedelta(days=int(giorni_periodo))
-
-        giorni_maturati = (today_dt - data_cedola_prec).days
-        rateo_percentuale = (cedola / freq) * (giorni_maturati / giorni_periodo)
+        if data_ced > today_dt: data_ced -= timedelta(days=int(giorni_cedola))
         
-        return max(0.0, rateo_percentuale)
-    except: return 0.0
+        giorni_trascorsi = (today_dt - data_ced).days
+        rateo = (dati['ced'] / dati['freq']) * (giorni_trascorsi / giorni_cedola)
+        return max(0.0, rateo)
+    except: 
+        # Fallback molto grezzo se date falliscono: 0.5 di una cedola
+        return (dati['ced'] / dati['freq']) * 0.5 if dati['freq'] > 0 else 0
 
 def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
-    """
-    Genera i flussi e anche i totali per lo scontrino
-    """
     flussi = []
-    
-    # 1. Costi Iniziali
+    # 1. Costi
+    # Stima Rateo: simuliamo che siamo a metà periodo se calcolo fallisce, o usiamo funzione
     rateo_pct = calcola_rateo(dati)
     costo_titolo = (nominale * prezzo_acquisto) / 100
-    costo_rateo = (nominale * rateo_pct) / 100
-    # Tassazione rateo (al 12.5 o 26 su quello che incasserai, qui semplifichiamo lordo)
-    # Nota: il rateo si paga NETTO se l'intermediario è sostituto, ma per semplicità retail mostriamo i costi vivi
+    costo_rateo_lordo = (nominale * rateo_pct) / 100
+    # Tassazione rateo: solitamente paghi il netto al venditore se sostituto d'imposta, 
+    # ma qui mostriamo uscita lorda per prudenza o netto. 
+    # Facciamo Netto per essere precisi: Rateo Netto = Rateo Lordo * (1 - tax)
+    costo_rateo_netto = costo_rateo * (1 - tax_rate/100)
     
-    spesa_totale = costo_titolo + costo_rateo + commissioni
+    spesa_totale = costo_titolo + costo_rateo_netto + commissioni
+    flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto + Rateo + Comm."})
     
-    flussi.append({"Data": date.today(), "Tipo": "USCITA (Acquisto)", "Importo": -spesa_totale, "Dettagli": f"Prezzo: {prezzo_acquisto} + Rateo + Comm."})
-    
-    # 2. Cedole Future
+    # 2. Cedole
     totale_incassato = 0
     if dati['freq'] > 0:
         cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
         curr = dati['sc']
-        # Genera date indietro
         date_cedole = []
-        temp_d = curr
-        while temp_d > date.today():
-            date_cedole.append(temp_d)
-            temp_d -= timedelta(days=int(365 / dati['freq']))
-        
+        temp = curr
+        while temp > date.today():
+            date_cedole.append(temp)
+            temp -= timedelta(days=int(365 / dati['freq']))
         date_cedole.sort()
         for d in date_cedole:
-            if d != dati['sc']: # La scadenza la gestiamo col rimborso
-                flussi.append({"Data": d, "Tipo": "ENTRATA (Cedola)", "Importo": cedola_netta, "Dettagli": "Cedola Netta"})
+            if d != dati['sc']:
+                flussi.append({"Data": d, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola Netta"})
                 totale_incassato += cedola_netta
-
-    # 3. Rimborso Finale
-    # Plusvalenza/Minusvalenza: (100 - Prezzo)
-    gain_capitale = max(0, nominale - costo_titolo) # Semplificato
-    tassa_gain = gain_capitale * (tax_rate/100)
-    rimborso_netto = nominale - tassa_gain
+                
+    # 3. Rimborso
+    # Capital Gain Tax: (Nominale - Costo_Titolo_Fiscale) * 12.5%
+    # Assumiamo Prezzo Fiscale = Prezzo Acquisto
+    plusvalenza = max(0, nominale - costo_titolo)
+    tassa_cg = plusvalenza * (tax_rate/100)
+    rimborso_netto = nominale - tassa_cg
     
-    # Aggiungi ultima cedola al rimborso
-    ultima_cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
+    ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
+    flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA", "Importo": rimborso_netto + ultima_ced, "Dettagli": "Rimborso + Ultima Cedola"})
+    totale_incassato += (rimborso_netto + ultima_ced)
     
-    flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA (Rimborso + Cedola)", "Importo": rimborso_netto + ultima_cedola_netta, "Dettagli": "Capitale + Ultima Cedola"})
-    totale_incassato += (rimborso_netto + ultima_cedola_netta)
-    
-    return pd.DataFrame(flussi), spesa_totale, totale_incassato, costo_rateo
+    return pd.DataFrame(flussi), spesa_totale, totale_incassato, costo_rateo_netto
 
 # ==============================================================================
 # 7. INTERFACCIA UTENTE
@@ -700,12 +661,13 @@ def main_app():
                     c_sim1, c_sim2 = st.columns([1, 2])
                     with c_sim1:
                         investimento = st.number_input("Quanto vuoi investire? (€)", value=10000, step=1000)
-                        commissioni = st.number_input("Commissioni Banca (€)", value=5.0, step=1.0)
+                        commissioni = st.number_input("Commissioni Banca (€)", value=5.0, step=1.0, help="Non lo sai? Se hai una banca online (Fineco, Directa) metti 5-10€. Se hai una banca fisica, spesso è lo 0.19% del capitale (es. 19€ su 10k).")
                     
-                    # Calcoli Simulatori
                     df_flussi, spesa_tot, incasso_tot, costo_rateo = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
                     guadagno_netto = incasso_tot - spesa_tot
-                    rendimento_totale_pct = (guadagno_netto / spesa_tot) * 100
+                    # Calcolo rendimento semplice
+                    anni_durata = (d['sc'] - date.today()).days / 365.25
+                    rend_annuo_semplice = (guadagno_netto / spesa_tot / anni_durata) * 100 if anni_durata > 0 else 0
                     
                     with c_sim2:
                         st.markdown(f"""
@@ -717,14 +679,15 @@ def main_app():
                                 <span>TOTALE DA PAGARE OGGI:</span>
                                 <span>{spesa_tot:.2f} €</span>
                             </div>
+                            <div class="receipt-sub">Hai pagato circa {(spesa_tot/investimento)*100:.1f}% del valore nominale</div>
                             <hr>
                             <div class="receipt-row" style="color:#00CC96; font-weight:bold;">
-                                <span>RITORNO TOTALE (A scadenza):</span>
-                                <span>{incasso_tot:.2f} €</span>
+                                <span>GUADAGNO TOTALE (in {anni_durata:.1f} anni):</span>
+                                <span>+{guadagno_netto:.2f} €</span>
                             </div>
                             <div class="receipt-row">
-                                <span>Guadagno Netto:</span>
-                                <span>+{guadagno_netto:.2f} € (+{rendimento_totale_pct:.2f}%)</span>
+                                <span>Rendimento Annuo Effettivo:</span>
+                                <span>{rend_annuo_semplice:.2f}%</span>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
