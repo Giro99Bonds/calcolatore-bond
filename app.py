@@ -465,8 +465,8 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
     rateo_pct = calcola_rateo(dati)
     costo_titolo = (nominale * prezzo_acquisto) / 100
     costo_rateo_lordo = (nominale * rateo_pct) / 100
-    # Nota: il rateo si paga al netto se l'intermediario è sostituto, ma per semplicità retail qui mostriamo l'impatto fiscale corretto dopo
-    # Standard italiano: si paga rateo netto (rateo lordo * (1 - tax))
+    # FIX: Tassazione Rateo
+    # Se compri, paghi il rateo NETTO (standard MOT/TLX per retail con regime amministrato)
     costo_rateo_netto = costo_rateo_lordo * (1 - tax_rate/100)
     
     spesa_totale = costo_titolo + costo_rateo_netto + commissioni
@@ -489,11 +489,12 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
                 totale_incassato += cedola_netta
                 
     # 3. Rimborso
-    # Tassazione sul Capital Gain (Prezzo Rimborso 100 - Prezzo Acquisto)
-    # Se Prezzo Acquisto > 100, genera Minusvalenza (credito fiscale), qui non lo contiamo come cash flow positivo per prudenza
-    # Se Prezzo Acquisto < 100, si paga il 12.5% sulla differenza
-    gain = max(0, 100 - prezzo_acquisto) 
-    tassa_gain = (gain / 100 * nominale) * (tax_rate/100)
+    # Capital Gain Tax: (Prezzo Rimborso (100) - Prezzo Acquisto) * 12.5%
+    # Se prezzo acquisto > 100, genera minusvalenza (qui ignorata per prudenza nel cash flow)
+    gain = max(0, 100 - prezzo_acquisto)
+    # Il gain è su 100 di nominale, quindi proporzioniamo al nominale investito
+    gain_euro = (gain / 100) * nominale
+    tassa_gain = gain_euro * (tax_rate/100)
     
     rimborso_netto = nominale - tassa_gain
     
@@ -631,27 +632,46 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
+                    # 1. METRICS DASHBOARD (RIPRISTINATO E POTENZIATO)
+                    st.subheader("📊 Dati Chiave")
+                    c1, c2, c3, c4, c5, c6 = st.columns(6)
+                    c1.metric("Prezzo", f"{d['pr']}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari")
+                    c2.metric("Rendimento Netto", f"{qual['ytm_netto']:.2f}%")
+                    c3.metric("Rendimento Lordo", f"{risk['ytm']:.2f}%")
+                    c4.metric("Cedola", f"{d['ced']}%")
+                    c5.metric("Taglio Minimo", f"{d['taglio']:,.0f}€")
+                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni")
+
+                    # 2. ANALISI IN BREVE
                     st.subheader("💡 Analisi in Breve")
                     t1, t2, t3 = st.columns(3)
                     
                     with t1:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">1. Quanto Rende?</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Questo numero include sia le cedole che ricevi sia il guadagno finale (se compri a sconto) o la perdita (se compri a premio).</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Include le cedole e il guadagno/perdita sul prezzo finale.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                     with t2:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
                         cedola_netta_euro = (1000 * (d['ced']/100) * (1 - tax/100))
-                        st.markdown(f'<div class="explanation-text">Ogni 1.000€ investiti, riceverai circa <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno sul conto corrente.</div>', unsafe_allow_html=True)
+                        
+                        # Logica frequenza cedole
+                        if d['freq'] == 1: freq_txt = "in un'unica soluzione annuale"
+                        elif d['freq'] == 2: freq_txt = f"in 2 cedole semestrali da {cedola_netta_euro/2:.2f}€"
+                        elif d['freq'] == 4: freq_txt = f"in 4 cedole trimestrali da {cedola_netta_euro/4:.2f}€"
+                        elif d['freq'] == 0: freq_txt = "(Zero Coupon: tutto a scadenza)"
+                        else: freq_txt = ""
+                        
+                        st.markdown(f'<div class="explanation-text">Ogni 1.000€ investiti, riceverai circa <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno, {freq_txt}.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                     with t3:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">3. Rischio Prezzo</div>', unsafe_allow_html=True)
                         volatilita = "BASSA" if risk['mod_dur'] < 3 else "MEDIA" if risk['mod_dur'] < 7 else "ALTA"
-                        st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi BCE salgono, il prezzo di questo bond potrebbe scendere. Più alta è la duration ({risk["mod_dur"]:.1f} anni), più oscilla il prezzo.</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi salgono dell\'1%, il prezzo scende del {risk["mod_dur"]:.1f}%.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
 
                     # --- SIMULATORE DI INVESTIMENTO AVANZATO ---
