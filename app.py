@@ -743,32 +743,32 @@ def main_app():
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
 
 # --- BOX INFORMATIVO UNICO (EMITTENTE + NOME BOND + DATI) ---
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div style="flex-grow: 1;">
-                            <div style="color:#b0b3c5; font-size:13px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">{chi}</div>
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                            <div style="flex-grow: 1;">
+                                <div style="color:#b0b3c5; font-size:13px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">{chi}</div>
+                                
+                                <div style="color:white; font-size:22px; font-weight:bold; margin-bottom:6px; line-height:1.2;">{d['desc']}</div>
+                                
+                                <div style="color:#00CC96; font-size:13px;">{tipo} <span style="color:#555;">|</span> {risk_msg}</div>
+                            </div>
                             
-                            <div style="color:white; font-size:22px; font-weight:bold; margin-bottom:6px; line-height:1.2;">{d['desc']}</div>
-                            
-                            <div style="color:#00CC96; font-size:13px;">{tipo} <span style="color:#555;">|</span> {risk_msg}</div>
+                            <div style="text-align:right; min-width: 90px; margin-left: 10px;">
+                                <h2 style="color:#00CC96; margin:0; font-size:28px;">{d['ced']}%</h2>
+                                <div style="color:#b0b3c5; font-size:12px;">Cedola</div>
+                            </div>
                         </div>
                         
-                        <div style="text-align:right; min-width: 90px; margin-left: 10px;">
-                            <h2 style="color:#00CC96; margin:0; font-size:28px;">{d['ced']}%</h2>
-                            <div style="color:#b0b3c5; font-size:12px;">Cedola</div>
+                        <hr style="border-color:rgba(255,255,255,0.1); margin:15px 0;">
+                        
+                        <div style="display:flex; justify-content:space-between; color:#e0e0e0; font-size:14px;">
+                            <div>📅 Scadenza: <b style="color:white;">{d['sc'].strftime('%d/%m/%Y')}</b></div>
+                            <div>⏳ Manca: <b style="color:white;">{tempo}</b></div>
+                            <div>🧾 Prezzo: <b style="color:white;">{d['pr']}€</b></div>
                         </div>
                     </div>
-                    
-                    <hr style="border-color:rgba(255,255,255,0.1); margin:15px 0;">
-                    
-                    <div style="display:flex; justify-content:space-between; color:#e0e0e0; font-size:14px;">
-                        <div>📅 Scadenza: <b style="color:white;">{d['sc'].strftime('%d/%m/%Y')}</b></div>
-                        <div>⏳ Manca: <b style="color:white;">{tempo}</b></div>
-                        <div>🧾 Prezzo: <b style="color:white;">{d['pr']}€</b></div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
                     
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
