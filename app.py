@@ -105,7 +105,6 @@ def init_session_state():
     session_token = query_params.get("session", None)
     
     if 'portfolio' not in st.session_state: st.session_state.portfolio = []
-    if 'confronto' not in st.session_state: st.session_state.confronto = None
     if 'alerts' not in st.session_state: st.session_state.alerts = []
     
     if 'logged_in' not in st.session_state: 
@@ -1200,19 +1199,15 @@ def main_app():
         if st.session_state.current_user:
             st.markdown(f"""<div class="user-box">👤 {st.session_state.current_user.capitalize()}</div>""", unsafe_allow_html=True)
         
-        # NAVIGAZIONE CLASSICA
-        if st.button("🔎 Scanner", use_container_width=True): st.session_state.page = "Scanner"; st.rerun()
-        if st.button("🧠 Smart Analysis", use_container_width=True): st.session_state.page = "SmartAnalysis"; st.rerun()
-        if st.button("⚔️ Confronto", use_container_width=True): st.session_state.page = "Confronto"; st.rerun()
-        if st.button("💼 Portafoglio", use_container_width=True): st.session_state.page = "Portafoglio"; st.rerun()
+        st.subheader("🧭 NAVIGAZIONE")
         
-        # NAVIGAZIONE TOOLS PRO
-        st.divider()
-        st.subheader("💎 TOOLS PRO")
-        if st.button("🎯 Screener", use_container_width=True): st.session_state.page = "Screener"; st.rerun()
+        # MENU UNIFICATO
+        if st.button("🔎 Scanner Singolo", use_container_width=True): st.session_state.page = "Scanner"; st.rerun()
+        if st.button("🎯 Screener Avanzato", use_container_width=True): st.session_state.page = "Screener"; st.rerun()
+        if st.button("🧠 Smart Analysis", use_container_width=True): st.session_state.page = "SmartAnalysis"; st.rerun()
         if st.button("📊 Dashboard Mercato", use_container_width=True): st.session_state.page = "Dashboard"; st.rerun()
         if st.button("🧮 Diversificazione", use_container_width=True): st.session_state.page = "Diversificazione"; st.rerun()
-        if st.button("💰 Simulatore Guadagno", use_container_width=True): st.session_state.page = "Simulatore"; st.rerun()
+        if st.button("💰 Simulatore", use_container_width=True): st.session_state.page = "Simulatore"; st.rerun()
         if st.button("🔔 Alert Manager", use_container_width=True): st.session_state.page = "Alerts"; st.rerun()
 
         st.divider()
@@ -1254,7 +1249,6 @@ def main_app():
 
     # ROUTING PAGINE
     if st.session_state.page == "Scanner":
-        # ... (Codice Scanner esistente)
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Inserisci un ISIN per analizzare il bond.")
         
@@ -1553,13 +1547,6 @@ def main_app():
                                         title="Timeline Flussi di Cassa", template="plotly_dark")
                     st.plotly_chart(fig_timeline, use_container_width=True)
 
-                    c_btn1, c_btn2 = st.columns(2)
-                    if c_btn1.button("📌 Salva per Confronto", use_container_width=True):
-                        st.session_state.confronto = d; st.success("Salvato!")
-                    if c_btn2.button("💼 Aggiungi a Portafoglio", use_container_width=True):
-                        st.session_state.portfolio.append(d)
-                        st.success("Aggiunto!")
-
                 else: st.warning("Bond non trovato. Aggiorna il DB.")
 
     elif st.session_state.page == "SmartAnalysis":
@@ -1795,43 +1782,6 @@ def main_app():
 
                 else: st.error("ISIN non trovato nel database.")
             else: st.info("Inserisci un ISIN per iniziare l'analisi.")
-
-    elif st.session_state.page == "Confronto":
-        st.title("⚔️ Confronto")
-        if st.session_state.confronto:
-            a = st.session_state.confronto
-            st.info(f"📌 A: {a['desc']}")
-            c1, c2 = st.columns(2)
-            cb = c1.selectbox("Cat B", list(SOURCES_MAP.keys()))
-            ib = c2.text_input("ISIN B").strip().upper()
-            if st.button("VS") and ib:
-                rb, info = cerca_db(ib, cb)
-                b = processa_riga(rb, info) if rb is not None else None
-                if b:
-                    diff_anni = abs(((a['sc'] - date.today()).days/365.25) - ((b['sc'] - date.today()).days/365.25))
-                    tax_a = determina_tasse(a['fonte'], a['desc'])
-                    tax_b = determina_tasse(b['fonte'], b['desc'])
-                    
-                    if diff_anni > 5: st.warning(f"⚠️ Attenzione: Confronti bond con scadenza molto diversa ({diff_anni:.1f} anni diff).")
-                    if tax_a != tax_b: st.info("ℹ️ Nota: Tassazioni diverse. Guarda il YTM Netto.")
-                    
-                    ra = calcola_metriche_rischio(a['pr'], a['ced'], a['sc'], a['freq'])
-                    rb = calcola_metriche_rischio(b['pr'], b['ced'], b['sc'], b['freq'])
-                    k1, k2, k3 = st.columns(3)
-                    # Usa patrimonio utente
-                    k1.metric("A YTM Net", f"{analizza_bond_quality_dettagliata(a, ra, tax_a, st.session_state.patrimonio)['ytm_netto']:.2f}%")
-                    k2.markdown("<h2>VS</h2>", unsafe_allow_html=True)
-                    k3.metric("B YTM Net", f"{analizza_bond_quality_dettagliata(b, rb, tax_b, st.session_state.patrimonio)['ytm_netto']:.2f}%")
-                else: st.error("B non trovato")
-        else: st.warning("Salva un bond prima.")
-
-    elif st.session_state.page == "Portafoglio":
-        st.title("💼 Portafoglio")
-        if st.session_state.portfolio:
-            df = pd.DataFrame(st.session_state.portfolio)
-            st.dataframe(df)
-            if st.button("Reset"): st.session_state.portfolio = []
-        else: st.info("Portafoglio vuoto.")
 
     elif st.session_state.page == "Screener":
         bond_screener_ui()
