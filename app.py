@@ -513,16 +513,17 @@ def aggiorna_db():
 def cerca_db(isin, cat_macro):
     if not valida_isin(isin): return None, None
     
-    # Se la categoria è specificata e non è "🌐 TUTTE", cerca solo lì
-    search_keys = []
-    if cat_macro and cat_macro != "🌐  TUTTE" and cat_macro in MACRO_CATEGORIES:
-        search_keys = MACRO_CATEGORIES[cat_macro]
+    # Recupera le sottocategorie dalla mappatura
+    # Se cat_macro è "🌐 TUTTE" (o simile), target_subcats sarà [] (lista vuota)
+    target_subcats = MACRO_CATEGORIES.get(cat_macro, [])
+    
+    # Se la lista è vuota (es. TUTTE) o None, cerchiamo in TUTTE le chiavi di SOURCES_MAP
+    if not target_subcats:
+        search_keys = list(SOURCES_MAP.keys())
     else:
-        # Altrimenti cerca ovunque (appiattisce la lista delle liste)
-        for key in SOURCES_MAP.keys():
-            search_keys.append(key)
+        search_keys = target_subcats
 
-    # Itera sulle chiavi di SOURCES_MAP selezionate
+    # Itera sulle chiavi selezionate
     for key in search_keys:
         sources = SOURCES_MAP.get(key, [])
         for src in sources:
@@ -745,26 +746,26 @@ def main_app():
                     
                     # --- BOX INFORMATIVO UNICO (FIX GRAFICA) ---
                     st.markdown(f"""
-                    <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                            <div style="flex-grow: 1;">
-                                <div style="color:#b0b3c5; font-size:13px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">{chi}</div>
-                                <div style="color:white; font-size:22px; font-weight:bold; margin-bottom:6px; line-height:1.2;">{d['desc']}</div>
-                                <div style="color:#00CC96; font-size:13px;">{tipo} <span style="color:#555;">|</span> {risk_msg}</div>
-                            </div>
-                            <div style="text-align:right; min-width: 90px; margin-left: 10px;">
-                                <h2 style="color:#00CC96; margin:0; font-size:28px;">{d['ced']}%</h2>
-                                <div style="color:#b0b3c5; font-size:12px;">Cedola</div>
-                            </div>
-                        </div>
-                        <hr style="border-color:rgba(255,255,255,0.1); margin:15px 0;">
-                        <div style="display:flex; justify-content:space-between; color:#e0e0e0; font-size:14px;">
-                            <div>📅 Scadenza: <b style="color:white;">{d['sc'].strftime('%d/%m/%Y')}</b></div>
-                            <div>⏳ Manca: <b style="color:white;">{tempo}</b></div>
-                            <div>🧾 Prezzo: <b style="color:white;">{d['pr']}€</b></div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+<div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div style="flex-grow: 1;">
+            <div style="color:#b0b3c5; font-size:13px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">{chi}</div>
+            <div style="color:white; font-size:22px; font-weight:bold; margin-bottom:6px; line-height:1.2;">{d['desc']}</div>
+            <div style="color:#00CC96; font-size:13px;">{tipo} <span style="color:#555;">|</span> {risk_msg}</div>
+        </div>
+        <div style="text-align:right; min-width: 90px; margin-left: 10px;">
+            <h2 style="color:#00CC96; margin:0; font-size:28px;">{d['ced']}%</h2>
+            <div style="color:#b0b3c5; font-size:12px;">Cedola</div>
+        </div>
+    </div>
+    <hr style="border-color:rgba(255,255,255,0.1); margin:15px 0;">
+    <div style="display:flex; justify-content:space-between; color:#e0e0e0; font-size:14px;">
+        <div>📅 Scadenza: <b style="color:white;">{d['sc'].strftime('%d/%m/%Y')}</b></div>
+        <div>⏳ Manca: <b style="color:white;">{tempo}</b></div>
+        <div>🧾 Prezzo: <b style="color:white;">{d['pr']}€</b></div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
                     
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
