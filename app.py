@@ -1024,10 +1024,6 @@ def main_app():
         if st.button("🧮 Diversificazione", use_container_width=True): st.session_state.page = "Diversificazione"; st.rerun()
         if st.button("🔔 Alert Manager", use_container_width=True): st.session_state.page = "Alerts"; st.rerun()
 
-        st.divider()
-        st.write("💰 **Il tuo Patrimonio**")
-        st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0, label_visibility="collapsed")
-        
         # --- SEZIONE SISTEMA UX 2.0 ---
         st.divider()
         st.caption("⚙️ STATO SISTEMA")
