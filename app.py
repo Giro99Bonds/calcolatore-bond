@@ -28,25 +28,24 @@ st.markdown("""
     /* --- STILI GENERALI --- */
     .metric-card { background-color: #1e2130; padding: 15px; border-radius: 8px; border: 1px solid #3e445b; margin-bottom: 10px; color: #ffffff !important; }
     
-   /* --- LEGEND CARD (AGGIORNATO) --- */
+    /* --- LEGEND CARD --- */
     .cat-card {
         padding: 15px;
         border-radius: 10px;
         margin-bottom: 10px;
         height: 100%;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        color: white; /* Testo bianco per contrasto su sfondi scuri */
+        color: white; 
     }
     .cat-title { font-weight: bold; font-size: 18px; margin-bottom: 5px; display: flex; align-items: center; gap: 8px; }
     .cat-desc { font-size: 14px; opacity: 0.95; margin-bottom: 8px; line-height: 1.4; }
     .cat-meta { font-size: 12px; font-weight: bold; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
     
-    /* Colori Sfondi Intensi per leggibilità */
     .bg-gov { background: linear-gradient(135deg, #1a4a2e 0%, #28a745 100%); }
     .bg-bank { background: linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%); }
     .bg-corp { background: linear-gradient(135deg, #1e3a5f 0%, #17a2b8 100%); }
     .bg-spec { background: linear-gradient(135deg, #581845 0%, #d63384 100%); }
-    
+
     /* --- SCONTRINO SIMULATORE --- */
     .receipt-box {
         border: 2px dashed rgba(128, 128, 128, 0.3);
@@ -402,58 +401,39 @@ def categorizza_rischio(isin, nome, desc):
     return 3 
 
 def trova_alternative_migliori(bond_target, df_mercato, categoria_obbligatoria=None):
-    """
-    Trova alternative migliori ma SOLO della stessa categoria (es. Governativo con Governativo).
-    """
     if df_mercato.empty: return pd.DataFrame()
-    
     anni_target = (bond_target['sc'] - date.today()).days / 365.25
     tax_target = determina_tasse(bond_target['fonte'], bond_target['desc'])
     ytm_netto_target = calcola_rendimento_grezzo(bond_target['pr'], bond_target['ced'], bond_target['sc']) * (1 - tax_target/100)
+    isin_target = bond_target.get('isin', '')
+    rischio_target = categorizza_rischio(isin_target, bond_target['fonte'], bond_target['desc'])
     
-    # Se non passiamo la categoria esplicita, proviamo a indovinarla dal bond target, ma è meglio passarla
+    # Fallback per categoria
     if not categoria_obbligatoria:
-        # Fallback (non dovrebbe succedere se la chiami correttamente)
-        categoria_obbligatoria = "Governativo" if tax_target == 12.5 else "Corporate"
+        categoria_obbligatoria = bond_target.get('Categoria', 'Governativo' if tax_target==12.5 else 'Corporate')
 
     alternative = []
-    
     for _, row in df_mercato.iterrows():
-        # 1. FILTRO CATEGORIA RIGIDO (Il Fix che volevi)
-        # Se io ho un Governativo, VOGLIO solo Governativi.
-        if row['Categoria'] != categoria_obbligatoria:
-            continue
-
-        # 2. Filtro Durata (+/- 2 anni)
-        if not (anni_target - 2 <= row['Anni'] <= anni_target + 2): continue
+        # Filtro Rigido Categoria
+        if row['Categoria'] != categoria_obbligatoria: continue
         
-        # 3. Filtro Prezzo (< 108)
+        if not (anni_target - 2 <= row['Anni'] <= anni_target + 2): continue
         if row['Prezzo'] > 108: continue 
         
-        # Calcoli confronto
         tax_alt = determina_tasse(row['Fonte'], row['Desc'])
         ytm_netto_alt = row['YTM_Grezzo'] * (1 - tax_alt/100)
         extra = ytm_netto_alt - ytm_netto_target
-        
-        # Logica Tipologia Switch
         tipo_switch = ""
-        # Qui ora confrontiamo solo mele con mele, quindi semplifichiamo
-        if extra > 0.15: 
-            tipo_switch = "✅ Miglior Rendimento"
-        elif extra > 0.05 and row['Prezzo'] < bond_target['pr']:
-            tipo_switch = "📉 Prezzo più basso"
-            
+        
+        if extra > 0.15: tipo_switch = "✅ Miglior Rendimento"
+        elif extra > 0.05 and row['Prezzo'] < bond_target['pr']: tipo_switch = "📉 Prezzo più basso"
+        
         if tipo_switch:
             link_isin = f"https://www.google.com/search?q={row['ISIN']}+bond"
-            row['Tipologia'] = tipo_switch
-            row['YTM_Netto'] = ytm_netto_alt
-            row['Extra'] = extra
-            row['Link'] = link_isin
+            row['Tipologia'] = tipo_switch; row['YTM_Netto'] = ytm_netto_alt; row['Extra'] = extra; row['Link'] = link_isin
             alternative.append(row)
-            
     df_alt = pd.DataFrame(alternative)
-    if not df_alt.empty:
-        return df_alt.sort_values('Extra', ascending=False).head(5)
+    if not df_alt.empty: return df_alt.sort_values('Extra', ascending=False).head(5)
     return pd.DataFrame()
 
 def aggiorna_db():
@@ -486,7 +466,11 @@ def cerca_db(isin, cat):
                 col = next((c for c in df.columns if 'ISIN' in str(c).upper()), None)
                 if col:
                     mask = df[col].astype(str).str.contains(isin, case=False, na=False)
-                    if mask.any(): return df[mask].iloc[0], {"nome": src['nome'], "freq": src['freq'], "cat_reale": c}
+                    if mask.any(): 
+                        row = df[mask].iloc[0]
+                        # Tentativo di rilevare la categoria reale
+                        cat_reale = "Governativo" if "BTP" in str(row) or "BOT" in str(row) else "Corporate" # Semplificato
+                        return row, {"nome": src['nome'], "freq": src['freq'], "cat_reale": c}
             except: continue
     return None, None
 
@@ -507,6 +491,7 @@ def calcola_rateo(dati):
 
 def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
     flussi = []
+    # 1. Costi
     rateo_pct = calcola_rateo(dati)
     costo_titolo = (nominale * prezzo_acquisto) / 100
     costo_rateo_lordo = (nominale * rateo_pct) / 100
@@ -614,7 +599,6 @@ def main_app():
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Inserisci un ISIN per analizzare il bond.")
         
-       # --- INIZIO NUOVA LEGENDA ---
         st.markdown("### 🧭 Guida alle Categorie")
         c1, c2, c3, c4 = st.columns(4)
         
@@ -655,7 +639,6 @@ def main_app():
             """, unsafe_allow_html=True)
         
         st.divider()
-        # --- FINE NUOVA LEGENDA ---
         
         if st.session_state.selected_isin_from_chart:
             isin_default = st.session_state.selected_isin_from_chart
@@ -681,6 +664,7 @@ def main_app():
                     tax = determina_tasse(d['fonte'], d['desc'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
+                    
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
                     
                     st.markdown(f"""
@@ -705,42 +689,50 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 1. METRICS DASHBOARD
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     c1.metric("Prezzo", f"{d['pr']}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari", 
                               help="💰 **Cosa significa?**\n\n• **Sotto la Pari (<100):** Paghi meno del valore che ti rimborseranno. Es: paghi 90, ricevi 100. La differenza è guadagno extra.\n• **Sopra la Pari (>100):** Paghi di più. Es: paghi 105, ricevi 100. È normale se la cedola è alta.")
+                    
                     c2.metric("Rendimento Netto", f"{qual['ytm_netto']:.2f}%", 
                               help="📈 **Cosa significa?**\n\nÈ il guadagno reale annuo che ti rimane in tasca, GIA' SOTTRATTE le tasse (12.5% o 26%). È il numero più importante da guardare.")
+                    
                     c3.metric("Rendimento Lordo", f"{risk['ytm']:.2f}%",
                               help="È il guadagno annuo PRIMA delle tasse. Serve per confrontare bond con tassazione diversa.")
+                    
                     c4.metric("Cedola", f"{d['ced']}%", 
                               help="💸 **Cosa significa?**\n\nÈ l'interesse periodico (il bonifico) che l'emittente ti paga. Es: 4% su 1.000€ = 40€ lordi l'anno.")
+                    
                     c5.metric("Taglio Minimo", f"{d['taglio']:,.0f}€", 
                               help="🧱 **Cosa significa?**\n\nÈ la quantità minima che puoi comprare. Se è 1.000€, non puoi investirne 500€.")
+                    
                     c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni", 
                               help="📉 **Cosa significa?**\n\nIndica quanto è rischioso il prezzo. Se la Duration è 6 anni, e i tassi salgono dell'1%, il prezzo del bond scenderà circa del 6%.")
 
-                    # 2. ANALISI IN BREVE
                     st.divider()
                     st.subheader("💡 Analisi in Breve")
                     t1, t2, t3 = st.columns(3)
+                    
                     with t1:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">1. Quanto Rende?</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Questo numero include sia le cedole che ricevi sia il guadagno finale (se compri a sconto) o la perdita (se compri a premio).</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
+                        
                     with t2:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
                         cedola_netta_euro = (1000 * (d['ced']/100) * (1 - tax/100))
+                        
                         if d['freq'] == 1: freq_txt = "in un'unica soluzione annuale"
                         elif d['freq'] == 2: freq_txt = f"in 2 cedole semestrali da {cedola_netta_euro/2:.2f}€"
                         elif d['freq'] == 4: freq_txt = f"in 4 cedole trimestrali da {cedola_netta_euro/4:.2f}€"
                         elif d['freq'] == 0: freq_txt = "(Zero Coupon: tutto a scadenza)"
                         else: freq_txt = ""
+                        
                         st.markdown(f'<div class="explanation-text">Ogni 1.000€ investiti, riceverai circa <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno, {freq_txt}.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
+                        
                     with t3:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">3. Rischio Prezzo</div>', unsafe_allow_html=True)
@@ -748,9 +740,9 @@ def main_app():
                         st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi salgono dell\'1%, il prezzo scende del {risk["mod_dur"]:.1f}%.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                    # --- SIMULATORE DI INVESTIMENTO AVANZATO ---
                     st.divider()
                     st.subheader("💰 Simulatore d'Acquisto")
+                    
                     c_sim1, c_sim2 = st.columns([1, 2])
                     with c_sim1:
                         investimento = st.number_input("Quanto vuoi investire? (€)", value=10000, step=1000)
@@ -767,23 +759,33 @@ def main_app():
                             <div class="receipt-row"><span>Costo Titoli (Prezzo {d['pr']}):</span> <span>{investimento * d['pr'] / 100:.2f} €</span></div>
                             <div class="receipt-row"><span>+ Rateo Interessi (da anticipare):</span> <span>{costo_rateo:.2f} €</span></div>
                             <div class="receipt-row"><span>+ Commissioni Banca:</span> <span>{commissioni:.2f} €</span></div>
-                            <div class="receipt-total"><span>TOTALE DA PAGARE OGGI:</span><span>{spesa_tot:.2f} €</span></div>
+                            <div class="receipt-total">
+                                <span>TOTALE DA PAGARE OGGI:</span>
+                                <span>{spesa_tot:.2f} €</span>
+                            </div>
                             <div class="receipt-sub">Hai pagato circa {(spesa_tot/investimento)*100:.1f}% del valore nominale</div>
                             <hr>
-                            <div class="receipt-row" style="color:#00CC96; font-weight:bold;"><span>GUADAGNO TOTALE (in {anni_durata:.1f} anni):</span><span>+{guadagno_netto:.2f} €</span></div>
-                            <div class="receipt-row"><span>Rendimento Annuo Effettivo:</span><span>{rend_annuo_semplice:.2f}%</span></div>
+                            <div class="receipt-row" style="color:#00CC96; font-weight:bold;">
+                                <span>GUADAGNO TOTALE (in {anni_durata:.1f} anni):</span>
+                                <span>+{guadagno_netto:.2f} €</span>
+                            </div>
+                            <div class="receipt-row">
+                                <span>Rendimento Annuo Effettivo:</span>
+                                <span>{rend_annuo_semplice:.2f}%</span>
+                            </div>
                         </div>
                         """, unsafe_allow_html=True)
+                        
                         st.info(f"""
                         ℹ️ **Perché questo rendimento ({rend_annuo_semplice:.2f}%) è diverso da quello sopra ({qual['ytm_netto']:.2f}%)?**
                         Perché qui stiamo calcolando i costi reali incluse le **Commissioni Bancarie ({commissioni}€)** che abbassano leggermente il rendimento finale.
+                        
                         **Composizione del Guadagno ({guadagno_netto:.2f}€):**
                         1. 🎫 Cedole Nette Totali: +{totale_cedole_nette:.2f}€
                         2. 📈 Guadagno sul Prezzo (Capital Gain): +{plusvalenza_netta:.2f}€
                         3. 🏦 Meno Costi (Commissioni): -{commissioni:.2f}€
                         """)
 
-                    # --- CEDOLARIO VISIVO ---
                     st.divider()
                     st.subheader("📅 Cedolario (I tuoi flussi di cassa)")
                     tot_da_incassare = df_flussi[df_flussi['Importo'] > 0]['Importo'].sum()
@@ -816,48 +818,41 @@ def main_app():
 
                 else: st.warning("Bond non trovato. Aggiorna il DB.")
 
-elif st.session_state.page == "SmartAnalysis":
-        st.title("🧠 Smart Analysis & Market Landscape")
-        st.caption("Confronta il tuo bond con l'intero mercato e visualizza il premio per il rischio.")
-        
-        with st.spinner("Mappatura del mercato in corso..."):
+    elif st.session_state.page == "SmartAnalysis":
+        st.title("🧠 Smart Analysis & Relative Value")
+        st.caption("Analisi professionale del posizionamento rispetto alla curva dei rendimenti.")
+        with st.spinner("Calcolo curve di rendimento..."):
             df_market = carica_dati_mercato()
         
-        if df_market.empty: 
-            st.warning("⚠️ Database vuoto. Aggiorna i dati dalla sidebar.")
+        if df_market.empty: st.warning("⚠️ Database vuoto. Aggiorna i dati dalla sidebar.")
         else:
             col_search, col_kpi = st.columns([1, 3])
             with col_search:
                 isin_smart = st.text_input("Analizza ISIN", placeholder="IT...").strip().upper()
-                # Il filtro categoria qui serve solo per aiutare la ricerca se l'ISIN non si trova
-                cat_view = st.selectbox("Filtra Categoria Ricerca", list(SOURCES_MAP.keys()), index=0)
+                cat_view = st.selectbox("Filtra Categoria Ricerca", list(SOURCES_MAP.keys()))
                 
             if isin_smart and valida_isin(isin_smart):
                 row, info = cerca_db(isin_smart, cat_view)
                 d_smart = processa_riga(row, info) if row is not None else None
                 
                 if d_smart:
-                    # 1. RILEVAMENTO INTELLIGENTE CATEGORIA
                     cat_target = "Altro"
                     if "BTP" in d_smart['desc'].upper() or "BOT" in d_smart['desc'].upper() or "ITALIA" in d_smart['fonte'].upper(): cat_target = "Governativo"
                     elif "BUND" in d_smart['desc'].upper() or "GERMANIA" in d_smart['desc'].upper(): cat_target = "Governativo"
                     elif "BANCHE" in d_smart['fonte'].upper() or "INTESA" in d_smart['desc'].upper() or "UNICREDIT" in d_smart['desc'].upper(): cat_target = "Bancario"
                     elif "CORP" in d_smart['fonte'].upper() or "ENI" in d_smart['desc'].upper() or "STELLANTIS" in d_smart['desc'].upper(): cat_target = "Corporate"
                     
-                    # Fallback
                     if cat_target == "Altro":
                         if "GOVERNATIVI" in cat_view: cat_target = "Governativo"
                         elif "FINANZIARI" in cat_view: cat_target = "Bancario"
                         elif "CORPORATE" in cat_view: cat_target = "Corporate"
 
                     d_smart['isin'] = isin_smart
-                    d_smart['Categoria'] = cat_target # Assegna per coerenza
+                    d_smart['Categoria'] = cat_target
                     ytm_s = calcola_rendimento_grezzo(d_smart['pr'], d_smart['ced'], d_smart['sc'])
                     dur_s = (d_smart['sc'] - date.today()).days / 365.25
                     
                     st.divider()
-                    
-                    # HEADER DINAMICO
                     st.subheader(f"📊 Mappa del Mercato: {cat_target} vs Tutti")
                     st.markdown(f"""
                     Stai visualizzando il posizionamento di **{d_smart['desc']}** ({cat_target}).
@@ -867,8 +862,6 @@ elif st.session_state.page == "SmartAnalysis":
                     * **Punti Blu/Viola:** Corporate e Banche (Rischio Medio/Alto - Rendimento maggiore).
                     """)
                     
-                    # 2. PREPARAZIONE DATI GRAFICO (ZOOM SUL MERCATO GLOBALE)
-                    # Non filtriamo per categoria qui, vogliamo vedere TUTTO intorno alla durata
                     range_zoom = 4
                     df_zoom = df_market[
                         (df_market['Anni'] >= dur_s - range_zoom) & 
@@ -876,24 +869,20 @@ elif st.session_state.page == "SmartAnalysis":
                         (df_market['YTM_Grezzo'] > -2) & (df_market['YTM_Grezzo'] < 15)
                     ].copy()
                     
-                    # 3. COSTRUZIONE GRAFICO STRATIFICATO
                     fig = px.scatter(
                         df_zoom, x='Anni', y='YTM_Grezzo', 
-                        color='Categoria', # Qui la magia: Marco vede i colori diversi!
+                        color='Categoria', 
                         hover_data=['ISIN', 'Desc', 'Prezzo'],
                         color_discrete_map={
-                            "Governativo": "#00CC96", # Verde (Safe)
-                            "Bancario": "#AB63FA",    # Viola
-                            "Corporate": "#636EFA",   # Blu
-                            "Altro": "#EF553B"        # Rosso/Arancio
+                            "Governativo": "#00CC96", 
+                            "Bancario": "#AB63FA",    
+                            "Corporate": "#636EFA",   
+                            "Altro": "#EF553B"        
                         },
                         opacity=0.6,
                         labels={'Anni': 'Duration (Anni)', 'YTM_Grezzo': 'Rendimento Lordo (%)'}
                     )
                     
-                    # 4. AGGIUNTA TRENDLINES (LOGICA QUANTITATIVA)
-                    
-                    # A) Trendline della CATEGORIA DEL BOND (Per vedere se è caro/economico rispetto ai suoi simili)
                     df_cat_specific = df_zoom[df_zoom['Categoria'] == cat_target]
                     if len(df_cat_specific) > 5:
                         z = np.polyfit(df_cat_specific['Anni'], df_cat_specific['YTM_Grezzo'], 2)
@@ -901,7 +890,6 @@ elif st.session_state.page == "SmartAnalysis":
                         x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
                         fig.add_trace(go.Scatter(x=x_trend, y=p(x_trend), mode='lines', name=f'Media {cat_target}', line=dict(color='yellow', width=3, dash='dot')))
                         
-                        # Calcolo Z-Score (solo sui simili)
                         fair_yield = p(dur_s)
                         delta_spread = ytm_s - fair_yield
                         sigma = np.std(df_cat_specific['YTM_Grezzo'] - p(df_cat_specific['Anni']))
@@ -909,8 +897,6 @@ elif st.session_state.page == "SmartAnalysis":
                     else:
                         fair_yield = ytm_s; delta_spread = 0; z_score = 0; sigma = 0
 
-                    # B) Trendline GOVERNATIVA (BENCHMARK) - Se il bond NON è governativo
-                    # Questo serve a Marco per vedere lo "Spread" visivamente
                     if cat_target != "Governativo":
                         df_gov = df_zoom[df_zoom['Categoria'] == "Governativo"]
                         if len(df_gov) > 5:
@@ -919,12 +905,10 @@ elif st.session_state.page == "SmartAnalysis":
                             x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
                             fig.add_trace(go.Scatter(x=x_trend, y=p_gov(x_trend), mode='lines', name='Risk Free (Stati)', line=dict(color='#00CC96', width=2)))
 
-                    # C) Il Tuo Bond
                     fig.add_trace(go.Scatter(x=[dur_s], y=[ytm_s], mode='markers+text', name='TUO BOND', text=['📍 TU'], textposition="top center", marker=dict(color='red', size=20, symbol='star')))
                     
                     fig.update_layout(template="plotly_dark", height=550, title=dict(text="Market Landscape: Rischio vs Rendimento", font=dict(size=20)))
                     
-                    # Interattività
                     selected_point = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
                     if selected_point and len(selected_point['selection']['points']) > 0:
                         try:
@@ -935,7 +919,6 @@ elif st.session_state.page == "SmartAnalysis":
                                 st.rerun()
                         except: pass
 
-                    # --- TERMOMETRO FINANZIARIO (Z-SCORE) ---
                     st.divider()
                     st.subheader("🌡️ Analisi del Valore (Relativo alla Categoria)")
                     
@@ -971,12 +954,10 @@ elif st.session_state.page == "SmartAnalysis":
                     </div>
                     """, unsafe_allow_html=True)
 
-                    # --- ALTERNATIVE MIGLIORI (SMART SWITCH) ---
                     st.divider()
                     st.subheader(f"🔄 Alternative Smart ({cat_target})")
                     st.caption(f"Bond {cat_target} con durata simile che offrono un rendimento migliore.")
                     
-                    # Qui passiamo esplicitamente cat_target per garantire il confronto "Mele con Mele" nella tabella
                     alternative = trova_alternative_migliori(d_smart, df_market, categoria_obbligatoria=cat_target)
                     
                     if not alternative.empty:
