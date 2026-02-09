@@ -920,6 +920,128 @@ def diversificazione_portfolio_ui():
             else:
                 st.success(f"✅ Massimo peso: {max_peso:.1f}%. Diversificazione ottima!")
 
+# 4. SIMULATORE GUADAGNO FINALE
+def simulatore_guadagno_ui():
+    """Simulatore 'Quanto avrò tra X anni?'"""
+    st.title("💰 Simulatore: Quanto Guadagno DAVVERO?")
+    st.caption("Calcolo esatto del guadagno finale")
+    
+    st.info("""
+    **🎯 A cosa serve?**
+    
+    Ti dice **ESATTAMENTE** quanti euro avrai tra X anni, considerando:
+    - ✅ Tutte le cedole nette
+    - ✅ Il rimborso finale
+    - ✅ Le tasse (12.5% o 26%)
+    - ✅ Le commissioni
+    - ✅ L'inflazione
+    """)
+    
+    st.divider()
+    
+    # Input ISIN
+    isin_sim = st.text_input("ISIN da Simulare", placeholder="IT...").strip().upper()
+    
+    if isin_sim and valida_isin(isin_sim):
+        row, info = cerca_db(isin_sim, "🌐 TUTTE")
+        bond = processa_riga(row, info) if row is not None else None
+        
+        if bond:
+            st.success(f"✅ {bond['desc']}")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                inv = st.number_input("Investimento (€)", value=10000, step=1000)
+            
+            with col2:
+                comm = st.number_input("Commissioni (€)", value=5.0, step=1.0)
+            
+            with col3:
+                infl, _ = get_inflazione_ufficiale()
+                infl_sim = st.number_input("Inflazione %", value=infl, step=0.5)
+            
+            if st.button("📊 Calcola", type="primary"):
+                # Calcoli
+                tax = determina_tasse(bond['fonte'], bond['desc'])
+                df_flussi, spesa, incasso, _, ced_tot, plus = genera_flussi_dettagliati(
+                    bond, inv, tax, comm, bond['pr']
+                )
+                
+                guadagno = incasso - spesa
+                anni = (bond['sc'] - date.today()).days / 365.25
+                
+                # Inflazione
+                valore_reale = incasso / ((1 + infl_sim/100) ** anni)
+                perdita_infl = spesa - valore_reale
+                
+                st.divider()
+                
+                # === BOX RISULTATO FINALE ===
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #00CC96, #00AA76); padding: 30px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 8px 16px rgba(0,0,0,0.3);">
+                    <h1 style="margin: 0; font-size: 48px;">€ {incasso:,.2f}</h1>
+                    <p style="margin: 5px 0; font-size: 18px;">Avrai questa cifra alla scadenza ({bond['sc'].strftime('%d/%m/%Y')})</p>
+                    <hr style="border-color: rgba(255,255,255,0.3); margin: 15px 0;">
+                    <div style="display: flex; justify-content: space-around; font-size: 16px;">
+                        <div>
+                            <div style="opacity: 0.8;">Investito Oggi</div>
+                            <div style="font-size: 24px; font-weight: bold;">€ {spesa:,.2f}</div>
+                        </div>
+                        <div>
+                            <div style="opacity: 0.8;">Guadagno Netto</div>
+                            <div style="font-size: 24px; font-weight: bold;">+€ {guadagno:,.2f}</div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.divider()
+                
+                # Breakdown
+                st.subheader("🧾 Breakdown Dettagliato")
+                
+                col_left, col_right = st.columns(2)
+                
+                with col_left:
+                    st.markdown("**📥 USCITE**")
+                    st.write(f"Costo bond: {inv * bond['pr'] / 100:,.2f}€")
+                    st.write(f"Commissioni: {comm:,.2f}€")
+                    st.write(f"**TOTALE PAGATO: {spesa:,.2f}€**")
+                
+                with col_right:
+                    st.markdown("**📤 ENTRATE**")
+                    st.write(f"Cedole nette: {ced_tot:,.2f}€")
+                    st.write(f"Plusvalenza: {plus:,.2f}€")
+                    st.write(f"**TOTALE INCASSATO: {incasso:,.2f}€**")
+                
+                st.divider()
+                
+                # Inflazione
+                st.subheader("📉 Impatto Inflazione")
+                
+                st.error(f"""
+                **⚠️ ATTENZIONE ALL'INFLAZIONE!**
+                
+                I tuoi {incasso:,.2f}€ tra {anni:.1f} anni varranno solo **{valore_reale:,.2f}€** di oggi.
+                
+                Perdita potere d'acquisto: **-{perdita_infl:,.2f}€** ({(perdita_infl/spesa*100):.1f}%)
+                """)
+                
+                # Timeline
+                st.divider()
+                st.subheader("📅 Timeline Mese per Mese")
+                
+                st.dataframe(
+                    df_flussi.style.format({
+                        'Importo': '{:+,.2f}€',
+                        'Data': lambda x: x.strftime('%d/%m/%Y')
+                    }),
+                    use_container_width=True
+                )
+        else:
+            st.error("ISIN non trovato")
+
 # 5. SISTEMA ALERT
 def alert_manager_ui():
     """Gestione alert personalizzati"""
@@ -1022,8 +1144,13 @@ def main_app():
         if st.button("🧠 Smart Analysis", use_container_width=True): st.session_state.page = "SmartAnalysis"; st.rerun()
         if st.button("📊 Dashboard Mercato", use_container_width=True): st.session_state.page = "Dashboard"; st.rerun()
         if st.button("🧮 Diversificazione", use_container_width=True): st.session_state.page = "Diversificazione"; st.rerun()
+        if st.button("💰 Simulatore", use_container_width=True): st.session_state.page = "Simulatore"; st.rerun()
         if st.button("🔔 Alert Manager", use_container_width=True): st.session_state.page = "Alerts"; st.rerun()
 
+        st.divider()
+        st.write("💰 **Il tuo Patrimonio**")
+        st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0, label_visibility="collapsed")
+        
         # --- SEZIONE SISTEMA UX 2.0 ---
         st.divider()
         st.caption("⚙️ STATO SISTEMA")
@@ -1220,7 +1347,7 @@ def main_app():
                         st.markdown('</div>', unsafe_allow_html=True)
 
                     st.divider()
-                    st.subheader("💰 Simulatore di Investimento Reale")
+                    st.subheader("💰 Simulatore d'Acquisto & P&L")
                     
                     c_sim1, c_sim2, c_sim3 = st.columns(3)
                     with c_sim1:
@@ -1316,11 +1443,7 @@ def main_app():
 
                 else: st.warning("Bond non trovato. Prova a selezionare '🌐 TUTTE' o aggiorna il DB.")
 
-    elif st.session_state.page == "Screener": bond_screener_ui()
-    elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
-    elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
-    elif st.session_state.page == "Simulatore": simulatore_guadagno_ui()
-elif st.session_state.page == "SmartAnalysis":
+    elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Pro Tools")
         st.caption("Confronta il tuo bond con il mercato reale.")
         
@@ -1333,10 +1456,12 @@ elif st.session_state.page == "SmartAnalysis":
             c_s, _ = st.columns([1, 3])
             with c_s: 
                 isin_s = st.text_input("Inserisci ISIN", placeholder="IT...").strip().upper()
+                # Recuperiamo cat_view anche se non usata per il filtro DB, serve per il contesto
                 cat_v = st.selectbox("Confronta con...", list(MACRO_CATEGORIES.keys()))
             
             if isin_s and valida_isin(isin_s):
-                row, info = cerca_db(isin_s, cat_v)
+                # Cerchiamo in TUTTO il DB per essere sicuri di trovarlo
+                row, info = cerca_db(isin_s, "🌐 TUTTE")
                 ds = processa_riga(row, info) if row is not None else None
                 
                 if ds:
@@ -1347,12 +1472,14 @@ elif st.session_state.page == "SmartAnalysis":
                     elif "INTESA" in desc_upp or "UNICREDIT" in desc_upp: cat_target = "Bancario"
                     elif "ENI" in desc_upp or "ENEL" in desc_upp: cat_target = "Corporate"
                     
+                    # Se non riesce a determinare, usa il filtro dell'utente o default
                     if cat_target == "Altro": 
-                        if "GOVERNATIVI" in cat_view: cat_target = "Governativo"
+                        if "GOVERNATIVI" in cat_v: cat_target = "Governativo"
                         else: cat_target = "Corporate"
 
                     ds['isin'] = isin_s; ds['Categoria'] = cat_target
                     ytm_s = calcola_rendimento_grezzo(ds['pr'], ds['ced'], ds['sc'])
+                    risk_metrics = calcola_metriche_rischio(ds['pr'], ds['ced'], ds['sc'], ds['freq']) # Calcolo metriche qui
                     anni_scad = (ds['sc'] - date.today()).days / 365.25
                     
                     st.divider()
@@ -1409,14 +1536,9 @@ elif st.session_state.page == "SmartAnalysis":
                     
                     fig.update_layout(template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1))
                     
-                    # Interattività: Se clicchi un punto, lo selezioni
+                    # Interattività
                     selected = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
-                    if selected and len(selected['selection']['points']) > 0:
-                        try:
-                            clk = selected['selection']['points'][0]['customdata'][0] # Assumendo ISIN in customdata, qui semplificato
-                            # Per ora non facciamo nulla al click per evitare errori di indice, solo visualizzazione
-                        except: pass
-
+                    
                     # 4. ANALISI VALORE (KPI)
                     st.divider(); st.subheader("🌡️ Termometro Valore")
                     k1, k2, k3 = st.columns(3)
@@ -1439,32 +1561,50 @@ elif st.session_state.page == "SmartAnalysis":
                     with c_str:
                         shocks = [-1.0, -0.5, 0.0, +0.5, +1.0]
                         res = []
+                        # Usa risk_metrics calcolato sopra
+                        dur_val = risk_metrics['mod_dur'] if risk_metrics else 0
                         for s in shocks:
-                            px_new = ds['pr'] * (1 - (risk_metrics['mod_dur'] * (s/100)))
+                            px_new = ds['pr'] * (1 - (dur_val * (s/100)))
                             var = px_new - ds['pr']
                             res.append({"Variazione Tassi": f"{s:+.1f}%", "Nuovo Prezzo": f"{px_new:.2f}€", "P&L": f"{var:+.2f}€"})
                         
                         st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
                     
                     with c_eff:
-                        eff_score = ytm_s / risk_metrics['mod_dur'] if risk_metrics['mod_dur'] > 0 else 0
+                        eff_score = ytm_s / dur_val if dur_val > 0 else 0
                         st.metric("Efficienza (Rendimento/Rischio)", f"{eff_score:.2f}")
                         st.caption("Per ogni punto di rischio (duration), quanto rendimento ottieni? Sopra 0.5 è buono.")
 
-                    # 6. ALTERNATIVE MIGLIORI
-                    st.divider(); st.subheader(f"🔄 Alternative Migliori in {cat_target}")
+                    # 6. SMART SWITCH (ALTERNATIVE)
+                    st.divider()
+                    st.subheader(f"🔄 Smart Switch ({cat_target})")
+                    st.caption("Bond simili (stessa durata/rischio) che rendono di più.")
+                    
                     alt = trova_alternative_migliori(ds, df_m, cat_target)
+                    
                     if not alt.empty:
+                        alt['Efficienza'] = alt['YTM_Netto'] / (alt['Anni'] + 0.1)
                         st.dataframe(
                             alt[['Tipologia', 'ISIN', 'Desc', 'Prezzo', 'YTM_Netto', 'Extra']], 
-                            use_container_width=True, hide_index=True,
-                            column_config={"Extra": st.column_config.NumberColumn("Guadagno Extra", format="%+.2f%%")}
+                            use_container_width=True, 
+                            hide_index=True,
+                            column_config={
+                                "Extra": st.column_config.NumberColumn("Guadagno Extra", format="%+.2f%%"),
+                                "YTM_Netto": st.column_config.NumberColumn("YTM Netto", format="%.2f%%"),
+                                "Prezzo": st.column_config.NumberColumn("Prezzo", format="%.2f €")
+                            }
                         )
-                    else: st.success("🏆 Complimenti! Hai selezionato uno dei migliori bond della categoria.")
+                    else:
+                        st.balloons()
+                        st.success(f"🏆 COMPLIMENTI! Il bond che hai scelto è già il **MIGLIORE** della sua categoria per questa scadenza.")
 
                 else: st.error("ISIN non trovato nel database.")
             else: st.info("Inserisci un ISIN per iniziare l'analisi.")
 
+    elif st.session_state.page == "Screener": bond_screener_ui()
+    elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
+    elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
+    elif st.session_state.page == "Simulatore": simulatore_guadagno_ui()
     elif st.session_state.page == "Alerts": alert_manager_ui()
 
 if st.session_state.logged_in: main_app()
