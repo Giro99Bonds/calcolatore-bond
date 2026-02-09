@@ -177,7 +177,7 @@ SOURCES_MAP = {
 }
 # MAPPING PER IL MENU A TENDINA SEMPLIFICATO
 MACRO_CATEGORIES = {
-    "TUTTE": [], # Cerca ovunque
+    "🌐 TUTTE": [], # Cerca ovunque
     "🏛️ GOVERNATIVI": [
         "🏛️ GOV - ITALIA", 
         "🇪🇺 GOV - EUROPA CORE", 
