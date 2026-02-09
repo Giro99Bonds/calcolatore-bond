@@ -920,128 +920,6 @@ def diversificazione_portfolio_ui():
             else:
                 st.success(f"✅ Massimo peso: {max_peso:.1f}%. Diversificazione ottima!")
 
-# 4. SIMULATORE GUADAGNO FINALE
-def simulatore_guadagno_ui():
-    """Simulatore 'Quanto avrò tra X anni?'"""
-    st.title("💰 Simulatore: Quanto Guadagno DAVVERO?")
-    st.caption("Calcolo esatto del guadagno finale")
-    
-    st.info("""
-    **🎯 A cosa serve?**
-    
-    Ti dice **ESATTAMENTE** quanti euro avrai tra X anni, considerando:
-    - ✅ Tutte le cedole nette
-    - ✅ Il rimborso finale
-    - ✅ Le tasse (12.5% o 26%)
-    - ✅ Le commissioni
-    - ✅ L'inflazione
-    """)
-    
-    st.divider()
-    
-    # Input ISIN
-    isin_sim = st.text_input("ISIN da Simulare", placeholder="IT...").strip().upper()
-    
-    if isin_sim and valida_isin(isin_sim):
-        row, info = cerca_db(isin_sim, "🌐 TUTTE")
-        bond = processa_riga(row, info) if row is not None else None
-        
-        if bond:
-            st.success(f"✅ {bond['desc']}")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                inv = st.number_input("Investimento (€)", value=10000, step=1000)
-            
-            with col2:
-                comm = st.number_input("Commissioni (€)", value=5.0, step=1.0)
-            
-            with col3:
-                infl, _ = get_inflazione_ufficiale()
-                infl_sim = st.number_input("Inflazione %", value=infl, step=0.5)
-            
-            if st.button("📊 Calcola", type="primary"):
-                # Calcoli
-                tax = determina_tasse(bond['fonte'], bond['desc'])
-                df_flussi, spesa, incasso, _, ced_tot, plus = genera_flussi_dettagliati(
-                    bond, inv, tax, comm, bond['pr']
-                )
-                
-                guadagno = incasso - spesa
-                anni = (bond['sc'] - date.today()).days / 365.25
-                
-                # Inflazione
-                valore_reale = incasso / ((1 + infl_sim/100) ** anni)
-                perdita_infl = spesa - valore_reale
-                
-                st.divider()
-                
-                # === BOX RISULTATO FINALE ===
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #00CC96, #00AA76); padding: 30px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 8px 16px rgba(0,0,0,0.3);">
-                    <h1 style="margin: 0; font-size: 48px;">€ {incasso:,.2f}</h1>
-                    <p style="margin: 5px 0; font-size: 18px;">Avrai questa cifra alla scadenza ({bond['sc'].strftime('%d/%m/%Y')})</p>
-                    <hr style="border-color: rgba(255,255,255,0.3); margin: 15px 0;">
-                    <div style="display: flex; justify-content: space-around; font-size: 16px;">
-                        <div>
-                            <div style="opacity: 0.8;">Investito Oggi</div>
-                            <div style="font-size: 24px; font-weight: bold;">€ {spesa:,.2f}</div>
-                        </div>
-                        <div>
-                            <div style="opacity: 0.8;">Guadagno Netto</div>
-                            <div style="font-size: 24px; font-weight: bold;">+€ {guadagno:,.2f}</div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.divider()
-                
-                # Breakdown
-                st.subheader("🧾 Breakdown Dettagliato")
-                
-                col_left, col_right = st.columns(2)
-                
-                with col_left:
-                    st.markdown("**📥 USCITE**")
-                    st.write(f"Costo bond: {inv * bond['pr'] / 100:,.2f}€")
-                    st.write(f"Commissioni: {comm:,.2f}€")
-                    st.write(f"**TOTALE PAGATO: {spesa:,.2f}€**")
-                
-                with col_right:
-                    st.markdown("**📤 ENTRATE**")
-                    st.write(f"Cedole nette: {ced_tot:,.2f}€")
-                    st.write(f"Plusvalenza: {plus:,.2f}€")
-                    st.write(f"**TOTALE INCASSATO: {incasso:,.2f}€**")
-                
-                st.divider()
-                
-                # Inflazione
-                st.subheader("📉 Impatto Inflazione")
-                
-                st.error(f"""
-                **⚠️ ATTENZIONE ALL'INFLAZIONE!**
-                
-                I tuoi {incasso:,.2f}€ tra {anni:.1f} anni varranno solo **{valore_reale:,.2f}€** di oggi.
-                
-                Perdita potere d'acquisto: **-{perdita_infl:,.2f}€** ({(perdita_infl/spesa*100):.1f}%)
-                """)
-                
-                # Timeline
-                st.divider()
-                st.subheader("📅 Timeline Mese per Mese")
-                
-                st.dataframe(
-                    df_flussi.style.format({
-                        'Importo': '{:+,.2f}€',
-                        'Data': lambda x: x.strftime('%d/%m/%Y')
-                    }),
-                    use_container_width=True
-                )
-        else:
-            st.error("ISIN non trovato")
-
 # 5. SISTEMA ALERT
 def alert_manager_ui():
     """Gestione alert personalizzati"""
@@ -1144,13 +1022,8 @@ def main_app():
         if st.button("🧠 Smart Analysis", use_container_width=True): st.session_state.page = "SmartAnalysis"; st.rerun()
         if st.button("📊 Dashboard Mercato", use_container_width=True): st.session_state.page = "Dashboard"; st.rerun()
         if st.button("🧮 Diversificazione", use_container_width=True): st.session_state.page = "Diversificazione"; st.rerun()
-        if st.button("💰 Simulatore", use_container_width=True): st.session_state.page = "Simulatore"; st.rerun()
         if st.button("🔔 Alert Manager", use_container_width=True): st.session_state.page = "Alerts"; st.rerun()
 
-        st.divider()
-        st.write("💰 **Il tuo Patrimonio**")
-        st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0, label_visibility="collapsed")
-        
         # --- SEZIONE SISTEMA UX 2.0 ---
         st.divider()
         st.caption("⚙️ STATO SISTEMA")
@@ -1347,7 +1220,7 @@ def main_app():
                         st.markdown('</div>', unsafe_allow_html=True)
 
                     st.divider()
-                    st.subheader("💰 Simulatore d'Acquisto & P&L")
+                    st.subheader("💰 Simulatore di Investimento Reale")
                     
                     c_sim1, c_sim2, c_sim3 = st.columns(3)
                     with c_sim1:
@@ -1536,7 +1409,20 @@ def main_app():
                         marker=dict(color='#FF00FF', size=25, symbol='diamond', line=dict(width=3, color='white'))
                     ))
 
-
+                    # 2. La Freccia (Annotation) - Molto più chiaro del testo sovrapposto
+                    fig.add_annotation(
+                        x=anni_scad, y=ytm_s,
+                        text="SEI QUI",
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowsize=1,
+                        arrowwidth=2,
+                        arrowcolor="#FF00FF",
+                        ax=0, ay=-40, # Sposta la scritta in alto di 40px
+                        font=dict(size=14, color="white", family="Arial Black"),
+                        bgcolor="#FF00FF",
+                        borderpad=4
+                    )
                     
                     fig.update_layout(template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1))
                     
@@ -1604,11 +1490,10 @@ def main_app():
 
                 else: st.error("ISIN non trovato nel database.")
             else: st.info("Inserisci un ISIN per iniziare l'analisi.")
-                
+
     elif st.session_state.page == "Screener": bond_screener_ui()
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
-    elif st.session_state.page == "Simulatore": simulatore_guadagno_ui()
     elif st.session_state.page == "Alerts": alert_manager_ui()
 
 if st.session_state.logged_in: main_app()
