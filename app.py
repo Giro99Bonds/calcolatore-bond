@@ -28,25 +28,25 @@ st.markdown("""
     /* --- STILI GENERALI --- */
     .metric-card { background-color: #1e2130; padding: 15px; border-radius: 8px; border: 1px solid #3e445b; margin-bottom: 10px; color: #ffffff !important; }
     
-    /* --- LEGEND CARD (STILE CHE TI PIACEVA) --- */
+   /* --- LEGEND CARD (AGGIORNATO) --- */
     .cat-card {
         padding: 15px;
         border-radius: 10px;
         margin-bottom: 10px;
         height: 100%;
-        border: 1px solid rgba(128,128,128,0.2);
-        transition: transform 0.2s;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        color: white; /* Testo bianco per contrasto su sfondi scuri */
     }
-    .cat-card:hover { transform: scale(1.02); }
-    .cat-title { font-weight: bold; font-size: 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-    .cat-desc { font-size: 13px; opacity: 0.9; margin-bottom: 8px; line-height: 1.4; }
-    .cat-meta { font-size: 12px; font-weight: bold; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-right: 5px; }
+    .cat-title { font-weight: bold; font-size: 18px; margin-bottom: 5px; display: flex; align-items: center; gap: 8px; }
+    .cat-desc { font-size: 14px; opacity: 0.95; margin-bottom: 8px; line-height: 1.4; }
+    .cat-meta { font-size: 12px; font-weight: bold; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; margin-right: 5px; }
     
-    .bg-gov { background: linear-gradient(145deg, rgba(26, 74, 46, 0.1), rgba(26, 74, 46, 0.3)); border-left: 4px solid #28a745; }
-    .bg-bank { background: linear-gradient(145deg, rgba(44, 62, 80, 0.1), rgba(44, 62, 80, 0.3)); border-left: 4px solid #8e9aaf; }
-    .bg-corp { background: linear-gradient(145deg, rgba(30, 58, 95, 0.1), rgba(30, 58, 95, 0.3)); border-left: 4px solid #17a2b8; }
-    .bg-spec { background: linear-gradient(145deg, rgba(88, 24, 69, 0.1), rgba(88, 24, 69, 0.3)); border-left: 4px solid #d63384; }
-
+    /* Colori Sfondi Intensi per leggibilità */
+    .bg-gov { background: linear-gradient(135deg, #1a4a2e 0%, #28a745 100%); }
+    .bg-bank { background: linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%); }
+    .bg-corp { background: linear-gradient(135deg, #1e3a5f 0%, #17a2b8 100%); }
+    .bg-spec { background: linear-gradient(135deg, #581845 0%, #d63384 100%); }
+    
     /* --- SCONTRINO SIMULATORE --- */
     .receipt-box {
         border: 2px dashed rgba(128, 128, 128, 0.3);
@@ -401,32 +401,59 @@ def categorizza_rischio(isin, nome, desc):
     if "ROMANIA" in nome or "TURCHIA" in nome: return 4
     return 3 
 
-def trova_alternative_migliori(bond_target, df_mercato):
+def trova_alternative_migliori(bond_target, df_mercato, categoria_obbligatoria=None):
+    """
+    Trova alternative migliori ma SOLO della stessa categoria (es. Governativo con Governativo).
+    """
     if df_mercato.empty: return pd.DataFrame()
+    
     anni_target = (bond_target['sc'] - date.today()).days / 365.25
     tax_target = determina_tasse(bond_target['fonte'], bond_target['desc'])
     ytm_netto_target = calcola_rendimento_grezzo(bond_target['pr'], bond_target['ced'], bond_target['sc']) * (1 - tax_target/100)
-    isin_target = bond_target.get('isin', '')
-    rischio_target = categorizza_rischio(isin_target, bond_target['fonte'], bond_target['desc'])
     
+    # Se non passiamo la categoria esplicita, proviamo a indovinarla dal bond target, ma è meglio passarla
+    if not categoria_obbligatoria:
+        # Fallback (non dovrebbe succedere se la chiami correttamente)
+        categoria_obbligatoria = "Governativo" if tax_target == 12.5 else "Corporate"
+
     alternative = []
+    
     for _, row in df_mercato.iterrows():
+        # 1. FILTRO CATEGORIA RIGIDO (Il Fix che volevi)
+        # Se io ho un Governativo, VOGLIO solo Governativi.
+        if row['Categoria'] != categoria_obbligatoria:
+            continue
+
+        # 2. Filtro Durata (+/- 2 anni)
         if not (anni_target - 2 <= row['Anni'] <= anni_target + 2): continue
+        
+        # 3. Filtro Prezzo (< 108)
         if row['Prezzo'] > 108: continue 
-        rischio_alt = categorizza_rischio(row['ISIN'], row['Fonte'], row['Desc'])
+        
+        # Calcoli confronto
         tax_alt = determina_tasse(row['Fonte'], row['Desc'])
         ytm_netto_alt = row['YTM_Grezzo'] * (1 - tax_alt/100)
         extra = ytm_netto_alt - ytm_netto_target
+        
+        # Logica Tipologia Switch
         tipo_switch = ""
-        if rischio_alt == rischio_target and extra > 0.15: tipo_switch = "✅ Gemello Migliore"
-        elif rischio_alt == rischio_target + 1 and extra > 0.8: tipo_switch = "⚠️ Boost Rendimento (Rischio+)"
-        elif rischio_alt < rischio_target and extra > -0.3: tipo_switch = "🛡️ Rifugio Sicuro"
+        # Qui ora confrontiamo solo mele con mele, quindi semplifichiamo
+        if extra > 0.15: 
+            tipo_switch = "✅ Miglior Rendimento"
+        elif extra > 0.05 and row['Prezzo'] < bond_target['pr']:
+            tipo_switch = "📉 Prezzo più basso"
+            
         if tipo_switch:
             link_isin = f"https://www.google.com/search?q={row['ISIN']}+bond"
-            row['Tipologia'] = tipo_switch; row['YTM_Netto'] = ytm_netto_alt; row['Extra'] = extra; row['Link'] = link_isin
+            row['Tipologia'] = tipo_switch
+            row['YTM_Netto'] = ytm_netto_alt
+            row['Extra'] = extra
+            row['Link'] = link_isin
             alternative.append(row)
+            
     df_alt = pd.DataFrame(alternative)
-    if not df_alt.empty: return df_alt.sort_values('Extra', ascending=False).head(5)
+    if not df_alt.empty:
+        return df_alt.sort_values('Extra', ascending=False).head(5)
     return pd.DataFrame()
 
 def aggiorna_db():
@@ -587,12 +614,48 @@ def main_app():
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Inserisci un ISIN per analizzare il bond.")
         
+       # --- INIZIO NUOVA LEGENDA ---
+        st.markdown("### 🧭 Guida alle Categorie")
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span><b>Stati</b><br>Italia, Germania, USA, Francia</div>""", unsafe_allow_html=True)
-        with c2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span><b>Banche</b><br>Intesa, UniCredit, Subordinate</div>""", unsafe_allow_html=True)
-        with c3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span><b>Aziende</b><br>Eni, Stellantis, Telecom</div>""", unsafe_allow_html=True)
-        with c4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span><b>Misti</b><br>Zero Coupon, 25y+, Callable</div>""", unsafe_allow_html=True)
+        
+        with c1:
+            st.markdown("""
+            <div class="cat-card bg-gov">
+                <div class="cat-title">🏛️ GOVERNATIVI</div>
+                <div class="cat-desc">Titoli di Stato (es. BTP, Bund). Massima sicurezza, tassazione agevolata.</div>
+                <div><span class="cat-meta">Rischio: BASSO</span><span class="cat-meta">Tax: 12.5%</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with c2:
+            st.markdown("""
+            <div class="cat-card bg-bank">
+                <div class="cat-title">🏦 FINANZIARI</div>
+                <div class="cat-desc">Obbligazioni bancarie. Rendimento medio. Attenzione se "Subordinate".</div>
+                <div><span class="cat-meta">Rischio: MEDIO</span><span class="cat-meta">Tax: 26%</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with c3:
+            st.markdown("""
+            <div class="cat-card bg-corp">
+                <div class="cat-title">🏭 CORPORATE</div>
+                <div class="cat-desc">Emessi da aziende (es. Eni, Fiat). Rendimento più alto, rischio emittente.</div>
+                <div><span class="cat-meta">Rischio: ALTO</span><span class="cat-meta">Tax: 26%</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with c4:
+            st.markdown("""
+            <div class="cat-card bg-spec">
+                <div class="cat-title">💎 SPECIALI</div>
+                <div class="cat-desc">Zero Coupon, Callable, 25y+. Strumenti complessi per strategie avanzate.</div>
+                <div><span class="cat-meta">Rischio: VARIABILE</span><span class="cat-meta">Tax: Mista</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+        
         st.divider()
+        # --- FINE NUOVA LEGENDA ---
         
         if st.session_state.selected_isin_from_chart:
             isin_default = st.session_state.selected_isin_from_chart
