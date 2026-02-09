@@ -448,22 +448,46 @@ def trova_alternative_migliori(bond_target, df_mercato, categoria_obbligatoria=N
     return pd.DataFrame()
 
 def aggiorna_db():
+    # 1. PULIZIA: Cancella tutto il contenuto della cartella prima di scaricare
+    if os.path.exists(DB_FOLDER):
+        for f in os.listdir(DB_FOLDER):
+            file_path = os.path.join(DB_FOLDER, f)
+            try:
+                if os.path.isfile(file_path):
+                    os.unlink(file_path)
+            except Exception as e:
+                print(f"Errore eliminazione {f}: {e}")
+    
+    # 2. DOWNLOAD: Scarica i nuovi file
     p = st.progress(0); s = st.empty()
     tot = sum(len(v) for v in SOURCES_MAP.values()); c = 0; ok = 0
+    
     for cat, sources in SOURCES_MAP.items():
         for src in sources:
             c += 1; s.text(f"Scarico {src['nome']} ({c}/{tot})...")
             p.progress(c/tot)
             try:
                 r = requests.get(src['url'], headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+                # Forza il parsing delle tabelle con il decimale corretto
                 dfs = pd.read_html(r.text, decimal=",", thousands=".")
+                found = False
                 for df in dfs:
+                    # Cerca la tabella giusta controllando le colonne
                     if any('ISIN' in str(col).upper() for col in df.columns):
+                        # Pulizia base del dataframe
                         df.to_csv(os.path.join(DB_FOLDER, f"{src['nome']}.csv"), index=False)
-                        ok += 1; break
-            except: pass
+                        ok += 1
+                        found = True
+                        break
+            except Exception as e:
+                # print(f"Errore su {src['nome']}: {e}") # Debug opzionale
+                pass
+                
     st.session_state.last_scrape_time = datetime.now()
-    s.empty(); p.empty(); st.toast(f"Aggiornati {ok} files"); st.rerun()
+    s.empty(); p.empty(); 
+    st.toast(f"Database Rigenerato: {ok}/{tot} files scaricati corretti.", icon="✅")
+    time.sleep(1)
+    st.rerun()
 
 def cerca_db(isin, cat):
     if not valida_isin(isin): return None, None
