@@ -1536,20 +1536,7 @@ def main_app():
                         marker=dict(color='#FF00FF', size=25, symbol='diamond', line=dict(width=3, color='white'))
                     ))
 
-                    # 2. La Freccia (Annotation) - Molto più chiaro del testo sovrapposto
-                    fig.add_annotation(
-                        x=anni_scad, y=ytm_s,
-                        text="SEI QUI",
-                        showarrow=True,
-                        arrowhead=2,
-                        arrowsize=1,
-                        arrowwidth=2,
-                        arrowcolor="#FF00FF",
-                        ax=0, ay=-40, # Sposta la scritta in alto di 40px
-                        font=dict(size=14, color="white", family="Arial Black"),
-                        bgcolor="#FF00FF",
-                        borderpad=4
-                    )
+
                     
                     fig.update_layout(template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1))
                     
