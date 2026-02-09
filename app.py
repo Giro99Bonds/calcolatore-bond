@@ -13,7 +13,7 @@ from scipy.optimize import newton
 import hashlib
 
 # ==============================================================================
-# 1. CONFIGURAZIONE PAGINA E STILI CSS
+# 1. CONFIGURAZIONE PAGINA E STILI CSS (MIGLIORATI PER TEMA)
 # ==============================================================================
 
 st.set_page_config(
@@ -25,12 +25,19 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* --- STILI GENERALI --- */
-    .metric-card { background-color: #1e2130; padding: 15px; border-radius: 8px; border: 1px solid #3e445b; margin-bottom: 10px; color: #ffffff !important; }
+    /* --- CARD METRICHE --- */
+    .metric-card {
+        background-color: #1e2130; /* Questo rimane scuro per contrasto o puoi cambiarlo */
+        padding: 15px; 
+        border-radius: 8px; 
+        border: 1px solid #3e445b; 
+        margin-bottom: 10px;
+        color: #ffffff !important; /* Forza testo bianco nelle card scure */
+    }
     
-    /* --- TRADUTTORE --- */
+    /* --- BOX SPIEGAZIONI (ADATTIVO) --- */
     .explanation-box {
-        background-color: #262730;
+        background-color: rgba(128, 128, 128, 0.1); /* Sfondo leggero trasparente */
         border-left: 4px solid #00CC96;
         padding: 15px;
         border-radius: 5px;
@@ -44,13 +51,21 @@ st.markdown("""
     }
     .explanation-text {
         font-size: 14px;
-        color: #e0e0e0;
+        color: inherit; /* PRENDE IL COLORE DEL TEMA (Nero su Bianco, Bianco su Nero) */
+        opacity: 0.9;
     }
 
     /* --- SIDEBAR --- */
-    [data-testid="stSidebar"] div.stButton > button { background-color: transparent; border: none; text-align: left; color: #000000 !important; font-weight: 600; }
-    [data-testid="stSidebar"] div.stButton > button:hover { color: #333333 !important; background-color: rgba(0,0,0,0.05); }
-    
+    [data-testid="stSidebar"] div.stButton > button {
+        background-color: transparent; border: none; text-align: left; 
+        color: inherit !important; box-shadow: none; padding-left: 0; 
+        font-size: 16px; font-weight: 600;
+    }
+    [data-testid="stSidebar"] div.stButton > button:hover {
+        padding-left: 10px; 
+        background-color: rgba(128, 128, 128, 0.1); border-radius: 5px;
+    }
+
     /* --- LEGENDA --- */
     .legend-box { padding: 15px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: white; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
     .legend-title { font-weight: bold; font-size: 16px; display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 4px; text-transform: uppercase; }
@@ -59,16 +74,20 @@ st.markdown("""
     .corp { background-color: #1e3a5f; border: 1px solid #17a2b8; }
     .spec { background-color: #581845; border: 1px solid #d63384; }
 
-    /* --- SCORECARD & USER --- */
-    .score-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #3e445b; }
+    /* --- SCORECARD TRASPARENTE --- */
+    .score-row {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.2);
+    }
     .score-good { color: #00CC96; font-weight: bold; }
     .score-bad { color: #FF4B4B; font-weight: bold; }
     .score-neutral { color: #FFAA00; font-weight: bold; }
-    .user-box { padding: 10px; background-color: #e8f5e9; border-left: 5px solid #00CC96; border-radius: 5px; margin-bottom: 20px; color: #1b5e20; font-weight: bold; }
     
-    .red-flag { border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
-    .green-flag { border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
-    .warning-flag { border-left: 5px solid #ffa500; background-color: #2d2a1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
+    /* --- BOX UTENTE --- */
+    .user-box { padding: 10px; background-color: rgba(0, 204, 150, 0.1); border-left: 5px solid #00CC96; border-radius: 5px; margin-bottom: 20px; font-weight: bold; color: inherit; }
+    
+    .main-header { font-size: 24px; font-weight: bold; color: white; }
+    .sub-header { font-size: 14px; color: #b0b3c5; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -178,6 +197,12 @@ def pulisci_taglio(valore):
     try: return float(s.replace('.', '').replace(',', '.'))
     except: return 1000.0
 
+def get_inflazione_ufficiale():
+    """Recupera inflazione (simulata per stabilità, ma linkata)"""
+    inflazione_corrente = 2.0 
+    fonte_url = "https://www.istat.it/it/archivio/prezzi+al+consumo"
+    return inflazione_corrente, fonte_url
+
 def processa_riga(row, info):
     try:
         cols = row.index if isinstance(row, pd.Series) else row.columns
@@ -214,29 +239,39 @@ def processa_riga(row, info):
     except: return None
 
 def identikit_bond(dati):
-    """Crea un profilo semplice del bond per retail"""
+    """Crea un profilo semplice con spiegazione del RISCHIO EMITTENTE"""
     desc = dati['desc'].upper()
     fonte = dati['fonte'].upper()
     
-    # Chi è?
+    risk_msg = ""
+    chi = ""
+    tipo = ""
+
     if "ITALIA" in fonte or "BTP" in desc or "BOT" in desc:
         chi = "🇮🇹 Stato Italiano"
-        tipo = "Prestito allo Stato (Basso Rischio)"
+        tipo = "Titolo di Stato (BTP/BOT)"
+        risk_msg = "Rischio Paese: Solido ma soggetto a volatilità politica e Spread."
     elif "GERMANIA" in fonte or "BUND" in desc:
         chi = "🇩🇪 Stato Tedesco"
-        tipo = "Prestito alla Germania (Sicurezza Max)"
+        tipo = "Titolo di Stato (Bund)"
+        risk_msg = "Bene Rifugio: Rischio quasi nullo, rendimenti generalmente bassi."
     elif "USA" in fonte or "TREASURY" in desc:
         chi = "🇺🇸 Stati Uniti"
-        tipo = "Prestito USA"
+        tipo = "Treasury Bond"
+        risk_msg = "Valuta Estera: Attenzione al rischio cambio Euro/Dollaro!"
     elif "BANCHE" in fonte or "INTESA" in desc or "UNICREDIT" in desc:
-        chi = "🏦 Banca"
+        chi = "🏦 Settore Bancario"
         tipo = "Obbligazione Bancaria"
-    elif "CORP" in fonte or "ENI" in desc or "ENEL" in desc:
-        chi = "🏭 Azienda"
-        tipo = "Obbligazione Aziendale (Corporate)"
+        risk_msg = "Rischio Settoriale: Legato alla solidità della banca e del sistema finanziario."
+        if "SUB" in desc: risk_msg += " ⚠️ SUBORDINATO: Rischio più alto in caso di fallimento."
+    elif "CORP" in fonte or "ENI" in desc or "ENEL" in desc or "STELLANTIS" in desc:
+        chi = "🏭 Azienda (Corporate)"
+        tipo = "Obbligazione Societaria"
+        risk_msg = "Rischio Aziendale: Dipende dai bilanci e dalla salute dell'azienda."
     else:
         chi = "🌍 Emittente Internazionale"
         tipo = "Obbligazione"
+        risk_msg = "Verificare il rating specifico dell'emittente."
 
     # Quanto manca?
     diff = (dati['sc'] - date.today())
@@ -244,7 +279,7 @@ def identikit_bond(dati):
     mesi = (diff.days % 365) // 30
     tempo = f"{anni} Anni e {mesi} Mesi"
     
-    return chi, tipo, tempo
+    return chi, tipo, tempo, risk_msg
 
 # ==============================================================================
 # 5. RISK ENGINE E SCORECARD DETTAGLIATA
@@ -547,11 +582,16 @@ def main_app():
         else:
             isin_default = ""
 
-        col_cat, col_isin = st.columns([2, 1])
+        # MODIFICA: Bottone Cerca
+        col_cat, col_isin, col_btn = st.columns([2, 2, 1])
         with col_cat: cat = st.selectbox("Categoria", list(SOURCES_MAP.keys()))
         with col_isin: isin = st.text_input("ISIN", value=isin_default, placeholder="IT...").strip().upper()
+        with col_btn: 
+            st.write("") 
+            st.write("") 
+            trigger_search = st.button("🔎 Cerca", use_container_width=True)
         
-        if isin:
+        if isin and (trigger_search or isin): # Cerca se preme invio O clicca bottone
             if not valida_isin(isin): st.error("❌ ISIN non valido")
             else:
                 row, info = cerca_db(isin, cat if not isin_default else None)
@@ -561,9 +601,10 @@ def main_app():
                     tax = determina_tasse(d['fonte'], d['desc'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
+                    infl, link_infl = get_inflazione_ufficiale()
                     
-                    # IDENTIKIT SEMPLICE
-                    chi, tipo, tempo = identikit_bond(d)
+                    # IDENTIKIT MIGLIORATO
+                    chi, tipo, tempo, risk_msg = identikit_bond(d)
                     
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px;">
@@ -571,6 +612,7 @@ def main_app():
                             <div>
                                 <h3 style="color:white; margin:0;">{chi}</h3>
                                 <div style="color:#b0b3c5; font-size:16px;">{tipo}</div>
+                                <div style="color:#00CC96; font-size:12px; margin-top:5px;">ℹ️ {risk_msg}</div>
                             </div>
                             <div style="text-align:right;">
                                 <h2 style="color:#00CC96; margin:0;">{d['ced']}%</h2>
@@ -586,8 +628,8 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # --- TRADUTTORE FINANZIARIO ---
-                    st.subheader("💡 Il Traduttore")
+                    # --- ANALISI IN BREVE (EX TRADUTTORE) ---
+                    st.subheader("📘 Analisi in Breve")
                     t1, t2, t3 = st.columns(3)
                     
                     with t1:
@@ -599,25 +641,24 @@ def main_app():
                     with t2:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
-                        investimento_sim = 10000
-                        cedola_netta_euro = (investimento_sim * (d['ced']/100) * (1 - tax/100))
-                        st.markdown(f'<div class="explanation-text">Se investi <b>10.000€</b>, riceverai circa <b>{cedola_netta_euro:.2f}€</b> netti ogni anno direttamente sul conto come bonifico.</div>', unsafe_allow_html=True)
+                        cedola_netta_euro = (1000 * (d['ced']/100) * (1 - tax/100))
+                        st.markdown(f'<div class="explanation-text">La cedola del <b>{d["ced"]}%</b> significa che per ogni 1.000€ investiti riceverai <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno sul conto.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                     with t3:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">3. Rischio Volatilità</div>', unsafe_allow_html=True)
                         volatilita = "BASSA" if risk['mod_dur'] < 3 else "MEDIA" if risk['mod_dur'] < 7 else "ALTA"
-                        st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi salgono dell\'1%, il prezzo di questo bond potrebbe scendere temporaneamente del <b>{risk["mod_dur"]:.1f}%</b>.</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b> (Duration {risk["mod_dur"]:.1f} anni). Se i tassi salgono dell\'1%, il prezzo scende temporaneamente di circa il {risk["mod_dur"]:.1f}%.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                    # --- DETTAGLI TECNICI (EX ANALISI BASE) ---
+                    # --- DETTAGLI TECNICI ---
                     with st.expander("📊 Vedi Dati Tecnici Completi"):
                         m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("Prezzo", f"{d['pr']:.2f}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari")
+                        m1.metric("Prezzo", f"{d['pr']:.2f}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari", help="Se compri 'Sotto la Pari' (es. 95) e porti a scadenza (100), guadagni la differenza come bonus finale.")
                         m2.metric("YTM Netto", f"{qual['ytm_netto']:.2f}%", f"Tassato al {tax}%")
                         m3.metric("Cedola", f"{d['ced']}%", f"{'Annuale' if d['freq']==1 else 'Semestrale' if d['freq']==2 else 'Trimestrale' if d['freq']==4 else 'Unica'}")
-                        m4.metric("Duration", f"{risk['mod_dur']:.2f}" if risk else "N/A")
+                        m4.metric("Duration", f"{risk['mod_dur']:.2f} Anni", help="Misura quanto il prezzo è sensibile ai tassi di interesse.")
                         
                         st.subheader("Punteggio Qualità")
                         c_flg, c_score = st.columns([2, 1])
@@ -637,7 +678,7 @@ def main_app():
                         st.session_state.portfolio.append(d)
                         st.success("Aggiunto!")
 
-                    # ALTRE TAB (Simulatore, Cedole)
+                    # ALTRE TAB
                     tab_whatif, tab_cedole = st.tabs(["🔮 Simulatore 'What If'", "📅 Cedolario"])
 
                     with tab_whatif:
@@ -691,7 +732,6 @@ def main_app():
                     st.divider()
                     st.subheader("📊 Dove si trova il tuo Bond?")
                     
-                    # ZOOM AUTOMATICO
                     range_zoom = 3
                     df_zoom = df_market[
                         (df_market['Anni'] >= dur_s - range_zoom) & 
