@@ -175,7 +175,26 @@ SOURCES_MAP = {
         {"nome": "LUNGHI_25Y+", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=25yearsEUR&yieldtype=G&timescale=DUR", "freq": 1}
     ]
 }
-
+# MAPPING PER IL MENU A TENDINA SEMPLIFICATO
+MACRO_CATEGORIES = {
+    "TUTTE": [], # Cerca ovunque
+    "🏛️ GOVERNATIVI": [
+        "🏛️ GOV - ITALIA", 
+        "🇪🇺 GOV - EUROPA CORE", 
+        "🏖️ GOV - EUROPA PERIFERIA", 
+        "🌍 GOV - MONDO & EMERGENTI", 
+        "🇪🇺 SOVRANAZIONALI (SUPRA)"
+    ],
+    "🏦 BANCARI": [
+        "🏦 FINANZIARI & BANCHE"
+    ],
+    "🏭 CORPORATE": [
+        "🏭 CORPORATE (AZIENDE)"
+    ],
+    "💎 SPECIALI": [
+        "💎 SPECIALI"
+    ]
+}
 # ==============================================================================
 # 4. FUNZIONI UTILI & DATABASE
 # ==============================================================================
@@ -500,24 +519,41 @@ def aggiorna_db():
     time.sleep(1)
     st.rerun()
 
-def cerca_db(isin, cat):
+def cerca_db(isin, cat_macro):
     if not valida_isin(isin): return None, None
-    # Cerca in tutte le categorie se cat non è specificato
-    search_cats = list(SOURCES_MAP.keys())
-    for c in search_cats:
-        for src in SOURCES_MAP.get(c, []):
+    
+    # 1. Determina quali categorie tecniche scansionare
+    search_keys = []
+    
+    # Se cat_macro è vuoto o "TUTTE", cerchiamo in tutto SOURCES_MAP
+    if not cat_macro or cat_macro == "TUTTE":
+        search_keys = list(SOURCES_MAP.keys())
+    # Altrimenti prendiamo le sottocategorie dalla mappatura
+    elif cat_macro in MACRO_CATEGORIES:
+        search_keys = MACRO_CATEGORIES[cat_macro]
+    else:
+        # Fallback di sicurezza
+        search_keys = list(SOURCES_MAP.keys())
+
+    # 2. Esegue la ricerca
+    for key in search_keys:
+        # Recupera la lista di fonti per quella chiave (es. BTP, BOT, CCT...)
+        sources = SOURCES_MAP.get(key, [])
+        for src in sources:
             path = os.path.join(DB_FOLDER, f"{src['nome']}.csv")
             if not os.path.exists(path): continue
             try:
                 df = pd.read_csv(path)
+                # Cerca colonna ISIN in modo flessibile
                 col = next((c for c in df.columns if 'ISIN' in str(c).upper()), None)
                 if col:
                     mask = df[col].astype(str).str.contains(isin, case=False, na=False)
                     if mask.any(): 
                         row = df[mask].iloc[0]
-                        cat_reale = "Governativo" if "BTP" in str(row) or "BOT" in str(row) else "Corporate"
-                        return row, {"nome": src['nome'], "freq": src['freq'], "cat_reale": c}
+                        # Restituisce il dato e la categoria reale trovata
+                        return row, {"nome": src['nome'], "freq": src['freq'], "cat_reale": key}
             except: continue
+            
     return None, None
 
 def calcola_rateo(dati):
@@ -699,8 +735,14 @@ def main_app():
             isin_default = ""
 
         col_cat, col_isin, col_btn = st.columns([2, 2, 1])
-        with col_cat: cat = st.selectbox("Categoria", list(SOURCES_MAP.keys()))
-        with col_isin: isin = st.text_input("ISIN", value=isin_default, placeholder="IT...").strip().upper()
+        
+        with col_cat: 
+            # MODIFICA: Ora usa le Macro Categorie (4 voci + TUTTE) invece della lista lunga
+            cat_select = st.selectbox("Filtra Categoria", list(MACRO_CATEGORIES.keys()))
+            
+        with col_isin: 
+            isin = st.text_input("ISIN", value=isin_default, placeholder="IT...").strip().upper()
+            
         with col_btn: 
             st.write("") 
             st.write("") 
@@ -709,6 +751,8 @@ def main_app():
         if isin and (trigger_search or isin):
             if not valida_isin(isin): st.error("❌ ISIN non valido")
             else:
+                # Passiamo la macro categoria selezionata alla nuova funzione cerca_db
+                row, info = cerca_db(isin, cat_select)
                 row, info = cerca_db(isin, cat if not isin_default else None)
                 d = processa_riga(row, info) if row is not None else None
                 
