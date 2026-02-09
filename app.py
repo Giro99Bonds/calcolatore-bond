@@ -610,12 +610,18 @@ def main_app():
         st.write("💰 **Il tuo Patrimonio**")
         st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0)
         
-        st.divider(); st.subheader("⚙️ SISTEMA")
+st.divider(); st.subheader("⚙️ SISTEMA")
         last = get_last_update_time()
         if last: 
+            # Calcolo delta su orario server (corretto per la logica semaforo)
             delta = (datetime.now() - last).total_seconds() / 3600
             color = "green" if delta < 24 else "orange"
-            st.markdown(f"📅 Aggiornato: :{color}[{last.strftime('%d/%m %H:%M')}]")
+            
+            # FIX ORARIO ITALIA: Aggiungo 1 ora solo per quello che leggi a video
+            # (Nota: In estate con l'ora legale dovrai mettere hours=2)
+            last_ita = last + timedelta(hours=1)
+            
+            st.markdown(f"📅 Aggiornato: :{color}[{last_ita.strftime('%d/%m %H:%M')}]")
         else: st.error("❌ Nessun Dato")
         
         c1, c2 = st.columns([1, 2])
