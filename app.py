@@ -178,7 +178,7 @@ SOURCES_MAP = {
 
 # Mapping per l'interfaccia utente semplificata
 MACRO_CATEGORIES = {
-    "TUTTE": [],
+    "🌐 TUTTE": [],
     "🏛️ GOVERNATIVI": ["🏛️ GOV - ITALIA", "🇪🇺 GOV - EUROPA CORE", "🏖️ GOV - EUROPA PERIFERIA", "🌍 GOV - MONDO & EMERGENTI", "🇪🇺 SOVRANAZIONALI (SUPRA)"],
     "🏦 BANCARI": ["🏦 FINANZIARI & BANCHE"],
     "🏭 CORPORATE": ["🏭 CORPORATE (AZIENDE)"],
