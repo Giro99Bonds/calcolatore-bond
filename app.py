@@ -741,6 +741,30 @@ def main_app():
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
                     
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
+
+                    # --- BOX INFORMATIVO CON NOME BOND AGGIUNTO ---
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h3 style="color:white; margin:0;">{chi}</h3>
+                                <div style="font-size: 20px; font-weight:bold; color: #ffeb3b; margin: 5px 0;">{d['desc']}</div>
+                                <div style="color:#b0b3c5; font-size:15px;">{tipo}</div>
+                                <div style="color:#00CC96; font-size:12px; margin-top:5px;">ℹ️ {risk_msg}</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <h2 style="color:#00CC96; margin:0;">{d['ced']}%</h2>
+                                <div style="color:#b0b3c5; font-size:12px;">Cedola Lorda</div>
+                            </div>
+                        </div>
+                        <hr style="border-color:#3e445b; margin:15px 0;">
+                        <div style="display:flex; justify-content:space-between; color:#e0e0e0;">
+                            <div>📅 Scadenza: <b>{d['sc'].strftime('%d/%m/%Y')}</b></div>
+                            <div>⏳ Mancano: <b>{tempo}</b></div>
+                            <div>🧾 Prezzo: <b>{d['pr']}€</b></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px;">
