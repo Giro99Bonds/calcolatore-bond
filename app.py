@@ -25,29 +25,55 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    /* --- STILI GENERALI --- */
     .metric-card { background-color: #1e2130; padding: 15px; border-radius: 8px; border: 1px solid #3e445b; margin-bottom: 10px; color: #ffffff !important; }
-    .explanation-box { background-color: rgba(128, 128, 128, 0.1); border-left: 4px solid #00CC96; padding: 15px; border-radius: 5px; margin-bottom: 15px; }
-    .explanation-title { font-weight: bold; color: #00CC96; font-size: 16px; margin-bottom: 5px; }
-    .explanation-text { font-size: 14px; color: inherit; opacity: 0.9; }
-    .receipt-box { border: 2px dashed rgba(128, 128, 128, 0.3); padding: 20px; border-radius: 10px; background-color: rgba(128, 128, 128, 0.05); margin-top: 10px; }
-    .receipt-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
-    .receipt-total { display: flex; justify-content: space-between; margin-top: 15px; border-top: 2px solid #00CC96; padding-top: 10px; font-weight: bold; font-size: 18px; color: #00CC96; }
-    .receipt-sub { font-size: 12px; color: gray; text-align: right; margin-top: -5px; }
-    [data-testid="stSidebar"] div.stButton > button { background-color: transparent; border: none; text-align: left; color: inherit !important; font-weight: 600; }
-    [data-testid="stSidebar"] div.stButton > button:hover { padding-left: 10px; background-color: rgba(128, 128, 128, 0.1); border-radius: 5px; }
-    .legend-box { padding: 15px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: white; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-    .cat-card { padding: 15px; border-radius: 10px; margin-bottom: 10px; height: 100%; border: 1px solid rgba(128,128,128,0.2); transition: transform 0.2s; }
+    
+    /* --- LEGEND CARD (STILE CHE TI PIACEVA) --- */
+    .cat-card {
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        height: 100%;
+        border: 1px solid rgba(128,128,128,0.2);
+        transition: transform 0.2s;
+    }
     .cat-card:hover { transform: scale(1.02); }
     .cat-title { font-weight: bold; font-size: 16px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .cat-desc { font-size: 13px; opacity: 0.9; margin-bottom: 8px; line-height: 1.4; }
+    .cat-meta { font-size: 12px; font-weight: bold; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-right: 5px; }
+    
     .bg-gov { background: linear-gradient(145deg, rgba(26, 74, 46, 0.1), rgba(26, 74, 46, 0.3)); border-left: 4px solid #28a745; }
     .bg-bank { background: linear-gradient(145deg, rgba(44, 62, 80, 0.1), rgba(44, 62, 80, 0.3)); border-left: 4px solid #8e9aaf; }
     .bg-corp { background: linear-gradient(145deg, rgba(30, 58, 95, 0.1), rgba(30, 58, 95, 0.3)); border-left: 4px solid #17a2b8; }
     .bg-spec { background: linear-gradient(145deg, rgba(88, 24, 69, 0.1), rgba(88, 24, 69, 0.3)); border-left: 4px solid #d63384; }
+
+    /* --- SCONTRINO SIMULATORE --- */
+    .receipt-box {
+        border: 2px dashed rgba(128, 128, 128, 0.3);
+        padding: 20px;
+        border-radius: 10px;
+        background-color: rgba(128, 128, 128, 0.05);
+        margin-top: 10px;
+    }
+    .receipt-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
+    .receipt-total { display: flex; justify-content: space-between; margin-top: 15px; border-top: 2px solid #00CC96; padding-top: 10px; font-weight: bold; font-size: 18px; color: #00CC96; }
+    .receipt-sub { font-size: 12px; color: gray; text-align: right; margin-top: -5px; }
+
+    /* --- ALTRI STILI --- */
+    .explanation-box { background-color: rgba(128, 128, 128, 0.1); border-left: 4px solid #00CC96; padding: 15px; border-radius: 5px; margin-bottom: 15px; }
+    .explanation-title { font-weight: bold; color: #00CC96; font-size: 16px; margin-bottom: 5px; }
+    .explanation-text { font-size: 14px; color: inherit; opacity: 0.9; }
+    
     .score-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.2); }
     .score-good { color: #00CC96; font-weight: bold; }
     .score-bad { color: #FF4B4B; font-weight: bold; }
     .score-neutral { color: #FFAA00; font-weight: bold; }
+    
     .user-box { padding: 10px; background-color: rgba(0, 204, 150, 0.1); border-left: 5px solid #00CC96; border-radius: 5px; margin-bottom: 20px; font-weight: bold; color: inherit; }
+    
+    [data-testid="stSidebar"] div.stButton > button { background-color: transparent; border: none; text-align: left; color: inherit !important; font-weight: 600; }
+    [data-testid="stSidebar"] div.stButton > button:hover { padding-left: 10px; background-color: rgba(128, 128, 128, 0.1); border-radius: 5px; }
+    
     .red-flag { border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
     .green-flag { border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
     .warning-flag { border-left: 5px solid #ffa500; background-color: #2d2a1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
@@ -445,7 +471,6 @@ def calcola_rateo(dati):
         data_ced = dati['sc']
         while data_ced > today_dt:
             data_ced -= timedelta(days=int(giorni_cedola))
-        # Correzione se la data di stacco precedente è futura
         if data_ced > today_dt: data_ced -= timedelta(days=int(giorni_cedola))
         
         giorni_trascorsi = (today_dt - data_ced).days
@@ -455,18 +480,13 @@ def calcola_rateo(dati):
 
 def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
     flussi = []
-    # 1. Costi
     rateo_pct = calcola_rateo(dati)
     costo_titolo = (nominale * prezzo_acquisto) / 100
     costo_rateo_lordo = (nominale * rateo_pct) / 100
-    # FIX: Tassazione Rateo
-    # Se compri, paghi il rateo NETTO (standard MOT/TLX per retail con regime amministrato)
     costo_rateo_netto = costo_rateo_lordo * (1 - tax_rate/100)
-    
     spesa_totale = costo_titolo + costo_rateo_netto + commissioni
     flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto + Rateo + Comm."})
     
-    # 2. Cedole
     totale_cedole_nette = 0
     if dati['freq'] > 0:
         cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
@@ -482,22 +502,14 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
                 flussi.append({"Data": d, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola Netta"})
                 totale_cedole_nette += cedola_netta
                 
-    # 3. Rimborso
-    # Capital Gain Tax: (Prezzo Rimborso (100) - Prezzo Acquisto) * 12.5%
-    # Se prezzo acquisto > 100, genera minusvalenza (qui ignorata per prudenza nel cash flow)
     gain = max(0, 100 - prezzo_acquisto)
-    # Gain in Euro sul nominale investito
     gain_euro = (gain / 100) * nominale
     tassa_gain = gain_euro * (tax_rate/100)
-    
     plusvalenza_netta = gain_euro - tassa_gain
-    
     rimborso_netto = nominale - tassa_gain
-    
     ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
     flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA", "Importo": rimborso_netto + ultima_ced, "Dettagli": "Rimborso + Ultima Cedola"})
     
-    # Per il calcolo del ritorno totale, sommiamo tutto ciò che entra
     incasso_totale = totale_cedole_nette + rimborso_netto + ultima_ced
     totale_cedole_nette += ultima_ced
 
@@ -575,11 +587,11 @@ def main_app():
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Inserisci un ISIN per analizzare il bond.")
         
-        l1, l2, l3, l4 = st.columns(4)
-        with l1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span><b>Stati</b><br>Italia, Germania, USA, Francia</div>""", unsafe_allow_html=True)
-        with l2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span><b>Banche</b><br>Intesa, UniCredit, Subordinate</div>""", unsafe_allow_html=True)
-        with l3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span><b>Aziende</b><br>Eni, Stellantis, Telecom</div>""", unsafe_allow_html=True)
-        with l4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span><b>Misti</b><br>Zero Coupon, 25y+, Callable</div>""", unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.markdown("""<div class="legend-box gov"><span class="legend-title">🏛️ GOVERNATIVI</span><b>Stati</b><br>Italia, Germania, USA, Francia</div>""", unsafe_allow_html=True)
+        with c2: st.markdown("""<div class="legend-box bank"><span class="legend-title">🏦 FINANZIARI</span><b>Banche</b><br>Intesa, UniCredit, Subordinate</div>""", unsafe_allow_html=True)
+        with c3: st.markdown("""<div class="legend-box corp"><span class="legend-title">🏭 CORPORATE</span><b>Aziende</b><br>Eni, Stellantis, Telecom</div>""", unsafe_allow_html=True)
+        with c4: st.markdown("""<div class="legend-box spec"><span class="legend-title">💎 SPECIALI</span><b>Misti</b><br>Zero Coupon, 25y+, Callable</div>""", unsafe_allow_html=True)
         st.divider()
         
         if st.session_state.selected_isin_from_chart:
@@ -606,7 +618,6 @@ def main_app():
                     tax = determina_tasse(d['fonte'], d['desc'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
-                    
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
                     
                     st.markdown(f"""
@@ -631,26 +642,19 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    st.divider()
-                    
                     # 1. METRICS DASHBOARD
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     c1.metric("Prezzo", f"{d['pr']}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari", 
                               help="💰 **Cosa significa?**\n\n• **Sotto la Pari (<100):** Paghi meno del valore che ti rimborseranno. Es: paghi 90, ricevi 100. La differenza è guadagno extra.\n• **Sopra la Pari (>100):** Paghi di più. Es: paghi 105, ricevi 100. È normale se la cedola è alta.")
-                    
                     c2.metric("Rendimento Netto", f"{qual['ytm_netto']:.2f}%", 
                               help="📈 **Cosa significa?**\n\nÈ il guadagno reale annuo che ti rimane in tasca, GIA' SOTTRATTE le tasse (12.5% o 26%). È il numero più importante da guardare.")
-                    
                     c3.metric("Rendimento Lordo", f"{risk['ytm']:.2f}%",
                               help="È il guadagno annuo PRIMA delle tasse. Serve per confrontare bond con tassazione diversa.")
-                    
                     c4.metric("Cedola", f"{d['ced']}%", 
                               help="💸 **Cosa significa?**\n\nÈ l'interesse periodico (il bonifico) che l'emittente ti paga. Es: 4% su 1.000€ = 40€ lordi l'anno.")
-                    
                     c5.metric("Taglio Minimo", f"{d['taglio']:,.0f}€", 
                               help="🧱 **Cosa significa?**\n\nÈ la quantità minima che puoi comprare. Se è 1.000€, non puoi investirne 500€.")
-                    
                     c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni", 
                               help="📉 **Cosa significa?**\n\nIndica quanto è rischioso il prezzo. Se la Duration è 6 anni, e i tassi salgono dell'1%, il prezzo del bond scenderà circa del 6%.")
 
@@ -658,27 +662,22 @@ def main_app():
                     st.divider()
                     st.subheader("💡 Analisi in Breve")
                     t1, t2, t3 = st.columns(3)
-                    
                     with t1:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">1. Quanto Rende?</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Questo numero include sia le cedole che ricevi sia il guadagno finale (se compri a sconto) o la perdita (se compri a premio).</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
-                        
                     with t2:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
                         cedola_netta_euro = (1000 * (d['ced']/100) * (1 - tax/100))
-                        
                         if d['freq'] == 1: freq_txt = "in un'unica soluzione annuale"
                         elif d['freq'] == 2: freq_txt = f"in 2 cedole semestrali da {cedola_netta_euro/2:.2f}€"
                         elif d['freq'] == 4: freq_txt = f"in 4 cedole trimestrali da {cedola_netta_euro/4:.2f}€"
                         elif d['freq'] == 0: freq_txt = "(Zero Coupon: tutto a scadenza)"
                         else: freq_txt = ""
-                        
                         st.markdown(f'<div class="explanation-text">Ogni 1.000€ investiti, riceverai circa <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno, {freq_txt}.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
-                        
                     with t3:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">3. Rischio Prezzo</div>', unsafe_allow_html=True)
@@ -689,7 +688,6 @@ def main_app():
                     # --- SIMULATORE DI INVESTIMENTO AVANZATO ---
                     st.divider()
                     st.subheader("💰 Simulatore d'Acquisto")
-                    
                     c_sim1, c_sim2 = st.columns([1, 2])
                     with c_sim1:
                         investimento = st.number_input("Quanto vuoi investire? (€)", value=10000, step=1000)
@@ -706,35 +704,45 @@ def main_app():
                             <div class="receipt-row"><span>Costo Titoli (Prezzo {d['pr']}):</span> <span>{investimento * d['pr'] / 100:.2f} €</span></div>
                             <div class="receipt-row"><span>+ Rateo Interessi (da anticipare):</span> <span>{costo_rateo:.2f} €</span></div>
                             <div class="receipt-row"><span>+ Commissioni Banca:</span> <span>{commissioni:.2f} €</span></div>
-                            <div class="receipt-total">
-                                <span>TOTALE DA PAGARE OGGI:</span>
-                                <span>{spesa_tot:.2f} €</span>
-                            </div>
+                            <div class="receipt-total"><span>TOTALE DA PAGARE OGGI:</span><span>{spesa_tot:.2f} €</span></div>
                             <div class="receipt-sub">Hai pagato circa {(spesa_tot/investimento)*100:.1f}% del valore nominale</div>
                             <hr>
-                            <div class="receipt-row" style="color:#00CC96; font-weight:bold;">
-                                <span>GUADAGNO TOTALE (in {anni_durata:.1f} anni):</span>
-                                <span>+{guadagno_netto:.2f} €</span>
-                            </div>
-                            <div class="receipt-row">
-                                <span>Rendimento Annuo Effettivo:</span>
-                                <span>{rend_annuo_semplice:.2f}%</span>
-                            </div>
+                            <div class="receipt-row" style="color:#00CC96; font-weight:bold;"><span>GUADAGNO TOTALE (in {anni_durata:.1f} anni):</span><span>+{guadagno_netto:.2f} €</span></div>
+                            <div class="receipt-row"><span>Rendimento Annuo Effettivo:</span><span>{rend_annuo_semplice:.2f}%</span></div>
                         </div>
                         """, unsafe_allow_html=True)
-                        
                         st.info(f"""
                         ℹ️ **Perché questo rendimento ({rend_annuo_semplice:.2f}%) è diverso da quello sopra ({qual['ytm_netto']:.2f}%)?**
                         Perché qui stiamo calcolando i costi reali incluse le **Commissioni Bancarie ({commissioni}€)** che abbassano leggermente il rendimento finale.
-                        
                         **Composizione del Guadagno ({guadagno_netto:.2f}€):**
                         1. 🎫 Cedole Nette Totali: +{totale_cedole_nette:.2f}€
                         2. 📈 Guadagno sul Prezzo (Capital Gain): +{plusvalenza_netta:.2f}€
                         3. 🏦 Meno Costi (Commissioni): -{commissioni:.2f}€
                         """)
 
-                    with st.expander("📅 Vedi tutti i pagamenti futuri (Cedolario)"):
-                        st.dataframe(df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style.format({'Importo': '{:+.2f}€'}), use_container_width=True)
+                    # --- CEDOLARIO VISIVO ---
+                    st.divider()
+                    st.subheader("📅 Cedolario (I tuoi flussi di cassa)")
+                    tot_da_incassare = df_flussi[df_flussi['Importo'] > 0]['Importo'].sum()
+                    data_fine = d['sc'].strftime('%d/%m/%Y')
+                    col_kpi_c1, col_kpi_c2 = st.columns(2)
+                    col_kpi_c1.metric("Totale da Incassare (Netto)", f"{tot_da_incassare:.2f} €")
+                    col_kpi_c2.metric("Ultimo Pagamento", data_fine)
+                    
+                    def color_negative_red(val):
+                        color = '#ff4b4b' if val < 0 else '#00cc96'
+                        return f'color: {color}; font-weight: bold;'
+                        
+                    st.dataframe(
+                        df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style.map(color_negative_red, subset=['Importo']).format({'Importo': '{:+.2f} €', 'Data': lambda x: x.strftime('%d/%m/%Y')}),
+                        use_container_width=True,
+                        height=400
+                    )
+                    
+                    fig_timeline = px.bar(df_flussi, x='Data', y='Importo', color='Tipo', 
+                                        color_discrete_map={'USCITA': '#FF4B4B', 'ENTRATA': '#00CC96'},
+                                        title="Timeline Flussi di Cassa", template="plotly_dark")
+                    st.plotly_chart(fig_timeline, use_container_width=True)
 
                     c_btn1, c_btn2 = st.columns(2)
                     if c_btn1.button("📌 Salva per Confronto", use_container_width=True):
@@ -746,63 +754,78 @@ def main_app():
                 else: st.warning("Bond non trovato. Aggiorna il DB.")
 
     elif st.session_state.page == "SmartAnalysis":
-        st.title("🧠 Smart Analysis & Fair Value")
-        st.caption("Confronto intelligente con il mercato.")
-        with st.spinner("Caricamento mercato..."):
+        st.title("🧠 Smart Analysis & Relative Value")
+        st.caption("Analisi professionale del posizionamento rispetto alla curva dei rendimenti.")
+        with st.spinner("Calcolo curve di rendimento..."):
             df_market = carica_dati_mercato()
         
-        if df_market.empty: st.warning("⚠️ Database vuoto.")
+        if df_market.empty: st.warning("⚠️ Database vuoto. Aggiorna i dati dalla sidebar.")
         else:
             col_search, col_kpi = st.columns([1, 3])
             with col_search:
                 isin_smart = st.text_input("Analizza ISIN", placeholder="IT...").strip().upper()
-                cat_smart = st.selectbox("Categoria", list(SOURCES_MAP.keys()))
+                cat_view = st.selectbox("Filtra Categoria Ricerca", list(SOURCES_MAP.keys()))
                 
             if isin_smart and valida_isin(isin_smart):
-                row, info = cerca_db(isin_smart, cat_smart)
+                row, info = cerca_db(isin_smart, cat_view)
                 d_smart = processa_riga(row, info) if row is not None else None
                 
                 if d_smart:
+                    cat_target = "Altro"
+                    if "BTP" in d_smart['desc'].upper() or "BOT" in d_smart['desc'].upper() or "ITALIA" in d_smart['fonte'].upper(): cat_target = "Governativo"
+                    elif "BUND" in d_smart['desc'].upper() or "GERMANIA" in d_smart['desc'].upper(): cat_target = "Governativo"
+                    elif "BANCHE" in d_smart['fonte'].upper() or "INTESA" in d_smart['desc'].upper(): cat_target = "Bancario"
+                    elif "CORP" in d_smart['fonte'].upper() or "ENI" in d_smart['desc'].upper(): cat_target = "Corporate"
+                    
+                    if cat_target == "Altro":
+                        if "GOVERNATIVI" in cat_view: cat_target = "Governativo"
+                        elif "FINANZIARI" in cat_view: cat_target = "Bancario"
+                        elif "CORPORATE" in cat_view: cat_target = "Corporate"
+
                     d_smart['isin'] = isin_smart
                     ytm_s = calcola_rendimento_grezzo(d_smart['pr'], d_smart['ced'], d_smart['sc'])
                     dur_s = (d_smart['sc'] - date.today()).days / 365.25
                     
                     st.divider()
-                    st.subheader("📊 Dove si trova il tuo Bond?")
+                    st.subheader(f"📊 Relative Value: {cat_target}")
+                    st.caption(f"Stai confrontando **{d_smart['desc']}** esclusivamente con altri bond **{cat_target}** per un'analisi coerente.")
                     
-                    range_zoom = 3
-                    df_zoom = df_market[
-                        (df_market['Anni'] >= dur_s - range_zoom) & 
-                        (df_market['Anni'] <= dur_s + range_zoom) &
-                        (df_market['YTM_Grezzo'] < ytm_s + 5)
+                    df_category = df_market[df_market['Categoria'] == cat_target].copy()
+                    range_zoom = 4
+                    df_zoom = df_category[
+                        (df_category['Anni'] >= dur_s - range_zoom) & 
+                        (df_category['Anni'] <= dur_s + range_zoom) &
+                        (df_category['YTM_Grezzo'] > -2) & (df_category['YTM_Grezzo'] < 15)
                     ]
                     
-                    st.markdown(f"Visualizzo solo bond con scadenza **+/- {range_zoom} anni** dal tuo. Clicca su un punto blu per analizzarlo.")
-                    
-                    # COLORE PER CATEGORIA
-                    fig = px.scatter(
-                        df_zoom, x='Anni', y='YTM_Grezzo', 
-                        color='Categoria', # Colora per categoria!
-                        hover_data=['ISIN', 'Desc', 'Prezzo'],
-                        labels={'Anni': 'Durata (Anni)', 'YTM_Grezzo': 'Rendimento Lordo (%)'},
-                        color_discrete_map={
-                            "Governativo": "#00CC96",
-                            "Bancario": "#EF553B",
-                            "Corporate": "#636EFA",
-                            "Altro": "#AB63FA"
-                        }
-                    )
-                    
-                    # TRENDLINE (REGRESSIONE POLINOMIALE SEMPLICE)
-                    if len(df_zoom) > 5:
-                        # Calcolo trendline semplice per visualizzare la media
+                    if len(df_zoom) > 10:
                         z = np.polyfit(df_zoom['Anni'], df_zoom['YTM_Grezzo'], 2)
                         p = np.poly1d(z)
-                        x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
-                        fig.add_trace(go.Scatter(x=x_trend, y=p(x_trend), mode='lines', name='Media Mercato', line=dict(color='white', dash='dash')))
+                        fair_yield = p(dur_s)
+                        delta_spread = ytm_s - fair_yield
+                        residui = df_zoom['YTM_Grezzo'] - p(df_zoom['Anni'])
+                        sigma = np.std(residui)
+                        z_score = delta_spread / sigma if sigma > 0 else 0
+                    else:
+                        fair_yield = ytm_s; delta_spread = 0; z_score = 0
+                        st.warning("Pochi dati per calcolare una curva affidabile.")
 
-                    fig.add_trace(go.Scatter(x=[dur_s], y=[ytm_s], mode='markers+text', name='TUO BOND', text=['📍 TU'], textposition="top center", marker=dict(color='red', size=15, symbol='star')))
-                    fig.update_layout(template="plotly_dark", height=450)
+                    fig = px.scatter(
+                        df_zoom, x='Anni', y='YTM_Grezzo', 
+                        hover_data=['ISIN', 'Desc', 'Prezzo'],
+                        color_discrete_sequence=['#1f77b4'],
+                        opacity=0.6,
+                        labels={'Anni': 'Duration (Anni)', 'YTM_Grezzo': 'Rendimento Lordo (%)'}
+                    )
+                    
+                    if len(df_zoom) > 10:
+                        x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
+                        fig.add_trace(go.Scatter(x=x_trend, y=p(x_trend), mode='lines', name=f'Curva {cat_target}', line=dict(color='yellow', width=2)))
+                        fig.add_trace(go.Scatter(x=x_trend, y=p(x_trend)+sigma, mode='lines', name='+1 Sigma', line=dict(color='gray', width=1, dash='dot'), showlegend=False))
+                        fig.add_trace(go.Scatter(x=x_trend, y=p(x_trend)-sigma, mode='lines', name='-1 Sigma', line=dict(color='gray', width=1, dash='dot'), showlegend=False))
+
+                    fig.add_trace(go.Scatter(x=[dur_s], y=[ytm_s], mode='markers+text', name='TUO BOND', text=['📍 TU'], textposition="top center", marker=dict(color='red', size=18, symbol='star')))
+                    fig.update_layout(template="plotly_dark", height=500, title=f"Posizionamento vs Curva {cat_target}")
                     
                     selected_point = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
                     if selected_point and len(selected_point['selection']['points']) > 0:
@@ -814,29 +837,42 @@ def main_app():
                                 st.rerun()
                         except: pass
 
-                    # VERDETTO FAIR VALUE
-                    if len(df_zoom) > 5:
-                        fair_yield = p(dur_s)
-                        delta_fair = ytm_s - fair_yield
-                        
-                        st.subheader("🌡️ Termometro del Valore")
-                        c_val1, c_val2 = st.columns([1, 3])
-                        with c_val1:
-                            if delta_fair > 0.5: 
-                                st.success("✅ SOTTOVALUTATO")
-                                st.caption("Rende più della media per questa durata.")
-                            elif delta_fair < -0.5: 
-                                st.error("❌ SOPRAVALUTATO")
-                                st.caption("Rende meno della media. Probabilmente caro.")
-                            else: 
-                                st.info("⚖️ FAIR VALUE")
-                                st.caption("Rendimento in linea con il mercato.")
-                        with c_val2:
-                            st.metric("Delta vs Media Mercato", f"{delta_fair:+.2f}%", help="Differenza tra il rendimento del tuo bond e la curva media di mercato.")
+                    st.divider()
+                    st.subheader("🌡️ Analisi del Valore (Z-Score)")
+                    c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
+                    c_kpi1.metric("Rendimento Tuo Bond", f"{ytm_s:.2f}%")
+                    c_kpi2.metric("Fair Value (Media Mercato)", f"{fair_yield:.2f}%", help=f"Rendimento teorico calcolato sulla curva dei bond {cat_target} con stessa durata.")
+                    
+                    verdetto = ""; colore_box = ""; spiegazione = ""
+                    
+                    if z_score > 1.5:
+                        verdetto = "💎 OCCASIONE (Cheap)"; colore_box = "rgba(0, 204, 150, 0.2)"
+                        spiegazione = f"Il bond rende il **{delta_spread:+.2f}%** in più rispetto alla sua curva di riferimento. È statisticamente economico (Z-Score > 1.5). Potrebbe essere un affare o incorporare un rischio specifico."
+                    elif z_score > 0.5:
+                        verdetto = "✅ RENDIMENTO BUONO"; colore_box = "rgba(0, 204, 150, 0.1)" 
+                        spiegazione = f"Rende leggermente sopra la media ({delta_spread:+.2f}%). Buon posizionamento."
+                    elif z_score < -1.5:
+                        verdetto = "❌ COSTOSO (Rich)"; colore_box = "rgba(255, 75, 75, 0.2)"
+                        spiegazione = f"Il bond rende molto meno ({delta_spread:+.2f}%) della media dei suoi simili. È molto caro (probabilmente molto richiesto o sicuro)."
+                    elif z_score < -0.5:
+                        verdetto = "⚠️ RENDIMENTO BASSO"; colore_box = "rgba(255, 170, 0, 0.1)"
+                        spiegazione = f"Rende sotto la media ({delta_spread:+.2f}%). C'è di meglio sul mercato a parità di rischio."
+                    else:
+                        verdetto = "⚖️ FAIR VALUE (In Linea)"; colore_box = "rgba(128, 128, 128, 0.1)"
+                        spiegazione = "Il rendimento è perfettamente allineato con il mercato. Prezzo corretto."
+
+                    c_kpi3.metric("Spread vs Curva", f"{delta_spread:+.2f}%", delta_color="normal")
+
+                    st.markdown(f"""
+                    <div style="background-color: {colore_box}; padding: 20px; border-radius: 10px; border-left: 5px solid white;">
+                        <h3 style="margin:0;">{verdetto}</h3>
+                        <p style="margin-top:10px; font-size:16px;">{spiegazione}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
 
                     st.divider()
-                    st.subheader("🔄 Alternative Migliori (Smart Switch)")
-                    st.caption("Confronto intelligente basato su Rischio e Rendimento Netto.")
+                    st.subheader(f"🔄 Alternative Smart ({cat_target})")
+                    st.caption("Bond della stessa categoria con scadenza simile che offrono un premio di rendimento.")
                     
                     alternative = trova_alternative_migliori(d_smart, df_market)
                     
@@ -846,15 +882,17 @@ def main_app():
                             column_config={
                                 "Link": st.column_config.LinkColumn("Scheda", display_text="🔗 Apri"),
                                 "YTM_Netto": st.column_config.NumberColumn("YTM Netto", format="%.2f%%"),
-                                "Extra": st.column_config.NumberColumn("Delta", format="%+.2f%%"),
+                                "Extra": st.column_config.NumberColumn("Delta Yield", format="%+.2f%%", help="Quanto guadagni in più rispetto al tuo bond"),
                                 "Prezzo": st.column_config.NumberColumn("Prezzo", format="%.2f€")
                             },
                             use_container_width=True,
                             hide_index=True
                         )
-                    else: st.success("🏆 Il tuo bond è già una delle migliori opzioni per questa scadenza e rischio.")
-                else: st.error("ISIN non trovato.")
-            else: st.info("Inserisci un ISIN per iniziare.")
+                    else:
+                        st.success("🏆 Complimenti! Non ci sono alternative nettamente migliori nella stessa categoria.")
+
+                else: st.error("ISIN non trovato nel database.")
+            else: st.info("Inserisci un ISIN per iniziare l'analisi.")
 
     elif st.session_state.page == "Confronto":
         st.title("⚔️ Confronto")
