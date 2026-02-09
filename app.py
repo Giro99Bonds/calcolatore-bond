@@ -513,9 +513,9 @@ def aggiorna_db():
 def cerca_db(isin, cat_macro):
     if not valida_isin(isin): return None, None
     
-    # Se la categoria è specificata e non è "TUTTE", cerca solo lì
+    # Se la categoria è specificata e non è "🌐 TUTTE", cerca solo lì
     search_keys = []
-    if cat_macro and cat_macro != "TUTTE" and cat_macro in MACRO_CATEGORIES:
+    if cat_macro and cat_macro != "🌐  TUTTE" and cat_macro in MACRO_CATEGORIES:
         search_keys = MACRO_CATEGORIES[cat_macro]
     else:
         # Altrimenti cerca ovunque (appiattisce la lista delle liste)
