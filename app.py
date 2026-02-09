@@ -887,7 +887,17 @@ def main_app():
                     anni_scadenza = (d_smart['sc'] - date.today()).days / 365.25
                     
                     st.divider()
+                    # --- NUOVO GRAFICO CON BENCHMARK TEDESCO ---
+                    st.divider()
                     st.subheader(f"📊 Market Landscape: {cat_target}")
+                    
+                    # BOX GUIDA
+                    st.info("""
+                    **👀 Guida al Grafico:**
+                    * **⭐ Stella (TU):** Il tuo bond.
+                    * **🔴 Linea Rossa (Bund 🇩🇪):** Il rendimento "sicuro" (Germania). Se sei sopra, è il premio per il rischio.
+                    * **🟡 Linea Gialla (Media):** La media dei bond simili al tuo (es. BTP con BTP).
+                    """)
                     
                     range_zoom = 4
                     df_zoom = df_market[
@@ -896,28 +906,54 @@ def main_app():
                         (df_market['YTM_Grezzo'] > -2) & (df_market['YTM_Grezzo'] < 15)
                     ].copy()
                     
+                    # Crea il grafico base (Puntini colorati)
                     fig = px.scatter(
                         df_zoom, x='Anni', y='YTM_Grezzo', color='Categoria', 
                         hover_data={'ISIN': True, 'Desc': True, 'Prezzo': ':.2f', 'YTM_Grezzo': ':.2f', 'Categoria': False},
                         color_discrete_map={"Governativo": "#00CC96", "Bancario": "#AB63FA", "Corporate": "#636EFA", "Altro": "#EF553B"},
-                        opacity=0.7, labels={'Anni': 'Anni alla Scadenza', 'YTM_Grezzo': 'Rendimento Lordo (%)'}
+                        opacity=0.6, labels={'Anni': 'Anni alla Scadenza', 'YTM_Grezzo': 'Rendimento Lordo (%)'}
                     )
                     
+                    x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
+
+                    # 1. LINEA BENCHMARK GERMANIA (RISK FREE REALE)
+                    # Cerchiamo i bond tedeschi in TUTTO il database (non solo nello zoom) per una curva precisa
+                    df_germania = df_market[df_market['Desc'].str.contains("BUND|GERMANIA", case=False, na=False)]
+                    
+                    # Disegna la linea rossa solo se abbiamo abbastanza dati tedeschi
+                    has_bund_curve = False
+                    if len(df_germania) > 3:
+                        df_germania = df_germania[(df_germania['YTM_Grezzo'] > -1) & (df_germania['Anni'] > 0)]
+                        try:
+                            # Regressione sulla Germania
+                            z_bund = np.polyfit(df_germania['Anni'], df_germania['YTM_Grezzo'], 2) 
+                            p_bund = np.poly1d(z_bund)
+                            fig.add_trace(go.Scatter(x=x_trend, y=p_bund(x_trend), mode='lines', name='Risk Free (Bund 🇩🇪)', line=dict(color='#FF4B4B', width=3)))
+                            has_bund_curve = True
+                        except: pass
+
+                    # 2. LINEA MEDIA CATEGORIA (Gialla - Fair Value)
                     df_cat_specific = df_zoom[df_zoom['Categoria'] == cat_target]
                     if len(df_cat_specific) > 5:
-                        z = np.polyfit(df_cat_specific['Anni'], df_cat_specific['YTM_Grezzo'], 2)
-                        p = np.poly1d(z)
-                        x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
-                        fig.add_trace(go.Scatter(x=x_trend, y=p(x_trend), mode='lines', name=f'Media {cat_target}', line=dict(color='yellow', width=3, dash='dot')))
-                        fair_yield = p(anni_scadenza)
-                        delta_spread = ytm_s - fair_yield
-                        sigma = np.std(df_cat_specific['YTM_Grezzo'] - p(df_cat_specific['Anni']))
-                        z_score = delta_spread / sigma if sigma > 0 else 0
+                        try:
+                            z = np.polyfit(df_cat_specific['Anni'], df_cat_specific['YTM_Grezzo'], 2)
+                            p = np.poly1d(z)
+                            fig.add_trace(go.Scatter(x=x_trend, y=p(x_trend), mode='lines', name=f'Media {cat_target}', line=dict(color='yellow', width=2, dash='dot')))
+                            
+                            fair_yield = p(anni_scadenza)
+                            delta_spread = ytm_s - fair_yield
+                            sigma = np.std(df_cat_specific['YTM_Grezzo'] - p(df_cat_specific['Anni']))
+                            z_score = delta_spread / sigma if sigma > 0 else 0
+                        except:
+                             fair_yield = ytm_s; delta_spread = 0; z_score = 0
                     else:
+                        # Se non ho abbastanza dati per la curva gialla, uso il benchmark come riferimento (se esiste) o nulla
                         fair_yield = ytm_s; delta_spread = 0; z_score = 0
 
-                    fig.add_trace(go.Scatter(x=[anni_scadenza], y=[ytm_s], mode='markers+text', name='TUO BOND', text=['📍 TU'], textposition="top center", marker=dict(color='red', size=22, symbol='star')))
-                    fig.update_layout(template="plotly_dark", height=450, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                    # 3. IL TUO BOND (Stella)
+                    fig.add_trace(go.Scatter(x=[anni_scadenza], y=[ytm_s], mode='markers+text', name='TUO BOND', text=['📍 TU'], textposition="top center", marker=dict(color='white', size=20, symbol='star')))
+                    
+                    fig.update_layout(template="plotly_dark", height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                     
                     selected_point = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
                     if selected_point and len(selected_point['selection']['points']) > 0:
