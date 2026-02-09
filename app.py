@@ -13,7 +13,7 @@ from scipy.optimize import newton
 import hashlib
 
 # ==============================================================================
-# 1. CONFIGURAZIONE PAGINA E STILI CSS (MIGLIORATI PER TEMA)
+# 1. CONFIGURAZIONE PAGINA E STILI CSS
 # ==============================================================================
 
 st.set_page_config(
@@ -27,33 +27,35 @@ st.markdown("""
 <style>
     /* --- CARD METRICHE --- */
     .metric-card {
-        background-color: #1e2130; /* Questo rimane scuro per contrasto o puoi cambiarlo */
+        background-color: #1e2130; 
         padding: 15px; 
         border-radius: 8px; 
         border: 1px solid #3e445b; 
         margin-bottom: 10px;
-        color: #ffffff !important; /* Forza testo bianco nelle card scure */
+        color: #ffffff !important;
     }
     
-    /* --- BOX SPIEGAZIONI (ADATTIVO) --- */
+    /* --- BOX SPIEGAZIONI --- */
     .explanation-box {
-        background-color: rgba(128, 128, 128, 0.1); /* Sfondo leggero trasparente */
+        background-color: rgba(128, 128, 128, 0.1);
         border-left: 4px solid #00CC96;
         padding: 15px;
         border-radius: 5px;
         margin-bottom: 15px;
     }
-    .explanation-title {
-        font-weight: bold;
-        color: #00CC96;
-        font-size: 16px;
-        margin-bottom: 5px;
+    .explanation-title { font-weight: bold; color: #00CC96; font-size: 16px; margin-bottom: 5px; }
+    .explanation-text { font-size: 14px; color: inherit; opacity: 0.9; }
+
+    /* --- SCONTRINO SIMULATORE --- */
+    .receipt-box {
+        border: 1px dashed rgba(128, 128, 128, 0.5);
+        padding: 20px;
+        border-radius: 10px;
+        background-color: rgba(0, 0, 0, 0.02);
     }
-    .explanation-text {
-        font-size: 14px;
-        color: inherit; /* PRENDE IL COLORE DEL TEMA (Nero su Bianco, Bianco su Nero) */
-        opacity: 0.9;
-    }
+    .receipt-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
+    .receipt-total { display: flex; justify-content: space-between; margin-top: 15px; border-top: 2px solid #00CC96; padding-top: 10px; font-weight: bold; font-size: 18px; color: #00CC96; }
+    .receipt-negative { color: #FF4B4B; }
 
     /* --- SIDEBAR --- */
     [data-testid="stSidebar"] div.stButton > button {
@@ -61,33 +63,23 @@ st.markdown("""
         color: inherit !important; box-shadow: none; padding-left: 0; 
         font-size: 16px; font-weight: 600;
     }
-    [data-testid="stSidebar"] div.stButton > button:hover {
-        padding-left: 10px; 
-        background-color: rgba(128, 128, 128, 0.1); border-radius: 5px;
-    }
+    [data-testid="stSidebar"] div.stButton > button:hover { padding-left: 10px; background-color: rgba(128, 128, 128, 0.1); border-radius: 5px; }
 
-    /* --- LEGENDA --- */
+    /* --- FLAGS & LEGEND --- */
     .legend-box { padding: 15px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: white; height: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
     .legend-title { font-weight: bold; font-size: 16px; display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 4px; text-transform: uppercase; }
     .gov { background-color: #1a4a2e; border: 1px solid #28a745; }
     .bank { background-color: #2c3e50; border: 1px solid #8e9aaf; }
     .corp { background-color: #1e3a5f; border: 1px solid #17a2b8; }
     .spec { background-color: #581845; border: 1px solid #d63384; }
-
-    /* --- SCORECARD TRASPARENTE --- */
-    .score-row {
-        display: flex; justify-content: space-between; align-items: center;
-        padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.2);
-    }
+    .score-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.2); }
     .score-good { color: #00CC96; font-weight: bold; }
     .score-bad { color: #FF4B4B; font-weight: bold; }
     .score-neutral { color: #FFAA00; font-weight: bold; }
-    
-    /* --- BOX UTENTE --- */
     .user-box { padding: 10px; background-color: rgba(0, 204, 150, 0.1); border-left: 5px solid #00CC96; border-radius: 5px; margin-bottom: 20px; font-weight: bold; color: inherit; }
-    
-    .main-header { font-size: 24px; font-weight: bold; color: white; }
-    .sub-header { font-size: 14px; color: #b0b3c5; }
+    .red-flag { border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
+    .green-flag { border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
+    .warning-flag { border-left: 5px solid #ffa500; background-color: #2d2a1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -198,7 +190,6 @@ def pulisci_taglio(valore):
     except: return 1000.0
 
 def get_inflazione_ufficiale():
-    """Recupera inflazione (simulata per stabilità, ma linkata)"""
     inflazione_corrente = 2.0 
     fonte_url = "https://www.istat.it/it/archivio/prezzi+al+consumo"
     return inflazione_corrente, fonte_url
@@ -239,13 +230,9 @@ def processa_riga(row, info):
     except: return None
 
 def identikit_bond(dati):
-    """Crea un profilo semplice con spiegazione del RISCHIO EMITTENTE"""
     desc = dati['desc'].upper()
     fonte = dati['fonte'].upper()
-    
-    risk_msg = ""
-    chi = ""
-    tipo = ""
+    risk_msg = ""; chi = ""; tipo = ""
 
     if "ITALIA" in fonte or "BTP" in desc or "BOT" in desc:
         chi = "🇮🇹 Stato Italiano"
@@ -262,8 +249,7 @@ def identikit_bond(dati):
     elif "BANCHE" in fonte or "INTESA" in desc or "UNICREDIT" in desc:
         chi = "🏦 Settore Bancario"
         tipo = "Obbligazione Bancaria"
-        risk_msg = "Rischio Settoriale: Legato alla solidità della banca e del sistema finanziario."
-        if "SUB" in desc: risk_msg += " ⚠️ SUBORDINATO: Rischio più alto in caso di fallimento."
+        risk_msg = "Rischio Settoriale: Legato alla solidità della banca. Se 'SUB', rischio alto."
     elif "CORP" in fonte or "ENI" in desc or "ENEL" in desc or "STELLANTIS" in desc:
         chi = "🏭 Azienda (Corporate)"
         tipo = "Obbligazione Societaria"
@@ -273,16 +259,14 @@ def identikit_bond(dati):
         tipo = "Obbligazione"
         risk_msg = "Verificare il rating specifico dell'emittente."
 
-    # Quanto manca?
     diff = (dati['sc'] - date.today())
     anni = diff.days // 365
     mesi = (diff.days % 365) // 30
     tempo = f"{anni} Anni e {mesi} Mesi"
-    
     return chi, tipo, tempo, risk_msg
 
 # ==============================================================================
-# 5. RISK ENGINE E SCORECARD DETTAGLIATA
+# 5. RISK ENGINE E SCORECARD
 # ==============================================================================
 
 def calcola_ytm_preciso(prezzo, cedola_pct, scadenza, freq, face_value=100):
@@ -322,7 +306,7 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
     breakdown = []
     score = 100
     peso_bond = (dati['taglio'] / patrimonio) * 100
-    if peso_bond > 20: punti = -30; msg = f"Rischio alto: pesa il {peso_bond:.1f}% del patrimonio"; colore = "score-bad"
+    if peso_bond > 20: punti = -30; msg = f"Rischio alto: pesa il {peso_bond:.1f}%"; colore = "score-bad"
     elif peso_bond > 10: punti = -10; msg = f"Taglio impegnativo: pesa il {peso_bond:.1f}%"; colore = "score-neutral"
     else: punti = 0; msg = f"Taglio sostenibile: pesa il {peso_bond:.1f}%"; colore = "score-good"
     score += punti
@@ -425,28 +409,20 @@ def trova_alternative_migliori(bond_target, df_mercato):
     for _, row in df_mercato.iterrows():
         if not (anni_target - 2 <= row['Anni'] <= anni_target + 2): continue
         if row['Prezzo'] > 108: continue 
-        
         rischio_alt = categorizza_rischio(row['ISIN'], row['Fonte'], row['Desc'])
         tax_alt = determina_tasse(row['Fonte'], row['Desc'])
         ytm_netto_alt = row['YTM_Grezzo'] * (1 - tax_alt/100)
         extra = ytm_netto_alt - ytm_netto_target
-        
         tipo_switch = ""
         if rischio_alt == rischio_target and extra > 0.15: tipo_switch = "✅ Gemello Migliore"
         elif rischio_alt == rischio_target + 1 and extra > 0.8: tipo_switch = "⚠️ Boost Rendimento (Rischio+)"
         elif rischio_alt < rischio_target and extra > -0.3: tipo_switch = "🛡️ Rifugio Sicuro"
-            
         if tipo_switch:
             link_isin = f"https://www.google.com/search?q={row['ISIN']}+bond"
-            row['Tipologia'] = tipo_switch
-            row['YTM_Netto'] = ytm_netto_alt
-            row['Extra'] = extra
-            row['Link'] = link_isin
+            row['Tipologia'] = tipo_switch; row['YTM_Netto'] = ytm_netto_alt; row['Extra'] = extra; row['Link'] = link_isin
             alternative.append(row)
-            
     df_alt = pd.DataFrame(alternative)
-    if not df_alt.empty:
-        return df_alt.sort_values('Extra', ascending=False).head(5)
+    if not df_alt.empty: return df_alt.sort_values('Extra', ascending=False).head(5)
     return pd.DataFrame()
 
 def aggiorna_db():
@@ -483,19 +459,88 @@ def cerca_db(isin, cat):
             except: continue
     return None, None
 
-def genera_flussi(dati, importo, tax_rate):
-    flussi = []; nom = importo; pr = (importo * dati['pr']) / 100
-    flussi.append({"Data": date.today(), "Flow": -pr, "Tipo": "Investimento"})
+def calcola_rateo(dati):
+    """Stima il rateo maturato (interessi da pagare al venditore)"""
+    try:
+        oggi = date.today()
+        scadenza = dati['sc']
+        freq = dati['freq']
+        cedola = dati['ced']
+        
+        if freq == 0: return 0.0 # Zero coupon
+        
+        giorni_anno = 365
+        giorni_periodo = giorni_anno / freq
+        
+        # Trova la data di pagamento cedola precedente
+        # (Metodo semplificato: andiamo indietro dalla scadenza)
+        data_cedola_succ = scadenza
+        while data_cedola_succ > today_dt:
+            data_cedola_succ -= timedelta(days=int(giorni_periodo))
+        
+        # Ora data_cedola_succ è in realtà la PRECEDENTE
+        data_cedola_prec = data_cedola_succ
+        
+        # Calcolo giorni maturati
+        today_dt = date.today()
+        # Fix: se la data precedente è futura (scadenza breve), gestisci
+        if data_cedola_prec > today_dt:
+             data_cedola_prec -= timedelta(days=int(giorni_periodo))
+
+        giorni_maturati = (today_dt - data_cedola_prec).days
+        rateo_percentuale = (cedola / freq) * (giorni_maturati / giorni_periodo)
+        
+        return max(0.0, rateo_percentuale)
+    except: return 0.0
+
+def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
+    """
+    Genera i flussi e anche i totali per lo scontrino
+    """
+    flussi = []
+    
+    # 1. Costi Iniziali
+    rateo_pct = calcola_rateo(dati)
+    costo_titolo = (nominale * prezzo_acquisto) / 100
+    costo_rateo = (nominale * rateo_pct) / 100
+    # Tassazione rateo (al 12.5 o 26 su quello che incasserai, qui semplifichiamo lordo)
+    # Nota: il rateo si paga NETTO se l'intermediario è sostituto, ma per semplicità retail mostriamo i costi vivi
+    
+    spesa_totale = costo_titolo + costo_rateo + commissioni
+    
+    flussi.append({"Data": date.today(), "Tipo": "USCITA (Acquisto)", "Importo": -spesa_totale, "Dettagli": f"Prezzo: {prezzo_acquisto} + Rateo + Comm."})
+    
+    # 2. Cedole Future
+    totale_incassato = 0
     if dati['freq'] > 0:
-        ced_net = (nom * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
+        cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
         curr = dati['sc']
-        while curr > date.today() + timedelta(days=2):
-            if curr != dati['sc']: flussi.append({"Data": curr, "Flow": ced_net, "Tipo": "Cedola"})
-            curr -= timedelta(days=int(365 / dati['freq']))
-    gain = max(0, nom - pr); rimb = nom - (gain * tax_rate / 100)
-    ced_fin = (nom * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
-    flussi.append({"Data": dati['sc'], "Flow": rimb + ced_fin, "Tipo": "Rimborso"})
-    return pd.DataFrame(flussi).sort_values("Data")
+        # Genera date indietro
+        date_cedole = []
+        temp_d = curr
+        while temp_d > date.today():
+            date_cedole.append(temp_d)
+            temp_d -= timedelta(days=int(365 / dati['freq']))
+        
+        date_cedole.sort()
+        for d in date_cedole:
+            if d != dati['sc']: # La scadenza la gestiamo col rimborso
+                flussi.append({"Data": d, "Tipo": "ENTRATA (Cedola)", "Importo": cedola_netta, "Dettagli": "Cedola Netta"})
+                totale_incassato += cedola_netta
+
+    # 3. Rimborso Finale
+    # Plusvalenza/Minusvalenza: (100 - Prezzo)
+    gain_capitale = max(0, nominale - costo_titolo) # Semplificato
+    tassa_gain = gain_capitale * (tax_rate/100)
+    rimborso_netto = nominale - tassa_gain
+    
+    # Aggiungi ultima cedola al rimborso
+    ultima_cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
+    
+    flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA (Rimborso + Cedola)", "Importo": rimborso_netto + ultima_cedola_netta, "Dettagli": "Capitale + Ultima Cedola"})
+    totale_incassato += (rimborso_netto + ultima_cedola_netta)
+    
+    return pd.DataFrame(flussi), spesa_totale, totale_incassato, costo_rateo
 
 # ==============================================================================
 # 7. INTERFACCIA UTENTE
@@ -582,7 +627,6 @@ def main_app():
         else:
             isin_default = ""
 
-        # MODIFICA: Bottone Cerca
         col_cat, col_isin, col_btn = st.columns([2, 2, 1])
         with col_cat: cat = st.selectbox("Categoria", list(SOURCES_MAP.keys()))
         with col_isin: isin = st.text_input("ISIN", value=isin_default, placeholder="IT...").strip().upper()
@@ -591,7 +635,7 @@ def main_app():
             st.write("") 
             trigger_search = st.button("🔎 Cerca", use_container_width=True)
         
-        if isin and (trigger_search or isin): # Cerca se preme invio O clicca bottone
+        if isin and (trigger_search or isin):
             if not valida_isin(isin): st.error("❌ ISIN non valido")
             else:
                 row, info = cerca_db(isin, cat if not isin_default else None)
@@ -601,9 +645,7 @@ def main_app():
                     tax = determina_tasse(d['fonte'], d['desc'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
-                    infl, link_infl = get_inflazione_ufficiale()
                     
-                    # IDENTIKIT MIGLIORATO
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
                     
                     st.markdown(f"""
@@ -628,82 +670,74 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # --- ANALISI IN BREVE (EX TRADUTTORE) ---
-                    st.subheader("📘 Analisi in Breve")
+                    st.subheader("💡 Analisi in Breve")
                     t1, t2, t3 = st.columns(3)
                     
                     with t1:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">1. Quanto Rende?</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Questo include le cedole che incassi e il guadagno/perdita sul prezzo finale.</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Questo numero include sia le cedole che ricevi sia il guadagno finale (se compri a sconto) o la perdita (se compri a premio).</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                     with t2:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
                         cedola_netta_euro = (1000 * (d['ced']/100) * (1 - tax/100))
-                        st.markdown(f'<div class="explanation-text">La cedola del <b>{d["ced"]}%</b> significa che per ogni 1.000€ investiti riceverai <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno sul conto.</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="explanation-text">Ogni 1.000€ investiti, riceverai circa <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno sul conto corrente.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
                         
                     with t3:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
-                        st.markdown('<div class="explanation-title">3. Rischio Volatilità</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="explanation-title">3. Rischio Prezzo</div>', unsafe_allow_html=True)
                         volatilita = "BASSA" if risk['mod_dur'] < 3 else "MEDIA" if risk['mod_dur'] < 7 else "ALTA"
-                        st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b> (Duration {risk["mod_dur"]:.1f} anni). Se i tassi salgono dell\'1%, il prezzo scende temporaneamente di circa il {risk["mod_dur"]:.1f}%.</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi BCE salgono, il prezzo di questo bond potrebbe scendere. Più alta è la duration ({risk["mod_dur"]:.1f} anni), più oscilla il prezzo.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                    # --- DETTAGLI TECNICI ---
-                    with st.expander("📊 Vedi Dati Tecnici Completi"):
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("Prezzo", f"{d['pr']:.2f}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari", help="Se compri 'Sotto la Pari' (es. 95) e porti a scadenza (100), guadagni la differenza come bonus finale.")
-                        m2.metric("YTM Netto", f"{qual['ytm_netto']:.2f}%", f"Tassato al {tax}%")
-                        m3.metric("Cedola", f"{d['ced']}%", f"{'Annuale' if d['freq']==1 else 'Semestrale' if d['freq']==2 else 'Trimestrale' if d['freq']==4 else 'Unica'}")
-                        m4.metric("Duration", f"{risk['mod_dur']:.2f} Anni", help="Misura quanto il prezzo è sensibile ai tassi di interesse.")
-                        
-                        st.subheader("Punteggio Qualità")
-                        c_flg, c_score = st.columns([2, 1])
-                        with c_flg:
-                            for ft, txt in qual['flags']:
-                                color = "red-flag" if ft=="red" else "warning-flag" if ft=="warning" else "green-flag"
-                                st.markdown(f'<div class="{color}">{txt}</div>', unsafe_allow_html=True)
-                            if not qual['flags']: st.markdown('<div class="green-flag">✅ Nessuna criticità rilevata</div>', unsafe_allow_html=True)
-                        with c_score:
-                            st.metric("Score", f"{qual['score']}/100")
+                    # --- SIMULATORE DI INVESTIMENTO AVANZATO ---
+                    st.divider()
+                    st.subheader("💰 Simulatore d'Acquisto")
+                    
+                    c_sim1, c_sim2 = st.columns([1, 2])
+                    with c_sim1:
+                        investimento = st.number_input("Quanto vuoi investire? (€)", value=10000, step=1000)
+                        commissioni = st.number_input("Commissioni Banca (€)", value=5.0, step=1.0)
+                    
+                    # Calcoli Simulatori
+                    df_flussi, spesa_tot, incasso_tot, costo_rateo = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
+                    guadagno_netto = incasso_tot - spesa_tot
+                    rendimento_totale_pct = (guadagno_netto / spesa_tot) * 100
+                    
+                    with c_sim2:
+                        st.markdown(f"""
+                        <div class="receipt-box">
+                            <div class="receipt-row"><span>Costo Titoli (Prezzo {d['pr']}):</span> <span>{investimento * d['pr'] / 100:.2f} €</span></div>
+                            <div class="receipt-row"><span>+ Rateo Interessi (da anticipare):</span> <span>{costo_rateo:.2f} €</span></div>
+                            <div class="receipt-row"><span>+ Commissioni Banca:</span> <span>{commissioni:.2f} €</span></div>
+                            <div class="receipt-total">
+                                <span>TOTALE DA PAGARE OGGI:</span>
+                                <span>{spesa_tot:.2f} €</span>
+                            </div>
+                            <hr>
+                            <div class="receipt-row" style="color:#00CC96; font-weight:bold;">
+                                <span>RITORNO TOTALE (A scadenza):</span>
+                                <span>{incasso_tot:.2f} €</span>
+                            </div>
+                            <div class="receipt-row">
+                                <span>Guadagno Netto:</span>
+                                <span>+{guadagno_netto:.2f} € (+{rendimento_totale_pct:.2f}%)</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                    # AZIONI
+                    with st.expander("📅 Vedi tutti i pagamenti futuri (Cedolario)"):
+                        st.dataframe(df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style.format({'Importo': '{:+.2f}€'}), use_container_width=True)
+
                     c_btn1, c_btn2 = st.columns(2)
                     if c_btn1.button("📌 Salva per Confronto", use_container_width=True):
                         st.session_state.confronto = d; st.success("Salvato!")
                     if c_btn2.button("💼 Aggiungi a Portafoglio", use_container_width=True):
                         st.session_state.portfolio.append(d)
                         st.success("Aggiunto!")
-
-                    # ALTRE TAB
-                    tab_whatif, tab_cedole = st.tabs(["🔮 Simulatore 'What If'", "📅 Cedolario"])
-
-                    with tab_whatif:
-                        st.warning("🔮 **Sfera di Cristallo:** Cosa succede se vendi PRIMA della scadenza?")
-                        if risk:
-                            anni_residui_float = (d['sc'] - date.today()).days / 365.25
-                            max_anni_slider = int(anni_residui_float)
-                            if max_anni_slider < 1:
-                                st.info("ℹ️ Il bond scade tra meno di un anno. Simulazione non necessaria.")
-                            else:
-                                cw1, cw2 = st.columns(2)
-                                with cw1:
-                                    hold = st.slider("Anni detenzione", 1, max_anni_slider, 1)
-                                with cw2:
-                                    shock = st.slider("Variazione Tassi", -3.0, 3.0, 0.0, 0.5)
-                                
-                                dur_res = max(0, risk['mod_dur'] - hold)
-                                p_fut = d['pr'] - (dur_res * (shock/100) * d['pr']) + ((100-d['pr']) * (hold/anni_residui_float))
-                                st.metric("Prezzo Stimato", f"{p_fut:.2f}€", delta=f"{p_fut-d['pr']:.2f}")
-                        else: st.error("Dati insufficienti")
-                    
-                    with tab_cedole:
-                        st.write("📅 **I tuoi flussi di cassa (Esempio su 10.000€)**")
-                        df_cf = genera_flussi(d, 10000, tax)
-                        st.dataframe(df_cf[df_cf['Data'] > date.today()].style.format({'Flow': '{:.2f}€'}), use_container_width=True)
 
                 else: st.warning("Bond non trovato. Aggiorna il DB.")
 
@@ -814,19 +848,6 @@ def main_app():
 
     elif st.session_state.page == "Portafoglio":
         st.title("💼 Portafoglio")
-        with st.expander("➕ Aggiungi Manuale"):
-            c1, c2, c3, c4 = st.columns([2,2,2,1])
-            pc = c1.selectbox("Cat", list(SOURCES_MAP.keys()), key="p_c")
-            pi = c2.text_input("ISIN", key="p_i").strip().upper()
-            pn = c3.number_input("Nom", 1000, key="p_n")
-            if c4.button("Add") and pi:
-                r, i = cerca_db(pi, pc)
-                d = processa_riga(r, i) if r is not None else None
-                if d:
-                    risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
-                    st.session_state.portfolio.append({"ISIN": pi, "Desc": d['desc'], "Nominale": pn, "Valore": (pn*d['pr'])/100, "YTM": risk['ytm'] if risk else 0, "Scadenza": d['sc']})
-                    st.success("Ok"); st.rerun()
-        
         if st.session_state.portfolio:
             df = pd.DataFrame(st.session_state.portfolio)
             st.dataframe(df)
