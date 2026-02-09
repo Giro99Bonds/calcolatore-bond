@@ -125,7 +125,7 @@ def init_session_state():
 init_session_state()
 
 # ==============================================================================
-# 3. MAPPA FONTI (ESTESA - 29 DATASETS)
+# 3. MAPPA FONTI (ESTESA - 29 DATASETS) & MAPPING CATEGORIE UI
 # ==============================================================================
 
 SOURCES_MAP = {
@@ -175,26 +175,16 @@ SOURCES_MAP = {
         {"nome": "LUNGHI_25Y+", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=25yearsEUR&yieldtype=G&timescale=DUR", "freq": 1}
     ]
 }
-# MAPPING PER IL MENU A TENDINA SEMPLIFICATO
+
+# Mapping per l'interfaccia utente semplificata
 MACRO_CATEGORIES = {
-    "🌐 TUTTE": [], # Cerca ovunque
-    "🏛️ GOVERNATIVI": [
-        "🏛️ GOV - ITALIA", 
-        "🇪🇺 GOV - EUROPA CORE", 
-        "🏖️ GOV - EUROPA PERIFERIA", 
-        "🌍 GOV - MONDO & EMERGENTI", 
-        "🇪🇺 SOVRANAZIONALI (SUPRA)"
-    ],
-    "🏦 BANCARI": [
-        "🏦 FINANZIARI & BANCHE"
-    ],
-    "🏭 CORPORATE": [
-        "🏭 CORPORATE (AZIENDE)"
-    ],
-    "💎 SPECIALI": [
-        "💎 SPECIALI"
-    ]
+    "TUTTE": [],
+    "🏛️ GOVERNATIVI": ["🏛️ GOV - ITALIA", "🇪🇺 GOV - EUROPA CORE", "🏖️ GOV - EUROPA PERIFERIA", "🌍 GOV - MONDO & EMERGENTI", "🇪🇺 SOVRANAZIONALI (SUPRA)"],
+    "🏦 BANCARI": ["🏦 FINANZIARI & BANCHE"],
+    "🏭 CORPORATE": ["🏭 CORPORATE (AZIENDE)"],
+    "💎 SPECIALI": ["💎 SPECIALI"]
 }
+
 # ==============================================================================
 # 4. FUNZIONI UTILI & DATABASE
 # ==============================================================================
@@ -522,38 +512,31 @@ def aggiorna_db():
 def cerca_db(isin, cat_macro):
     if not valida_isin(isin): return None, None
     
-    # 1. Determina quali categorie tecniche scansionare
+    # Se la categoria è specificata e non è "TUTTE", cerca solo lì
     search_keys = []
-    
-    # Se cat_macro è vuoto o "TUTTE", cerchiamo in tutto SOURCES_MAP
-    if not cat_macro or cat_macro == "TUTTE":
-        search_keys = list(SOURCES_MAP.keys())
-    # Altrimenti prendiamo le sottocategorie dalla mappatura
-    elif cat_macro in MACRO_CATEGORIES:
+    if cat_macro and cat_macro != "TUTTE" and cat_macro in MACRO_CATEGORIES:
         search_keys = MACRO_CATEGORIES[cat_macro]
     else:
-        # Fallback di sicurezza
-        search_keys = list(SOURCES_MAP.keys())
+        # Altrimenti cerca ovunque (appiattisce la lista delle liste)
+        for key in SOURCES_MAP.keys():
+            search_keys.append(key)
 
-    # 2. Esegue la ricerca
+    # Itera sulle chiavi di SOURCES_MAP selezionate
     for key in search_keys:
-        # Recupera la lista di fonti per quella chiave (es. BTP, BOT, CCT...)
         sources = SOURCES_MAP.get(key, [])
         for src in sources:
             path = os.path.join(DB_FOLDER, f"{src['nome']}.csv")
             if not os.path.exists(path): continue
             try:
                 df = pd.read_csv(path)
-                # Cerca colonna ISIN in modo flessibile
                 col = next((c for c in df.columns if 'ISIN' in str(c).upper()), None)
                 if col:
                     mask = df[col].astype(str).str.contains(isin, case=False, na=False)
                     if mask.any(): 
                         row = df[mask].iloc[0]
-                        # Restituisce il dato e la categoria reale trovata
+                        cat_reale = "Governativo" if "BTP" in str(row) or "BOT" in str(row) else "Corporate"
                         return row, {"nome": src['nome'], "freq": src['freq'], "cat_reale": key}
             except: continue
-            
     return None, None
 
 def calcola_rateo(dati):
@@ -579,6 +562,8 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
     costo_rateo_lordo = (nominale * rateo_pct) / 100
     costo_rateo_netto = costo_rateo_lordo * (1 - tax_rate/100)
     spesa_totale = costo_titolo + costo_rateo_netto + commissioni
+    
+    # Flusso iniziale negativo
     flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto + Rateo + Comm."})
     
     totale_cedole_nette = 0
@@ -653,7 +638,6 @@ def main_app():
             color = "green" if delta < 24 else "orange"
             
             # FIX ORARIO ITALIA: Aggiungo 1 ora solo per quello che leggi a video
-            # (Nota: In estate con l'ora legale dovrai mettere hours=2)
             last_ita = last + timedelta(hours=1)
             
             st.markdown(f"📅 Aggiornato: :{color}[{last_ita.strftime('%d/%m %H:%M')}]")
@@ -735,27 +719,20 @@ def main_app():
             isin_default = ""
 
         col_cat, col_isin, col_btn = st.columns([2, 2, 1])
-        
         with col_cat: 
-            # MODIFICA: Ora usa le Macro Categorie (4 voci + TUTTE) invece della lista lunga
             cat_select = st.selectbox("Filtra Categoria", list(MACRO_CATEGORIES.keys()))
-            
         with col_isin: 
             isin = st.text_input("ISIN", value=isin_default, placeholder="IT...").strip().upper()
-            
         with col_btn: 
             st.write("") 
             st.write("") 
             trigger_search = st.button("🔎 Cerca", use_container_width=True)
         
-if isin and (trigger_search or isin):
+        if isin and (trigger_search or isin):
             if not valida_isin(isin): st.error("❌ ISIN non valido")
             else:
-                # CORREZIONE: Usiamo 'cat_select' invece di 'cat'
-                # Passiamo None se l'ISIN arriva dal grafico (isin_default), altrimenti il filtro scelto
-                filtro_categoria = cat_select if not isin_default else None
-                
-                row, info = cerca_db(isin, filtro_categoria)
+                filtro_cat = cat_select if not isin_default else None
+                row, info = cerca_db(isin, filtro_cat)
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
@@ -791,36 +768,46 @@ if isin and (trigger_search or isin):
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     c1.metric("Prezzo", f"{d['pr']}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari", 
                               help="💰 **Cosa significa?**\n\n• **Sotto la Pari (<100):** Paghi meno del valore che ti rimborseranno. Es: paghi 90, ricevi 100. La differenza è guadagno extra.\n• **Sopra la Pari (>100):** Paghi di più. Es: paghi 105, ricevi 100. È normale se la cedola è alta.")
+                    
                     c2.metric("Rendimento Netto", f"{qual['ytm_netto']:.2f}%", 
                               help="📈 **Cosa significa?**\n\nÈ il guadagno reale annuo che ti rimane in tasca, GIA' SOTTRATTE le tasse (12.5% o 26%). È il numero più importante da guardare.")
+                    
                     c3.metric("Rendimento Lordo", f"{risk['ytm']:.2f}%",
                               help="È il guadagno annuo PRIMA delle tasse. Serve per confrontare bond con tassazione diversa.")
+                    
                     c4.metric("Cedola", f"{d['ced']}%", 
                               help="💸 **Cosa significa?**\n\nÈ l'interesse periodico (il bonifico) che l'emittente ti paga. Es: 4% su 1.000€ = 40€ lordi l'anno.")
+                    
                     c5.metric("Taglio Minimo", f"{d['taglio']:,.0f}€", 
                               help="🧱 **Cosa significa?**\n\nÈ la quantità minima che puoi comprare. Se è 1.000€, non puoi investirne 500€.")
+                    
                     c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni", 
                               help="📉 **Cosa significa?**\n\nIndica quanto è rischioso il prezzo. Se la Duration è 6 anni, e i tassi salgono dell'1%, il prezzo del bond scenderà circa del 6%.")
 
                     st.divider()
                     st.subheader("💡 Analisi in Breve")
                     t1, t2, t3 = st.columns(3)
+                    
                     with t1:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">1. Quanto Rende?</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Questo numero include sia le cedole che ricevi sia il guadagno finale (se compri a sconto) o la perdita (se compri a premio).</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
+                        
                     with t2:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
                         cedola_netta_euro = (1000 * (d['ced']/100) * (1 - tax/100))
+                        
                         if d['freq'] == 1: freq_txt = "in un'unica soluzione annuale"
                         elif d['freq'] == 2: freq_txt = f"in 2 cedole semestrali da {cedola_netta_euro/2:.2f}€"
                         elif d['freq'] == 4: freq_txt = f"in 4 cedole trimestrali da {cedola_netta_euro/4:.2f}€"
                         elif d['freq'] == 0: freq_txt = "(Zero Coupon: tutto a scadenza)"
                         else: freq_txt = ""
+                        
                         st.markdown(f'<div class="explanation-text">Ogni 1.000€ investiti, riceverai circa <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno, {freq_txt}.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
+                        
                     with t3:
                         st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
                         st.markdown('<div class="explanation-title">3. Rischio Prezzo</div>', unsafe_allow_html=True)
@@ -828,17 +815,15 @@ if isin and (trigger_search or isin):
                         st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi salgono dell\'1%, il prezzo scende del {risk["mod_dur"]:.1f}%.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- INIZIO BLOCCO SIMULATORE AVANZATO ---
                     st.divider()
                     st.subheader("💰 Simulatore d'Acquisto & P&L")
                     
                     c_sim1, c_sim2 = st.columns([1, 2])
                     with c_sim1:
                         investimento = st.number_input("Quanto vuoi investire? (€)", value=10000, step=1000)
-                        commissioni = st.number_input("Commissioni Banca (€)", value=5.0, step=1.0)
+                        commissioni = st.number_input("Commissioni Banca (€)", value=5.0, step=1.0, help="Non lo sai? Se hai una banca online (Fineco, Directa) metti 5-10€. Se hai una banca fisica, spesso è lo 0.19% del capitale (es. 19€ su 10k).")
                     
-                    # Calcolo Flussi
-                    df_flussi, spesa_tot, incasso_tot, costo_rateo, tot_ced, plus_netta = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
+                    df_flussi, spesa_tot, incasso_tot, costo_rateo, totale_cedole_nette, plusvalenza_netta = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
                     guadagno_netto = incasso_tot - spesa_tot
                     anni_durata = (d['sc'] - date.today()).days / 365.25
                     rend_annuo_semplice = (guadagno_netto / spesa_tot / anni_durata) * 100 if anni_durata > 0 else 0
@@ -846,24 +831,40 @@ if isin and (trigger_search or isin):
                     with c_sim2:
                         st.markdown(f"""
                         <div class="receipt-box">
-                            <div class="receipt-row"><span>Costo Totale (Oggi):</span> <span>-{spesa_tot:.2f} €</span></div>
-                            <div class="receipt-row"><span>Incasso Totale (Scadenza):</span> <span>+{incasso_tot:.2f} €</span></div>
-                            <hr>
+                            <div class="receipt-row"><span>Costo Titoli (Prezzo {d['pr']}):</span> <span>{investimento * d['pr'] / 100:.2f} €</span></div>
+                            <div class="receipt-row"><span>+ Rateo Interessi (da anticipare):</span> <span>{costo_rateo:.2f} €</span></div>
+                            <div class="receipt-row"><span>+ Commissioni Banca:</span> <span>{commissioni:.2f} €</span></div>
                             <div class="receipt-total">
-                                <span>UTILE NETTO:</span>
+                                <span>TOTALE DA PAGARE OGGI:</span>
+                                <span>{spesa_tot:.2f} €</span>
+                            </div>
+                            <div class="receipt-sub">Hai pagato circa {(spesa_tot/investimento)*100:.1f}% del valore nominale</div>
+                            <hr>
+                            <div class="receipt-row" style="color:#00CC96; font-weight:bold;">
+                                <span>GUADAGNO TOTALE (in {anni_durata:.1f} anni):</span>
                                 <span>+{guadagno_netto:.2f} €</span>
                             </div>
-                            <div class="receipt-sub">Rendimento Annuo Effettivo: {rend_annuo_semplice:.2f}%</div>
+                            <div class="receipt-row">
+                                <span>Rendimento Annuo Effettivo:</span>
+                                <span>{rend_annuo_semplice:.2f}%</span>
+                            </div>
                         </div>
                         """, unsafe_allow_html=True)
+                        
+                        st.info(f"""
+                        ℹ️ **Perché questo rendimento ({rend_annuo_semplice:.2f}%) è diverso da quello sopra ({qual['ytm_netto']:.2f}%)?**
+                        Perché qui stiamo calcolando i costi reali incluse le **Commissioni Bancarie ({commissioni}€)** che abbassano leggermente il rendimento finale.
+                        
+                        **Composizione del Guadagno ({guadagno_netto:.2f}€):**
+                        1. 🎫 Cedole Nette Totali: +{totale_cedole_nette:.2f}€
+                        2. 📈 Guadagno sul Prezzo (Capital Gain): +{plusvalenza_netta:.2f}€
+                        3. 🏦 Meno Costi (Commissioni): -{commissioni:.2f}€
+                        """)
 
-                    # --- GRAFICO P&L (RECUPERO CAPITALE) ---
                     st.subheader("📈 Curva del Recupero Capitale (Breakeven)")
                     
-                    # Calcolo cumulativo per vedere quando torni in positivo
                     df_flussi['Cumulativo'] = df_flussi['Importo'].cumsum()
                     
-                    # Creiamo il grafico area
                     fig_pnl = px.area(
                         df_flussi, x='Data', y='Cumulativo',
                         title="Andamento del saldo nel tempo (Quando recupero i soldi?)",
@@ -871,23 +872,33 @@ if isin and (trigger_search or isin):
                         labels={'Cumulativo': 'Saldo Portafoglio (€)'}
                     )
                     
-                    # Linea dello zero (Breakeven)
                     fig_pnl.add_hline(y=0, line_dash="dash", line_color="white", annotation_text="Pareggio (0€)")
                     
-                    # Colora di verde se sopra zero, rosso se sotto (Trick visivo semplice: linea verde unica, l'area sotto mostra il trend)
                     fig_pnl.update_traces(line_color='#00CC96', fillcolor='rgba(0, 204, 150, 0.2)')
                     st.plotly_chart(fig_pnl, use_container_width=True)
 
-                    with st.expander("📅 Vedi Dettaglio Flussi (Cedolario)"):
-                        # Tabella colorata
-                        def color_negative_red(val):
-                            color = '#ff4b4b' if val < 0 else '#00cc96'
-                            return f'color: {color}; font-weight: bold;'
+                    st.divider()
+                    st.subheader("📅 Cedolario (I tuoi flussi di cassa)")
+                    tot_da_incassare = df_flussi[df_flussi['Importo'] > 0]['Importo'].sum()
+                    data_fine = d['sc'].strftime('%d/%m/%Y')
+                    col_kpi_c1, col_kpi_c2 = st.columns(2)
+                    col_kpi_c1.metric("Totale da Incassare (Netto)", f"{tot_da_incassare:.2f} €")
+                    col_kpi_c2.metric("Ultimo Pagamento", data_fine)
+                    
+                    def color_negative_red(val):
+                        color = '#ff4b4b' if val < 0 else '#00cc96'
+                        return f'color: {color}; font-weight: bold;'
                         
-                        st.dataframe(
-                            df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style.map(color_negative_red, subset=['Importo']).format({'Importo': '{:+.2f} €', 'Data': lambda x: x.strftime('%d/%m/%Y')}),
-                            use_container_width=True
-                        )
+                    st.dataframe(
+                        df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style.map(color_negative_red, subset=['Importo']).format({'Importo': '{:+.2f} €', 'Data': lambda x: x.strftime('%d/%m/%Y')}),
+                        use_container_width=True,
+                        height=400
+                    )
+                    
+                    fig_timeline = px.bar(df_flussi, x='Data', y='Importo', color='Tipo', 
+                                        color_discrete_map={'USCITA': '#FF4B4B', 'ENTRATA': '#00CC96'},
+                                        title="Timeline Flussi di Cassa", template="plotly_dark")
+                    st.plotly_chart(fig_timeline, use_container_width=True)
 
                     c_btn1, c_btn2 = st.columns(2)
                     if c_btn1.button("📌 Salva per Confronto", use_container_width=True):
@@ -895,13 +906,14 @@ if isin and (trigger_search or isin):
                     if c_btn2.button("💼 Aggiungi a Portafoglio", use_container_width=True):
                         st.session_state.portfolio.append(d)
                         st.success("Aggiunto!")
-                    # --- FINE BLOCCO SIMULATORE ---
+
+                else: st.warning("Bond non trovato. Aggiorna il DB.")
 
     elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Pro Tools")
-        st.caption("Strumenti istituzionali: Benchmark Risk-Free, Stress Test e Analisi Valore.")
+        st.caption("Strumenti istituzionali per la valutazione del rischio e del fair value, spiegati in modo semplice.")
         
-        with st.spinner("Analisi curve di mercato..."):
+        with st.spinner("Elaborazione dati di mercato..."):
             df_market = carica_dati_mercato()
         
         if df_market.empty: 
@@ -910,7 +922,7 @@ if isin and (trigger_search or isin):
             col_search, col_kpi = st.columns([1, 3])
             with col_search:
                 isin_smart = st.text_input("Analizza ISIN", placeholder="IT...").strip().upper()
-                cat_view = st.selectbox("Filtra Categoria Ricerca", list(SOURCES_MAP.keys()))
+                cat_view = st.selectbox("Filtra Categoria Ricerca", list(MACRO_CATEGORIES.keys()))
                 
             if isin_smart and valida_isin(isin_smart):
                 row, info = cerca_db(isin_smart, cat_view)
@@ -919,13 +931,15 @@ if isin and (trigger_search or isin):
                 if d_smart:
                     # RILEVAMENTO CATEGORIA
                     cat_target = "Altro"
-                    desc_u = d_smart['desc'].upper()
-                    if "BTP" in desc_u or "BOT" in desc_u: cat_target = "Governativo"
-                    elif "BUND" in desc_u or "GERMANIA" in desc_u: cat_target = "Governativo"
-                    elif "BANCHE" in d_smart['fonte'].upper() or "INTESA" in desc_u or "UNICREDIT" in desc_u: cat_target = "Bancario"
-                    elif "CORP" in d_smart['fonte'].upper() or "ENI" in desc_u or "STELLANTIS" in desc_u: cat_target = "Corporate"
+                    desc_upp = d_smart['desc'].upper()
+                    fonte_upp = d_smart['fonte'].upper()
                     
-                    if cat_target == "Altro": # Fallback su categoria file
+                    if "BTP" in desc_upp or "BOT" in desc_upp or "ITALIA" in fonte_upp: cat_target = "Governativo"
+                    elif "BUND" in desc_upp or "GERMANIA" in desc_upp: cat_target = "Governativo"
+                    elif "BANCHE" in fonte_upp or "INTESA" in desc_upp or "UNICREDIT" in desc_upp: cat_target = "Bancario"
+                    elif "CORP" in fonte_upp or "ENI" in desc_upp or "STELLANTIS" in desc_upp: cat_target = "Corporate"
+                    
+                    if cat_target == "Altro":
                         if "GOVERNATIVI" in cat_view: cat_target = "Governativo"
                         elif "FINANZIARI" in cat_view: cat_target = "Bancario"
                         elif "CORPORATE" in cat_view: cat_target = "Corporate"
@@ -933,7 +947,7 @@ if isin and (trigger_search or isin):
                     d_smart['isin'] = isin_smart
                     d_smart['Categoria'] = cat_target
                     
-                    # CALCOLI
+                    # CALCOLI BASE
                     ytm_s = calcola_rendimento_grezzo(d_smart['pr'], d_smart['ced'], d_smart['sc'])
                     risk_metrics = calcola_metriche_rischio(d_smart['pr'], d_smart['ced'], d_smart['sc'], d_smart['freq'])
                     duration = risk_metrics['mod_dur'] if risk_metrics else 0
@@ -942,7 +956,6 @@ if isin and (trigger_search or isin):
                     st.divider()
                     st.subheader(f"📊 Market Landscape: {cat_target}")
                     
-                    # BOX GUIDA GRAFICO
                     st.info("""
                     **👀 Guida alla Lettura:**
                     * **💎 Diamante Magenta (TU):** Il tuo bond.
@@ -950,7 +963,7 @@ if isin and (trigger_search or isin):
                     * **🟡 Linea Gialla (Media Categoria):** La media dei bond simili (es. curva BTP).
                     """)
                     
-                    # GRAFICO
+                    # 1. SCATTER PLOT
                     range_zoom = 4
                     df_zoom = df_market[
                         (df_market['Anni'] >= anni_scadenza - range_zoom) & 
@@ -962,7 +975,7 @@ if isin and (trigger_search or isin):
                         df_zoom, x='Anni', y='YTM_Grezzo', color='Categoria', 
                         hover_data={'ISIN': True, 'Desc': True, 'Prezzo': ':.2f', 'YTM_Grezzo': ':.2f', 'Categoria': False},
                         color_discrete_map={"Governativo": "#00CC96", "Bancario": "#AB63FA", "Corporate": "#636EFA", "Altro": "#EF553B"},
-                        opacity=0.6, labels={'Anni': 'Anni alla Scadenza', 'YTM_Grezzo': 'Rendimento Lordo (%)'}
+                        opacity=0.7, labels={'Anni': 'Anni alla Scadenza', 'YTM_Grezzo': 'Rendimento Lordo (%)'}
                     )
                     
                     x_trend = np.linspace(df_zoom['Anni'].min(), df_zoom['Anni'].max(), 100)
@@ -1000,7 +1013,7 @@ if isin and (trigger_search or isin):
                         marker=dict(color='#FF00FF', size=25, symbol='diamond', line=dict(width=2, color='White'))
                     ))
                     
-                    fig.update_layout(template="plotly_dark", height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                    fig.update_layout(template="plotly_dark", height=450, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                     
                     selected_point = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
                     if selected_point and len(selected_point['selection']['points']) > 0:
@@ -1011,70 +1024,108 @@ if isin and (trigger_search or isin):
                                 st.session_state.page = "Scanner"; st.rerun()
                         except: pass
 
-                    # --- TERMOMETRO VALORE ---
+                    # 2. ANALISI Z-SCORE (TERMOMETRO) - REINTEGRATE LE SPIEGAZIONI
                     st.divider()
-                    st.subheader("🌡️ Termometro del Valore")
+                    st.subheader("🌡️ Analisi del Valore (Relativo alla Categoria)")
                     
                     c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
-                    c_kpi1.metric("Rendimento Lordo", f"{ytm_s:.2f}%", help="Il tuo rendimento annuo pre-tasse.")
-                    c_kpi2.metric(f"Fair Value ({cat_target})", f"{fair_yield:.2f}%", help="La media matematica dei bond simili.")
+                    
+                    # KPI CON TOOLTIPS EDUCATIVI
+                    c_kpi1.metric("Rendimento Lordo", f"{ytm_s:.2f}%", 
+                                  help="È il rendimento annuo totale PRIMA delle tasse. Si usa il lordo per confrontare bond con tassazioni diverse (es. BTP vs Corporate).")
+                    
+                    c_kpi2.metric(f"Fair Value ({cat_target})", f"{fair_yield:.2f}%", 
+                                  help=f"È il rendimento 'giusto' calcolato matematicamente. Rappresenta la media di quanto rendono oggi tutti gli altri bond {cat_target} con scadenza {anni_scadenza:.1f} anni.")
                     
                     verdetto = ""; colore_box = ""; spiegazione = ""
-                    if z_score > 1.2: verdetto = "💎 SOTTOVALUTATO (Cheap)"; colore_box = "rgba(0, 204, 150, 0.2)"; spiegazione = f"Rendi il **{delta_spread:+.2f}%** IN PIÙ della media. Ottimo, se l'emittente è solido."
-                    elif z_score > 0.4: verdetto = "✅ BUON VALORE"; colore_box = "rgba(0, 204, 150, 0.1)"; spiegazione = f"Sei sopra la media ({delta_spread:+.2f}%). Buon punto di ingresso."
-                    elif z_score < -1.2: verdetto = "❌ SOPRAVALUTATO (Caro)"; colore_box = "rgba(255, 75, 75, 0.2)"; spiegazione = f"Rendi molto meno della media ({delta_spread:+.2f}%). Bond costoso (forse molto sicuro?)."
-                    else: verdetto = "⚖️ FAIR VALUE (Giusto)"; colore_box = "rgba(128, 128, 128, 0.1)"; spiegazione = "Il prezzo è perfettamente in linea con il mercato."
+                    if z_score > 1.2: verdetto = "💎 SOTTOVALUTATO (Cheap)"; colore_box = "rgba(0, 204, 150, 0.2)"; spiegazione = f"Rende il **{delta_spread:+.2f}%** in più rispetto alla curva {cat_target}. Potrebbe essere un affare o incorporare un rischio specifico."
+                    elif z_score > 0.4: verdetto = "✅ BUON VALORE"; colore_box = "rgba(0, 204, 150, 0.1)"; spiegazione = f"Rende leggermente sopra la media ({delta_spread:+.2f}%). Un buon acquisto difensivo."
+                    elif z_score < -1.2: verdetto = "❌ SOPRAVALUTATO (Rich)"; colore_box = "rgba(255, 75, 75, 0.2)"; spiegazione = f"Rende molto meno ({delta_spread:+.2f}%) della media. È caro. Probabilmente è un emittente ultra-sicuro o molto liquido."
+                    elif z_score < -0.4: verdetto = "⚠️ RENDIMENTO BASSO"; colore_box = "rgba(255, 170, 0, 0.1)"; spiegazione = f"Rende sotto la media ({delta_spread:+.2f}%). Ci sono alternative più redditizie a parità di rischio."
+                    else: verdetto = "⚖️ FAIR VALUE"; colore_box = "rgba(128, 128, 128, 0.1)"; spiegazione = "Il prezzo è allineato al mercato. Non ci sono anomalie."
 
-                    c_kpi3.metric("Spread vs Media", f"{delta_spread:+.2f}%", delta_color="normal")
-                    st.markdown(f"""<div style="background-color: {colore_box}; padding: 15px; border-radius: 10px; border-left: 5px solid white;"><h3>{verdetto}</h3><p>{spiegazione}</p></div>""", unsafe_allow_html=True)
+                    c_kpi3.metric("Spread vs Media", f"{delta_spread:+.2f}%", delta_color="normal", 
+                                  help="La differenza tra il TUO rendimento e il FAIR VALUE. Se è positivo (+), stai ottenendo un rendimento extra rispetto alla media.")
 
-                    # --- TOOLS AVANZATI (STRESS TEST & EFFICENCY) ---
+                    st.markdown(f"""<div style="background-color: {colore_box}; padding: 15px; border-radius: 10px; border-left: 5px solid white; margin-bottom: 20px;"><h3>{verdetto}</h3><p>{spiegazione}</p></div>""", unsafe_allow_html=True)
+
+                    # EXPANDER EDUCATIVO
+                    with st.expander("🎓 Come leggere questi dati (Clicca per info)"):
+                        st.markdown("""
+                        * **Rendimento Lordo:** Quanto rende il bond senza contare le tasse (utile per i confronti puri).
+                        * **Fair Value:** Immaginalo come il "prezzo di listino" del mercato. Se il grafico mostra una linea gialla, quello è il Fair Value.
+                        * **Spread:** È il tuo vantaggio. Se compri un bond con Spread positivo, stai comprando "a sconto" rispetto alla media della sua categoria.
+                        """)
+
+                    # --- STRUMENTI PRO (RISCHIO & EFFICIENZA) ---
                     st.divider()
-                    st.subheader("🛠️ Strumenti Pro")
+                    st.subheader("🛠️ Strumenti Pro: Rischio & Efficienza")
                     
                     col_stress, col_efficiency = st.columns([3, 2])
                     
+                    # 3. STRESS TEST (MATRICE DI RISCHIO)
                     with col_stress:
-                        st.markdown("**🌪️ Stress Test (Se i tassi cambiano...)**")
-                        shocks = [-1.0, -0.5, 0.0, +0.5, +1.0]
-                        prices = []; pnl_pct = []
+                        st.markdown("**🌪️ Stress Test Tassi (Cosa succede se...?)**")
+                        st.caption("Simulazione dell'impatto sul prezzo se la BCE alza o abbassa i tassi oggi.")
+                        
+                        shocks = [-1.0, -0.5, 0.0, +0.5, +1.0, +2.0]
+                        prices = []
+                        pnl_pct = []
+                        
                         for s in shocks:
                             px_estim = d_smart['pr'] * (1 - (duration * (s/100)))
+                            change = px_estim - d_smart['pr']
                             prices.append(f"{px_estim:.2f}€")
-                            pnl_pct.append(px_estim - d_smart['pr'])
-                        
-                        df_stress = pd.DataFrame({"Variazione Tassi": [f"{s:+.1f}%" for s in shocks], "Nuovo Prezzo": prices, "P&L Stimato": [f"{p:+.2f}€" for p in pnl_pct]})
+                            pnl_pct.append(change)
+
+                        df_stress = pd.DataFrame({
+                            "Variazione Tassi": [f"{s:+.1f}%" for s in shocks],
+                            "Nuovo Prezzo": prices,
+                            "Perdita/Guadagno": [f"{ (p/d_smart['pr'])*100 :+.2f}%" for p in pnl_pct]
+                        })
                         
                         def color_stress(val):
                             if "0.00" in val: return ""
                             return 'color: #ff4b4b' if '-' in val else 'color: #00cc96'
-                        
-                        st.dataframe(df_stress.style.map(color_stress, subset=['P&L Stimato']), use_container_width=True, hide_index=True)
 
+                        st.dataframe(df_stress.style.map(color_stress, subset=['Perdita/Guadagno']), use_container_width=True, hide_index=True)
+
+                    # 4. EFFICIENZA (YIELD PER DURATION)
                     with col_efficiency:
-                        st.markdown("**🍋 Efficienza & Composizione**")
-                        eff_score = ytm_s / duration if duration > 0 else 0
-                        col_eff = "green" if eff_score > 0.7 else "orange" if eff_score > 0.4 else "red"
+                        st.markdown("**🍋 Efficienza del Rischio**")
                         
-                        st.metric("Yield/Duration", f"{eff_score:.2f}x", help="Rendimento per unità di rischio.")
-                        st.caption(f"Giudizio: :{col_eff}[**{ 'Ottimo' if eff_score>0.7 else 'Medio' if eff_score>0.4 else 'Basso' }**]")
+                        efficiency_score = ytm_s / duration if duration > 0 else 0
+                        eff_label = "Eccellente" if efficiency_score > 0.8 else "Buona" if efficiency_score > 0.5 else "Bassa"
+                        eff_color = "green" if efficiency_score > 0.8 else "orange" if efficiency_score > 0.5 else "red"
                         
-                        # Torta Risk Free vs Spread
-                        risk_free_val = p_bund(anni_scadenza) if 'p_bund' in locals() else 2.5
-                        spread_val = max(0, ytm_s - risk_free_val)
+                        st.metric("Yield / Duration Ratio", f"{efficiency_score:.2f}x", help="Indica quanto rendimento ottieni per ogni unità di rischio (Duration) che ti assumi.")
+                        st.markdown(f"Giudizio: :{eff_color}[**{eff_label}**]")
+                        st.caption(f"Per ogni anno di durata (rischio), questo bond ti paga il **{efficiency_score:.2f}%** di rendimento.")
                         
-                        df_pie = pd.DataFrame({"Comp": ["Risk Free (Bund)", "Spread Rischio"], "Val": [risk_free_val, spread_val]})
-                        fig_pie = px.pie(df_pie, values='Val', names='Comp', hole=0.6, color_discrete_sequence=['#2E86C1', '#E74C3C'])
-                        fig_pie.update_layout(showlegend=False, height=150, margin=dict(t=0, b=0, l=0, r=0), annotations=[dict(text=f"{ytm_s:.1f}%", x=0.5, y=0.5, font_size=14, showarrow=False)])
-                        st.markdown("**Composizione Rendimento**")
+                        st.markdown("---")
+                        
+                        risk_free_proxy = 2.50 
+                        spread_implied = max(0, ytm_s - risk_free_proxy)
+                        
+                        df_decomp = pd.DataFrame({
+                            "Componente": ["Tasso Base (Risk Free)", "Premio Rischio (Spread)"],
+                            "Valore": [risk_free_proxy, spread_implied]
+                        })
+                        fig_pie = px.pie(df_decomp, values='Valore', names='Componente', hole=0.6, 
+                                        color_discrete_sequence=['#2E86C1', '#E74C3C'])
+                        fig_pie.update_layout(showlegend=False, height=150, margin=dict(t=0, b=0, l=0, r=0),
+                                            annotations=[dict(text=f"{ytm_s:.1f}%", x=0.5, y=0.5, font_size=16, showarrow=False)])
+                        st.markdown("**🍔 Composizione Rendimento**")
                         st.plotly_chart(fig_pie, use_container_width=True)
 
                     # --- ALTERNATIVE ---
                     st.divider()
-                    st.subheader(f"🔄 Alternative Smart ({cat_target})")
+                    st.subheader(f"🔄 Smart Switch ({cat_target})")
+                    st.caption(f"Bond {cat_target} con durata simile che offrono un rendimento migliore.")
                     alternative = trova_alternative_migliori(d_smart, df_market, categoria_obbligatoria=cat_target)
                     
                     if not alternative.empty:
+                        alternative['Efficienza'] = alternative['YTM_Netto'] / (alternative['Anni'] + 0.1) 
                         st.dataframe(
                             alternative[['Tipologia', 'ISIN', 'Desc', 'Prezzo', 'YTM_Netto', 'Extra', 'Link']],
                             column_config={
@@ -1083,12 +1134,14 @@ if isin and (trigger_search or isin):
                                 "Extra": st.column_config.NumberColumn("Delta", format="%+.2f%%"),
                                 "Prezzo": st.column_config.NumberColumn("Prezzo", format="%.2f€")
                             },
-                            use_container_width=True, hide_index=True
+                            use_container_width=True,
+                            hide_index=True
                         )
-                    else: st.success("Nessuna alternativa migliore trovata.")
+                    else:
+                        st.success(f"🏆 Il tuo bond è già tra i migliori {cat_target} per questa scadenza.")
 
-                else: st.error("ISIN non trovato.")
-            else: st.info("Inserisci un ISIN.")
+                else: st.error("ISIN non trovato nel database.")
+            else: st.info("Inserisci un ISIN per iniziare l'analisi.")
 
     elif st.session_state.page == "Confronto":
         st.title("⚔️ Confronto")
