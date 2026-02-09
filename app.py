@@ -11,6 +11,9 @@ import plotly.express as px
 import os
 from scipy.optimize import newton
 import hashlib
+import json
+from typing import Dict, List, Optional
+import plotly.figure_factory as ff
 
 # ==============================================================================
 # 1. CONFIGURAZIONE PAGINA E STILI CSS
@@ -103,6 +106,8 @@ def init_session_state():
     
     if 'portfolio' not in st.session_state: st.session_state.portfolio = []
     if 'confronto' not in st.session_state: st.session_state.confronto = None
+    if 'alerts' not in st.session_state: st.session_state.alerts = []
+    
     if 'logged_in' not in st.session_state: 
         found_user = None
         if session_token:
@@ -596,6 +601,578 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
 
     return pd.DataFrame(flussi), spesa_totale, incasso_totale, costo_rateo_netto, totale_cedole_nette, plusvalenza_netta
 
+# -----------------------------------------------------------------------------
+# 🆕 FUNZIONALITÀ RETAIL AVANZATE
+# -----------------------------------------------------------------------------
+
+# 1. BOND SCREENER INTELLIGENTE
+def bond_screener_ui():
+    """Interfaccia Bond Screener con filtri avanzati"""
+    st.title("🎯 Bond Screener Intelligente")
+    st.caption("Trova i bond perfetti per te con filtri combinati")
+    
+    # Carica mercato
+    with st.spinner("Caricamento database..."):
+        df_market = carica_dati_mercato()
+        if df_market.empty:
+            st.error("❌ Database vuoto. Aggiorna dalla sidebar.")
+            return
+        
+    st.divider()
+    
+    # === FILTRI ===
+    st.subheader("🔧 I Tuoi Filtri")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("**📊 Rendimento**")
+        ytm_min = st.number_input("YTM Minimo %", value=0.0, step=0.5)
+        ytm_max = st.number_input("YTM Massimo %", value=15.0, step=0.5)
+        
+    with col2:
+        st.markdown("**⏰ Scadenza**")
+        anni_min = st.number_input("Scadenza Min (anni)", value=0.0, step=0.5)
+        anni_max = st.number_input("Scadenza Max (anni)", value=30.0, step=1.0)
+        
+    with col3:
+        st.markdown("**💰 Prezzo**")
+        prezzo_min = st.number_input("Prezzo Min", value=50.0, step=5.0)
+        prezzo_max = st.number_input("Prezzo Max", value=150.0, step=5.0)
+
+    # Filtri categoria
+    col4, col5 = st.columns(2)
+    
+    with col4:
+        categorie_sel = st.multiselect(
+            "🏷️ Categorie",
+            options=df_market['Categoria'].unique().tolist(),
+            default=df_market['Categoria'].unique().tolist()
+        )
+    with col5:
+        ordinamento = st.selectbox(
+            "📊 Ordina per",
+            ["YTM_Grezzo (Decrescente)", "YTM_Grezzo (Crescente)", 
+             "Prezzo (Decrescente)", "Prezzo (Crescente)",
+             "Scadenza (Più vicina)", "Scadenza (Più lontana)"]
+        )
+
+    # === APPLICAZIONE FILTRI ===
+    if st.button("🔍 Cerca Bond", type="primary"):
+        filtered = df_market[
+            (df_market['YTM_Grezzo'] >= ytm_min) &
+            (df_market['YTM_Grezzo'] <= ytm_max) &
+            (df_market['Anni'] >= anni_min) &
+            (df_market['Anni'] <= anni_max) &
+            (df_market['Prezzo'] >= prezzo_min) &
+            (df_market['Prezzo'] <= prezzo_max) &
+            (df_market['Categoria'].isin(categorie_sel))
+        ]
+        
+        # Ordinamento
+        if "Decrescente" in ordinamento:
+            filtered = filtered.sort_values(ordinamento.split()[0], ascending=False)
+        elif "Crescente" in ordinamento:
+            filtered = filtered.sort_values(ordinamento.split()[0], ascending=True)
+        elif "vicina" in ordinamento:
+            filtered = filtered.sort_values('Anni', ascending=True)
+        else:
+            filtered = filtered.sort_values('Anni', ascending=False)
+            
+        # === RISULTATI ===
+        if filtered.empty:
+            st.warning("⚠️ Nessun bond trovato. Rilassa i filtri.")
+        else:
+            st.success(f"✅ Trovati **{len(filtered)}** bond!")
+            
+            # Mostra risultati
+            st.dataframe(
+                filtered[['ISIN', 'Desc', 'Prezzo', 'YTM_Grezzo', 'Anni', 'Categoria']].head(50).style.format({
+                    'Prezzo': '{:.2f}€',
+                    'YTM_Grezzo': '{:.2f}%',
+                    'Anni': '{:.1f}'
+                }),
+                use_container_width=True
+            )
+            
+            # Export CSV
+            csv = filtered.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "💾 Scarica Risultati (CSV)",
+                csv,
+                f"bond_screener_{date.today()}.csv",
+                "text/csv"
+            )
+            
+            # Grafico distribuzione
+            fig = px.scatter(
+                filtered.head(100), 
+                x='Anni', 
+                y='YTM_Grezzo',
+                color='Categoria',
+                size='Prezzo',
+                hover_data=['ISIN', 'Desc'],
+                title="📊 Distribuzione Risultati"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+# 2. DASHBOARD MERCATO
+def dashboard_mercato_ui():
+    """Dashboard con vista mercato completa"""
+    st.title("📊 Dashboard Mercato Bond")
+    st.caption("Vista d'insieme del mercato obbligazionario oggi")
+    
+    with st.spinner("Caricamento dati mercato..."):
+        df = carica_dati_mercato()
+        if df.empty:
+            st.error("❌ Database vuoto.")
+            return
+    
+    # === KPI GLOBALI ===
+    st.subheader("📈 Statistiche Mercato")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Bond Disponibili", len(df))
+    col2.metric("YTM Medio", f"{df['YTM_Grezzo'].mean():.2f}%")
+    col3.metric("Prezzo Medio", f"{df['Prezzo'].mean():.2f}€")
+    col4.metric("Scadenza Media", f"{df['Anni'].mean():.1f} anni")
+    
+    st.divider()
+    
+    # === TOP 10 RENDIMENTI ===
+    st.subheader("🏆 Top 10 Rendimenti (YTM Lordo)")
+    
+    top10 = df.nlargest(10, 'YTM_Grezzo')
+    col_tab, col_chart = st.columns([1, 1])
+    with col_tab:
+        st.dataframe(
+            top10[['ISIN', 'Desc', 'YTM_Grezzo', 'Prezzo']].style.format({
+                'YTM_Grezzo': '{:.2f}%',
+                'Prezzo': '{:.2f}€'
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+    with col_chart:
+        fig_top = px.bar(
+            top10,
+            x='YTM_Grezzo',
+            y='Desc',
+            orientation='h',
+            color='YTM_Grezzo',
+            color_continuous_scale='RdYlGn'
+        )
+        fig_top.update_layout(showlegend=False, height=400)
+        st.plotly_chart(fig_top, use_container_width=True)
+    
+    st.divider()
+    
+    # === RENDIMENTI PER CATEGORIA ===
+    st.subheader("📊 Rendimenti per Categoria")
+    
+    df_cat = df.groupby('Categoria').agg({
+        'YTM_Grezzo': 'mean',
+        'ISIN': 'count'
+    }).reset_index()
+    df_cat.columns = ['Categoria', 'YTM Medio', 'Numero Bond']
+    
+    fig_cat = px.bar(
+        df_cat,
+        x='Categoria',
+        y='YTM Medio',
+        text='YTM Medio',
+        color='YTM Medio',
+        color_continuous_scale='Viridis'
+    )
+    fig_cat.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
+    st.plotly_chart(fig_cat, use_container_width=True)
+    
+    st.divider()
+    
+    # === HEATMAP SCADENZA vs RENDIMENTO ===
+    st.subheader("🔥 Heatmap: Scadenza vs Rendimento")
+    
+    # Crea bucket
+    df['Bucket_Scadenza'] = pd.cut(df['Anni'], bins=[0, 2, 5, 10, 15, 30], labels=['0-2y', '2-5y', '5-10y', '10-15y', '15-30y'])
+    
+    pivot = df.pivot_table(
+        values='YTM_Grezzo',
+        index='Categoria',
+        columns='Bucket_Scadenza',
+        aggfunc='mean'
+    ).fillna(0)
+    
+    fig_heat = px.imshow(
+        pivot,
+        text_auto='.2f',
+        color_continuous_scale='RdYlGn',
+        labels={'color': 'YTM %'}
+    )
+    st.plotly_chart(fig_heat, use_container_width=True)
+
+# 3. CALCOLATORE DIVERSIFICAZIONE
+def diversificazione_portfolio_ui():
+    """Calcolatore diversificazione automatica"""
+    st.title("🧮 Calcolatore Diversificazione Portafoglio")
+    st.caption("Costruisci un portafoglio bilanciato automaticamente")
+    
+    st.info("""
+    **💡 Cos'è la Diversificazione?**
+    
+    È la strategia di **NON mettere tutte le uova nello stesso paniere**.
+    
+    Questo strumento ti aiuta a:
+    - Distribuire il capitale su più bond
+    - Evitare concentrazione su un singolo emittente
+    - Bilanciare scadenze (Bond Ladder)
+    - Ottimizzare rendimento/rischio
+    """)
+    
+    st.divider()
+    
+    # === INPUT UTENTE ===
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        capitale_tot = st.number_input(
+            "💰 Capitale Totale (€)",
+            min_value=5000.0,
+            value=50000.0,
+            step=5000.0
+        )
+    with col2:
+        num_bond = st.slider(
+            "🎯 Numero Bond",
+            min_value=3,
+            max_value=10,
+            value=5
+        )
+    with col3:
+        profilo = st.selectbox(
+            "⚠️ Profilo Rischio",
+            ["Conservativo", "Moderato", "Aggressivo"]
+        )
+    
+    # Preferenze avanzate
+    with st.expander("⚙️ Opzioni Avanzate"):
+        solo_gov = st.checkbox("Solo Governativi", value=True)
+        max_per_bond_pct = st.slider("Max % per singolo bond", 10, 50, 25)
+        anni_target = st.slider("Scadenza target (anni)", 1, 15, 5)
+    
+    # === COSTRUZIONE PORTAFOGLIO ===
+    if st.button("🚀 Costruisci Portafoglio", type="primary"):
+        with st.spinner("Ottimizzazione in corso..."):
+            df_market = carica_dati_mercato()
+            
+            if df_market.empty:
+                st.error("Database vuoto")
+                return
+            
+            # Filtra per profilo rischio
+            if profilo == "Conservativo":
+                df_filt = df_market[df_market['Categoria'] == 'Governativo']
+            elif profilo == "Moderato":
+                df_filt = df_market[df_market['Categoria'].isin(['Governativo', 'Bancario'])]
+            else:
+                df_filt = df_market
+            
+            if solo_gov:
+                df_filt = df_filt[df_filt['Categoria'] == 'Governativo']
+            
+            # Crea ladder scadenze
+            df_filt = df_filt[
+                (df_filt['Anni'] >= anni_target * 0.5) &
+                (df_filt['Anni'] <= anni_target * 1.5)
+            ]
+            
+            if len(df_filt) < num_bond:
+                st.warning(f"Trovati solo {len(df_filt)} bond. Rilassa i filtri.")
+                return
+            
+            # Seleziona bond
+            step_anni = (df_filt['Anni'].max() - df_filt['Anni'].min()) / num_bond
+            
+            portfolio = []
+            capitale_per_bond = capitale_tot / num_bond
+            max_capitale_per_bond = (capitale_tot * max_per_bond_pct) / 100
+            
+            for i in range(num_bond):
+                anni_min_bucket = df_filt['Anni'].min() + (i * step_anni)
+                anni_max_bucket = anni_min_bucket + step_anni
+                
+                bucket = df_filt[
+                    (df_filt['Anni'] >= anni_min_bucket) &
+                    (df_filt['Anni'] < anni_max_bucket)
+                ]
+                
+                if not bucket.empty:
+                    # Seleziona migliore per YTM
+                    best = bucket.nlargest(1, 'YTM_Grezzo').iloc[0]
+                    
+                    alloc = min(capitale_per_bond, max_capitale_per_bond)
+                    
+                    portfolio.append({
+                        'ISIN': best['ISIN'],
+                        'Desc': best['Desc'],
+                        'Categoria': best['Categoria'],
+                        'YTM': best['YTM_Grezzo'],
+                        'Scadenza': best['Scadenza'],
+                        'Anni': best['Anni'],
+                        'Allocazione': alloc,
+                        'Peso %': (alloc / capitale_tot) * 100
+                    })
+            
+            df_port = pd.DataFrame(portfolio)
+            
+            # === RISULTATI ===
+            st.success(f"✅ Portafoglio costruito con {len(df_port)} bond!")
+            
+            # Metriche
+            m1, m2, m3, m4 = st.columns(4)
+            
+            m1.metric("Capitale Allocato", f"{df_port['Allocazione'].sum():,.0f}€")
+            m2.metric("YTM Medio Ponderato", f"{(df_port['YTM'] * df_port['Allocazione']).sum() / df_port['Allocazione'].sum():.2f}%")
+            m3.metric("Scadenza Media", f"{(df_port['Anni'] * df_port['Allocazione']).sum() / df_port['Allocazione'].sum():.1f} anni")
+            m4.metric("Diversificazione", f"{len(df_port['Categoria'].unique())} categorie")
+            
+            st.divider()
+            
+            # Tabella
+            st.subheader("📋 Il Tuo Portafoglio")
+            
+            st.dataframe(
+                df_port.style.format({
+                    'YTM': '{:.2f}%',
+                    'Anni': '{:.1f}',
+                    'Allocazione': '{:,.0f}€',
+                    'Peso %': '{:.1f}%'
+                }),
+                use_container_width=True
+            )
+            
+            # Grafici
+            col_pie, col_bar = st.columns(2)
+            
+            with col_pie:
+                fig_pie = px.pie(
+                    df_port,
+                    values='Allocazione',
+                    names='Desc',
+                    title='Allocazione Capitale'
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            with col_bar:
+                fig_bar = px.bar(
+                    df_port,
+                    x='Anni',
+                    y='Allocazione',
+                    color='YTM',
+                    title='Distribuzione Scadenze'
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+            
+            # Verifica concentrazione
+            st.divider()
+            st.subheader("🛡️ Verifica Rischi")
+            
+            max_peso = df_port['Peso %'].max()
+            
+            if max_peso > 30:
+                st.error(f"⚠️ ATTENZIONE: Un bond pesa il {max_peso:.1f}% (troppo!). Riduci a <25%")
+            elif max_peso > 25:
+                st.warning(f"⚠️ Un bond pesa il {max_peso:.1f}%. OK, ma attenzione.")
+            else:
+                st.success(f"✅ Massimo peso: {max_peso:.1f}%. Diversificazione ottima!")
+
+# 4. SIMULATORE GUADAGNO FINALE
+def simulatore_guadagno_ui():
+    """Simulatore 'Quanto avrò tra X anni?'"""
+    st.title("💰 Simulatore: Quanto Guadagno DAVVERO?")
+    st.caption("Calcolo esatto del guadagno finale")
+    
+    st.info("""
+    **🎯 A cosa serve?**
+    
+    Ti dice **ESATTAMENTE** quanti euro avrai tra X anni, considerando:
+    - ✅ Tutte le cedole nette
+    - ✅ Il rimborso finale
+    - ✅ Le tasse (12.5% o 26%)
+    - ✅ Le commissioni
+    - ✅ L'inflazione
+    """)
+    
+    st.divider()
+    
+    # Input ISIN
+    isin_sim = st.text_input("ISIN da Simulare", placeholder="IT...").strip().upper()
+    
+    if isin_sim and valida_isin(isin_sim):
+        row, info = cerca_db(isin_sim, "🌐 TUTTE")
+        bond = processa_riga(row, info) if row is not None else None
+        
+        if bond:
+            st.success(f"✅ {bond['desc']}")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                inv = st.number_input("Investimento (€)", value=10000, step=1000)
+            
+            with col2:
+                comm = st.number_input("Commissioni (€)", value=5.0, step=1.0)
+            
+            with col3:
+                infl, _ = get_inflazione_ufficiale()
+                infl_sim = st.number_input("Inflazione %", value=infl, step=0.5)
+            
+            if st.button("📊 Calcola", type="primary"):
+                # Calcoli
+                tax = determina_tasse(bond['fonte'], bond['desc'])
+                df_flussi, spesa, incasso, _, ced_tot, plus = genera_flussi_dettagliati(
+                    bond, inv, tax, comm, bond['pr']
+                )
+                
+                guadagno = incasso - spesa
+                anni = (bond['sc'] - date.today()).days / 365.25
+                
+                # Inflazione
+                valore_reale = incasso / ((1 + infl_sim/100) ** anni)
+                perdita_infl = spesa - valore_reale
+                
+                st.divider()
+                
+                # === BOX RISULTATO FINALE ===
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #00CC96, #00AA76); padding: 30px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 8px 16px rgba(0,0,0,0.3);">
+                    <h1 style="margin: 0; font-size: 48px;">€ {incasso:,.2f}</h1>
+                    <p style="margin: 5px 0; font-size: 18px;">Avrai questa cifra alla scadenza ({bond['sc'].strftime('%d/%m/%Y')})</p>
+                    <hr style="border-color: rgba(255,255,255,0.3); margin: 15px 0;">
+                    <div style="display: flex; justify-content: space-around; font-size: 16px;">
+                        <div>
+                            <div style="opacity: 0.8;">Investito Oggi</div>
+                            <div style="font-size: 24px; font-weight: bold;">€ {spesa:,.2f}</div>
+                        </div>
+                        <div>
+                            <div style="opacity: 0.8;">Guadagno Netto</div>
+                            <div style="font-size: 24px; font-weight: bold;">+€ {guadagno:,.2f}</div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.divider()
+                
+                # Breakdown
+                st.subheader("🧾 Breakdown Dettagliato")
+                
+                col_left, col_right = st.columns(2)
+                
+                with col_left:
+                    st.markdown("**📥 USCITE**")
+                    st.write(f"Costo bond: {inv * bond['pr'] / 100:,.2f}€")
+                    st.write(f"Commissioni: {comm:,.2f}€")
+                    st.write(f"**TOTALE PAGATO: {spesa:,.2f}€**")
+                
+                with col_right:
+                    st.markdown("**📤 ENTRATE**")
+                    st.write(f"Cedole nette: {ced_tot:,.2f}€")
+                    st.write(f"Plusvalenza: {plus:,.2f}€")
+                    st.write(f"**TOTALE INCASSATO: {incasso:,.2f}€**")
+                
+                st.divider()
+                
+                # Inflazione
+                st.subheader("📉 Impatto Inflazione")
+                
+                st.error(f"""
+                **⚠️ ATTENZIONE ALL'INFLAZIONE!**
+                
+                I tuoi {incasso:,.2f}€ tra {anni:.1f} anni varranno solo **{valore_reale:,.2f}€** di oggi.
+                
+                Perdita potere d'acquisto: **-{perdita_infl:,.2f}€** ({(perdita_infl/spesa*100):.1f}%)
+                """)
+                
+                # Timeline
+                st.divider()
+                st.subheader("📅 Timeline Mese per Mese")
+                
+                st.dataframe(
+                    df_flussi.style.format({
+                        'Importo': '{:+,.2f}€',
+                        'Data': lambda x: x.strftime('%d/%m/%Y')
+                    }),
+                    use_container_width=True
+                )
+        else:
+            st.error("ISIN non trovato")
+
+# 5. SISTEMA ALERT
+def alert_manager_ui():
+    """Gestione alert personalizzati"""
+    st.title("🔔 Alert Intelligenti")
+    st.caption("Ricevi notifiche su opportunità di mercato")
+    
+    st.warning("⚠️ Funzione in sviluppo. Al momento puoi solo simulare gli alert.")
+    
+    # Inizializza session state per alert
+    if 'alerts' not in st.session_state:
+        st.session_state.alerts = []
+    
+    st.divider()
+    
+    # === CREA NUOVO ALERT ===
+    st.subheader("➕ Crea Nuovo Alert")
+    
+    tipo_alert = st.selectbox(
+        "Tipo Alert",
+        ["Prezzo Scende Sotto", "YTM Sale Sopra", "Nuova Emissione Categoria"]
+    )
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if tipo_alert == "Prezzo Scende Sotto":
+            isin_alert = st.text_input("ISIN da Monitorare")
+            target = st.number_input("Prezzo Target (€)", value=95.0)
+            
+        elif tipo_alert == "YTM Sale Sopra":
+            cat_alert = st.selectbox("Categoria", ["Governativo", "Bancario", "Corporate"])
+            target = st.number_input("YTM Minimo %", value=3.5)
+            
+        else:
+            cat_alert = st.selectbox("Categoria", ["BTP", "Corporate", "Bancari"])
+            target = None
+    
+    with col2:
+        metodo = st.radio("Metodo Notifica", ["Email", "App (Non disponibile)"], disabled=True)
+    
+    if st.button("✅ Attiva Alert"):
+        alert = {
+            'tipo': tipo_alert,
+            'target': target,
+            'data_creazione': date.today()
+        }
+        st.session_state.alerts.append(alert)
+        st.success("Alert attivato! (Simulazione)")
+    
+    st.divider()
+    
+    # === ALERT ATTIVI ===
+    st.subheader("📋 I Tuoi Alert Attivi")
+    
+    if st.session_state.alerts:
+        for i, alert in enumerate(st.session_state.alerts):
+            col_info, col_btn = st.columns([4, 1])
+            
+            with col_info:
+                st.info(f"**{alert['tipo']}** - Target: {alert.get('target', 'N/A')} - Creato: {alert['data_creazione']}")
+            
+            with col_btn:
+                if st.button("❌", key=f"del_{i}"):
+                    st.session_state.alerts.pop(i)
+                    st.rerun()
+    else:
+        st.info("Nessun alert attivo")
+
 # ==============================================================================
 # 7. INTERFACCIA UTENTE
 # ==============================================================================
@@ -623,11 +1200,21 @@ def main_app():
         if st.session_state.current_user:
             st.markdown(f"""<div class="user-box">👤 {st.session_state.current_user.capitalize()}</div>""", unsafe_allow_html=True)
         
+        # NAVIGAZIONE CLASSICA
         if st.button("🔎 Scanner", use_container_width=True): st.session_state.page = "Scanner"; st.rerun()
         if st.button("🧠 Smart Analysis", use_container_width=True): st.session_state.page = "SmartAnalysis"; st.rerun()
         if st.button("⚔️ Confronto", use_container_width=True): st.session_state.page = "Confronto"; st.rerun()
         if st.button("💼 Portafoglio", use_container_width=True): st.session_state.page = "Portafoglio"; st.rerun()
         
+        # NAVIGAZIONE TOOLS PRO
+        st.divider()
+        st.subheader("💎 TOOLS PRO")
+        if st.button("🎯 Screener", use_container_width=True): st.session_state.page = "Screener"; st.rerun()
+        if st.button("📊 Dashboard Mercato", use_container_width=True): st.session_state.page = "Dashboard"; st.rerun()
+        if st.button("🧮 Diversificazione", use_container_width=True): st.session_state.page = "Diversificazione"; st.rerun()
+        if st.button("💰 Simulatore Guadagno", use_container_width=True): st.session_state.page = "Simulatore"; st.rerun()
+        if st.button("🔔 Alert Manager", use_container_width=True): st.session_state.page = "Alerts"; st.rerun()
+
         st.divider()
         st.write("💰 **Il tuo Patrimonio**")
         st.session_state.patrimonio = st.number_input("Totale investibile (€)", min_value=10000.0, value=st.session_state.patrimonio, step=5000.0)
@@ -635,13 +1222,9 @@ def main_app():
         st.divider(); st.subheader("⚙️ SISTEMA")
         last = get_last_update_time()
         if last: 
-            # Calcolo delta su orario server (corretto per la logica semaforo)
             delta = (datetime.now() - last).total_seconds() / 3600
             color = "green" if delta < 24 else "orange"
-            
-            # FIX ORARIO ITALIA: Aggiungo 1 ora solo per quello che leggi a video
             last_ita = last + timedelta(hours=1)
-            
             st.markdown(f"📅 Aggiornato: :{color}[{last_ita.strftime('%d/%m %H:%M')}]")
         else: st.error("❌ Nessun Dato")
         
@@ -669,7 +1252,9 @@ def main_app():
             st.query_params.clear()
             st.rerun()
 
+    # ROUTING PAGINE
     if st.session_state.page == "Scanner":
+        # ... (Codice Scanner esistente)
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Inserisci un ISIN per analizzare il bond.")
         
@@ -733,7 +1318,7 @@ def main_app():
         if isin and (trigger_search or isin):
             if not valida_isin(isin): st.error("❌ ISIN non valido")
             else:
-                filtro_cat = cat_select if not isin_default else None
+                filtro_cat = cat_select if not isin_default else "🌐 TUTTE"
                 row, info = cerca_db(isin, filtro_cat)
                 d = processa_riga(row, info) if row is not None else None
                 
@@ -1247,6 +1832,21 @@ def main_app():
             st.dataframe(df)
             if st.button("Reset"): st.session_state.portfolio = []
         else: st.info("Portafoglio vuoto.")
+
+    elif st.session_state.page == "Screener":
+        bond_screener_ui()
+
+    elif st.session_state.page == "Dashboard":
+        dashboard_mercato_ui()
+
+    elif st.session_state.page == "Diversificazione":
+        diversificazione_portfolio_ui()
+
+    elif st.session_state.page == "Simulatore":
+        simulatore_guadagno_ui()
+
+    elif st.session_state.page == "Alerts":
+        alert_manager_ui()
 
 if st.session_state.logged_in: main_app()
 else: login()
