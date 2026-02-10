@@ -1286,127 +1286,147 @@ def main_app():
                     )
 
     # --- SMART ANALYSIS ---
-    elif st.session_state.page == "SmartAnalysis":
-        st.title("🧠 Smart Analysis")
-        st.caption("Confronta il tuo bond con il mercato reale e trova alternative.")
+elif st.session_state.page == "SmartAnalysis":
+        st.title("🧠 Smart Analysis & Confronto")
+        st.caption("Analisi di posizionamento: Il tuo bond vs La Curva di Mercato.")
         
         # 1. Caricamento Dati
-        with st.spinner("Analisi curve dei tassi..."):
+        with st.spinner("Generazione Yield Curve..."):
             df_m = carica_tutto_mercato()
         
         if df_m.empty: 
             st.warning("⚠️ Database vuoto. Vai su Aggiorna Dati.")
         else:
             c_s, _ = st.columns([1, 2])
-            isin_s = c_s.text_input("Inserisci ISIN da analizzare", placeholder="IT...").strip().upper()
+            isin_s = c_s.text_input("Inserisci ISIN da confrontare", placeholder="IT...").strip().upper()
             
             if isin_s:
-                # Cerca il bond specifico nel dataframe globale
                 target_bond = df_m[df_m['ISIN'] == isin_s]
                 
                 if not target_bond.empty:
-                    # Estrai dati bond target
                     b = target_bond.iloc[0]
                     ytm_target = b['YTM_Grezzo']
-                    # Calcolo anni residui dalla data scadenza
                     try:
                         anni_target = (pd.to_datetime(b['Scadenza']) - date.today()).days / 365.25
-                    except:
-                        anni_target = 0
+                    except: anni_target = 0
                     cat_target = b['Tipo']
                     
-                    # 2. METRICHE DI CONFRONTO
-                    # Filtra i "Peer" (stessa categoria)
-                    peers = df_m[df_m['Tipo'] == cat_target]
-                    avg_ytm = peers['YTM_Grezzo'].mean()
-                    spread = ytm_target - avg_ytm
+                    # Filtriamo il mercato per la STESSA categoria (confrontiamo mele con mele)
+                    # Escludiamo outlier assurdi (rendimenti negativi o > 15%) per pulire il grafico
+                    df_cloud = df_m[
+                        (df_m['Tipo'] == cat_target) & 
+                        (df_m['YTM_Grezzo'] > -1) & 
+                        (df_m['YTM_Grezzo'] < 12) &
+                        (df_m['Anni'] > 0)
+                    ].copy()
+
+                    # Calcolo Spread su Media
+                    avg_ytm = df_cloud['YTM_Grezzo'].mean()
                     
                     st.divider()
-                    st.subheader(f"📊 Analisi Posizionamento ({cat_target})")
-                    
                     k1, k2, k3 = st.columns(3)
                     k1.metric("Rendimento Tuo Bond", f"{ytm_target:.2f}%")
-                    k2.metric(f"Media Mercato {cat_target}", f"{avg_ytm:.2f}%")
-                    k3.metric("Spread vs Media", f"{spread:+.2f}%", delta_color="normal", 
-                              help="Se positivo, il tuo bond rende più della media della sua categoria.")
+                    k2.metric(f"Media Categoria {cat_target}", f"{avg_ytm:.2f}%")
+                    k3.metric("Posizione", "Sopra Media" if ytm_target > avg_ytm else "Sotto Media", 
+                              delta=f"{ytm_target - avg_ytm:.2f}%", delta_color="normal")
 
-                    # 3. GRAFICO SCATTER (Tu sei qui)
-                    st.markdown("##### 📍 Il tuo bond nella 'Nuvola' del mercato")
+                    # ---------------------------------------------------------
+                    # 2. GRAFICO SCATTER EVOLUTO (CLOUD + CURVA DI MERCATO)
+                    # ---------------------------------------------------------
+                    st.subheader(f"📍 Posizionamento su Curva dei Rendimenti")
                     
-                    # Filtro per pulire il grafico (zoom intelligente)
-                    df_zoom = df_m[
-                        (df_m['Tipo'] == cat_target) & 
-                        (df_m['YTM_Grezzo'] > -2) & 
-                        (df_m['YTM_Grezzo'] < 15) &
-                        (df_m['Anni'] > anni_target - 5) &
-                        (df_m['Anni'] < anni_target + 5)
-                    ].copy()
-                    
-                    # Creazione Grafico
-                    fig = px.scatter(
-                        df_zoom, x='Anni', y='YTM_Grezzo', 
-                        color='Tipo', opacity=0.5, 
-                        hover_data=['Descrizione', 'Prezzo'],
-                        color_discrete_map={'Governativo':'#00CC96', 'Corporate':'#636EFA', 'Bancario':'#AB63FA'},
-                        title=f"Yield Curve: {cat_target} (Zoom ±5 anni)"
-                    )
-                    
-                    # Aggiungi il marker del TUO bond (Rombo Gigante)
+                    fig = go.Figure()
+
+                    # A. La Nuvola (Tutti gli altri bond)
+                    fig.add_trace(go.Scatter(
+                        x=df_cloud['Anni'], 
+                        y=df_cloud['YTM_Grezzo'],
+                        mode='markers',
+                        marker=dict(color='rgba(255, 255, 255, 0.2)', size=6), # Punti semitrasparenti
+                        name='Mercato',
+                        text=df_cloud['Descrizione'], # Hover info
+                        hovertemplate="<b>%{text}</b><br>Scadenza: %{x:.1f} anni<br>YTM: %{y:.2f}%<extra></extra>"
+                    ))
+
+                    # B. La Curva di Tendenza (Media di Mercato)
+                    # Usiamo una regressione polinomiale per disegnare la curva media
+                    if len(df_cloud) > 10:
+                        try:
+                            # Calcolo trendline (grado 3 per curva morbida)
+                            z = np.polyfit(df_cloud['Anni'], df_cloud['YTM_Grezzo'], 3)
+                            p = np.poly1d(z)
+                            
+                            # Generiamo punti per la linea
+                            x_trend = np.linspace(df_cloud['Anni'].min(), df_cloud['Anni'].max(), 100)
+                            y_trend = p(x_trend)
+                            
+                            fig.add_trace(go.Scatter(
+                                x=x_trend, y=y_trend,
+                                mode='lines',
+                                line=dict(color='#FFD700', width=2, dash='dash'), # Giallo Oro tratteggiato
+                                name='Media di Mercato'
+                            ))
+                        except: pass
+
+                    # C. Il Tuo Bond (Diamante Verde)
                     fig.add_trace(go.Scatter(
                         x=[anni_target], y=[ytm_target],
-                        mode='markers+text',
-                        marker=dict(color='#FF00FF', size=25, symbol='diamond', line=dict(color='white', width=2)),
+                        mode='markers', # Solo Marker, niente testo
+                        marker=dict(color='#00CC96', size=15, symbol='diamond', line=dict(color='white', width=2)),
                         name='TUO BOND',
-                        text=["TU SEI QUI"], textposition="top center",
-                        textfont=dict(color='#FF00FF', size=14, family="Arial Black")
+                        hovertemplate="<b>IL TUO BOND</b><br>Scadenza: %{x:.1f} anni<br>YTM: %{y:.2f}%<extra></extra>"
                     ))
-                    
-                    fig.update_layout(template="plotly_dark", height=500, showlegend=False)
+
+                    fig.update_layout(
+                        template="plotly_dark", 
+                        height=500,
+                        xaxis_title="Scadenza (Anni)",
+                        yaxis_title="Rendimento Lordo (%)",
+                        legend=dict(orientation="h", y=1.05),
+                        margin=dict(l=20, r=20, t=20, b=20)
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # Analisi testuale
-                    if spread > 0.5:
-                        st.success("✅ **OTTIMO:** Questo bond rende decisamente più della media dei suoi simili!")
-                    elif spread < -0.5:
-                        st.error("❌ **ATTENZIONE:** Questo bond rende meno della media. Probabilmente è troppo caro.")
-                    else:
-                        st.info("⚖️ **FAIR:** Il rendimento è allineato al mercato.")
+                    st.info("""
+                    **Come leggere questo grafico:**
+                    * **Punti Bianchi:** Sono tutti gli altri bond disponibili sul mercato.
+                    * **Linea Gialla:** Rappresenta il rendimento "medio" per ogni scadenza.
+                    * **Diamante Verde:** È il tuo bond.
+                    * Se il tuo bond è **sopra la linea gialla**, offre un rendimento migliore della media per quella durata.
+                    """)
 
-                    # 4. SMART SWITCH (Alternative Migliori)
+                    # 3. TABELLA ALTERNATIVE (Bond simili ma migliori)
                     st.divider()
-                    st.subheader("🔄 Smart Switch: Esiste di meglio?")
-                    st.caption(f"Cerco bond {cat_target} con scadenza simile ({anni_target:.1f} anni ± 2) ma rendimento più alto.")
+                    st.subheader("🔄 Alternative a Parità di Scadenza")
+                    st.caption(f"Bond che scadono nello stesso periodo ({anni_target:.1f} anni ± 1.5) ma rendono di più.")
                     
-                    # Logica trova alternative
-                    alternatives = peers[
-                        (peers['Anni'] >= anni_target - 2) & 
-                        (peers['Anni'] <= anni_target + 2) &
-                        (peers['Prezzo'] <= 105) & 
-                        (peers['YTM_Grezzo'] > ytm_target + 0.10) # Almeno 0.10% in più
-                    ].sort_values('YTM_Grezzo', ascending=False).head(5).copy()
+                    # Filtro stretto sulla scadenza
+                    alternatives = df_cloud[
+                        (df_cloud['Anni'] >= anni_target - 1.5) & 
+                        (df_cloud['Anni'] <= anni_target + 1.5) &
+                        (df_cloud['YTM_Grezzo'] > ytm_target) & # Deve rendere di più
+                        (df_cloud['Prezzo'] <= 105) # Filtro prezzi folli
+                    ].sort_values('YTM_Grezzo', ascending=False).head(5)
                     
                     if not alternatives.empty:
-                        alternatives['Extra Rendimento'] = alternatives['YTM_Grezzo'] - ytm_target
-                        
+                        alternatives['Extra Spread'] = alternatives['YTM_Grezzo'] - ytm_target
                         st.dataframe(
-                            alternatives[['ISIN', 'Descrizione', 'Prezzo', 'YTM_Grezzo', 'Extra Rendimento']].style.format({
+                            alternatives[['ISIN', 'Descrizione', 'Prezzo', 'YTM_Grezzo', 'Extra Spread']].style.format({
                                 'Prezzo': '{:.2f} €',
                                 'YTM_Grezzo': '{:.2f}%',
-                                'Extra Rendimento': '+{:.2f}%'
+                                'Extra Spread': '+{:.2f}%'
                             }),
                             use_container_width=True,
                             hide_index=True
                         )
-                        st.caption("💡 Questi bond offrono un rendimento maggiore a parità di durata temporale.")
                     else:
-                        st.balloons()
-                        st.success("🏆 Complimenti! Non abbiamo trovato alternative nettamente migliori nel database. Hai scelto bene.")
+                        st.success("✅ Ottimo! Non ci sono bond nettamente migliori per questa scadenza nel database.")
 
                 else:
-                    st.error("❌ ISIN non trovato nel database caricato. Prova ad aggiornare i dati nella Sidebar.")
+                    st.error("❌ ISIN non trovato nel database.")
             else:
-                st.info("Inserisci un ISIN per avviare l'intelligenza artificiale.")
-
+                st.info("Inserisci un ISIN per avviare l'analisi comparativa.")
+                
     elif st.session_state.page == "Screener": bond_screener_ui()
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
