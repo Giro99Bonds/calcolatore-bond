@@ -1219,9 +1219,7 @@ def main_app():
                         st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi salgono dell\'1%, il prezzo scende del {risk["mod_dur"]:.1f}%.</div>', unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                  
-    )
-                   st.divider()
+                    st.divider()
                     
                     # === 💰 SIMULATORE DI INVESTIMENTO REALE (FIXED) ===
                     st.subheader("💰 Simulatore di Investimento Reale")
