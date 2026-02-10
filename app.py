@@ -1491,9 +1491,10 @@ def main_app():
             else: st.error("❌ ISIN non trovato.")
     # --- SCREENER AVANZATO (FILTRI VALUTA + CONVERSIONE PREZZI) ---
  # --- SCREENER AVANZATO (INPUT MANUALI + TUTTE LE VALUTE) ---
+# --- SCREENER AVANZATO (ALL SELECTED DEFAULT + RISCHIO CAMBIO) ---
     elif st.session_state.page == "Screener":
         st.title("⚡ Screener Avanzato")
-        st.caption("Filtra inserendo parametri precisi.")
+        st.caption("Tutto il mercato a colpo d'occhio. Filtra per escludere.")
         
         # 1. Caricamento Dati
         with st.spinner("Caricamento database bond..."):
@@ -1503,62 +1504,61 @@ def main_app():
             st.warning("⚠️ Database vuoto. Clicca 'Aggiorna Dati' nella sidebar.")
             st.stop()
 
-        # 2. Arricchimento Dati (Calcolo Valuta)
+        # 2. Arricchimento Dati
         if 'Valuta' not in df.columns:
             df['Valuta'] = df.apply(lambda x: detect_valuta(x['Descrizione'], x['ISIN']), axis=1)
 
         # ---------------------------------------------------------------------
-        # BARRA DEI FILTRI (INPUT NUMERICI + MULTI-VALUTA)
+        # BARRA DEI FILTRI (LOGICA "TUTTO INCLUSO")
         # ---------------------------------------------------------------------
-        with st.expander("🎛️ IMPOSTA FILTRI DI RICERCA", expanded=True):
+        with st.expander("🎛️ FILTRI DI RICERCA", expanded=True):
             
-            # RIGA 1: CATEGORIA E VALUTA DI VISUALIZZAZIONE
             r1_c1, r1_c2, r1_c3 = st.columns(3)
             
             with r1_c1:
-                # FILTRO VALUTA BOND (Origine)
+                # DEFAULT: TUTTE LE VALUTE SELEZIONATE
                 all_currencies = sorted(df['Valuta'].unique().tolist())
-                default_curr = ['EUR'] if 'EUR' in all_currencies else all_currencies[:1]
-                sel_currencies = st.multiselect("1. Includi Valute Bond", all_currencies, default=default_curr)
+                sel_currencies = st.multiselect(
+                    "1. Valute (Deseleziona per escludere)", 
+                    all_currencies, 
+                    default=all_currencies # <--- TUTTO SELEZIONATO DI DEFAULT
+                )
                 
             with r1_c2:
-                # FILTRO CATEGORIA (Con Emoji Corrette)
+                # DEFAULT: TUTTE LE CATEGORIE SELEZIONATE
+                all_cats = list(MACRO_CATEGORIES.keys())
                 sel_cat = st.multiselect(
-                    "2. Categoria Emittente", 
-                    list(MACRO_CATEGORIES.keys()), 
-                    default=["🏛️ GOVERNATIVI", "🏭 CORPORATE"]
+                    "2. Categorie (Deseleziona per escludere)", 
+                    all_cats, 
+                    default=all_cats # <--- TUTTO SELEZIONATO DI DEFAULT
                 )
                 
             with r1_c3:
-                # CONVERTITORE PREZZI (TUTTE LE VALUTE)
+                # VALUTA DI CONFRONTO (Il tuo conto)
                 target_currency = st.selectbox(
-                    "3. Visualizza Prezzi in...", 
-                    ["EUR", "USD", "GBP", "CHF", "TRY", "BRL", "RON", "JPY", "CAD", "AUD"], 
-                    index=0
+                    "3. Il tuo Conto è in...", 
+                    ["EUR", "USD", "GBP", "CHF"], 
+                    index=0,
+                    help="I prezzi verranno convertiti in questa valuta per farti capire quanto paghi davvero."
                 )
 
             st.divider()
             
-            # RIGA 2: FILTRI NUMERICI (INPUT MANUALI, NO SLIDER)
-            # Organizziamo in 3 colonne: Rendimento, Scadenza, Prezzo
-            
+            # FILTRI NUMERICI MANUALI
             col_y, col_d, col_p = st.columns(3)
             
-            # --- FILTRO RENDIMENTO ---
             with col_y:
                 st.markdown("📊 **Rendimento Lordo %**")
                 c_min, c_max = st.columns(2)
                 min_y = c_min.number_input("Min %", value=0.0, step=0.5)
                 max_y = c_max.number_input("Max %", value=100.0, step=0.5)
 
-            # --- FILTRO SCADENZA ---
             with col_d:
                 st.markdown("📅 **Scadenza (Anni)**")
                 c_min, c_max = st.columns(2)
                 min_d = c_min.number_input("Min Anni", value=0.0, step=1.0)
                 max_d = c_max.number_input("Max Anni", value=50.0, step=1.0)
 
-            # --- FILTRO PREZZO ---
             with col_p:
                 st.markdown("💰 **Prezzo Mercato**")
                 c_min, c_max = st.columns(2)
@@ -1568,92 +1568,90 @@ def main_app():
         # ---------------------------------------------------------------------
         # LOGICA DI FILTRAGGIO
         # ---------------------------------------------------------------------
-        # 1. Filtro Valuta
-        if sel_currencies:
-            df_filt = df[df['Valuta'].isin(sel_currencies)]
-        else:
-            df_filt = df 
+        # Se l'utente toglie tutto, mostriamo lista vuota o tutto? Meglio gestire l'errore.
+        if not sel_currencies or not sel_cat:
+            st.warning("⚠️ Seleziona almeno una Valuta e una Categoria.")
+            st.stop()
 
-        # 2. Filtro Categoria
-        if sel_cat:
-            df_filt = df_filt[df_filt['Tipo'].isin(sel_cat)]
-
-        # 3. Filtri Numerici (Usando i valori degli input)
-        df_filt = df_filt[
-            (df_filt['YTM_Grezzo'] >= min_y) & (df_filt['YTM_Grezzo'] <= max_y) &
-            (df_filt['Anni'] >= min_d) & (df_filt['Anni'] <= max_d) &
-            (df_filt['Prezzo'] >= min_p) & (df_filt['Prezzo'] <= max_p)
+        df_filt = df[
+            (df['Valuta'].isin(sel_currencies)) &
+            (df['Tipo'].isin(sel_cat)) &
+            (df['YTM_Grezzo'] >= min_y) & (df['YTM_Grezzo'] <= max_y) &
+            (df['Anni'] >= min_d) & (df['Anni'] <= max_d) &
+            (df['Prezzo'] >= min_p) & (df['Prezzo'] <= max_p)
         ]
 
-        # 4. CONVERSIONE PREZZI (Live su tutte le valute)
+        # 4. CONVERSIONE PREZZI & LOGICA RISCHIO
         if not df_filt.empty:
-            def converti_prezzo_display(row):
-                prezzo_orig = row['Prezzo']
+            # Cache del cambio per velocizzare
+            tassi_cache = {curr: get_tasso_cambio_live(target_currency, curr) for curr in df_filt['Valuta'].unique() if curr != target_currency}
+            
+            def processa_riga_display(row):
+                # 1. Conversione Prezzo
                 valuta_bond = row['Valuta']
-                
                 if valuta_bond == target_currency:
-                    return prezzo_orig
+                    pz_conv = row['Prezzo']
+                    note = "✅ Cambio Diretto"
+                else:
+                    rate = tassi_cache.get(valuta_bond, 1.0)
+                    pz_conv = row['Prezzo'] / rate if rate > 0 else 0
+                    note = "⚠️ Rischio Cambio"
                 
-                # Otteniamo cambio live 
-                rate = get_tasso_cambio_live(target_currency, valuta_bond) 
-                return prezzo_orig / rate if rate > 0 else 0
+                return pd.Series([pz_conv, note])
 
-            df_filt['Prezzo_Display'] = df_filt.apply(converti_prezzo_display, axis=1)
+            df_filt[['Prezzo_Display', 'Note_Rischio']] = df_filt.apply(processa_riga_display, axis=1)
         
         # ---------------------------------------------------------------------
         # VISUALIZZAZIONE RISULTATI
         # ---------------------------------------------------------------------
         st.divider()
-        st.subheader(f"🔍 Risultati: {len(df_filt)} Obbligazioni trovate")
+        st.subheader(f"🔍 Trovati {len(df_filt)} Bond")
 
         if not df_filt.empty:
-            # Ordiniamo per Rendimento decrescente di default
+            # Ordinamento: Default per Rendimento, ma evidenziamo il rischio
             df_filt = df_filt.sort_values(by='YTM_Grezzo', ascending=False)
             
-            # Preparazione Tabella
-            df_show = df_filt[['ISIN', 'Descrizione', 'Tipo', 'Valuta', 'Prezzo_Display', 'Scadenza', 'YTM_Grezzo']].copy()
+            # Preparazione Tabella Finale
+            df_show = df_filt[['ISIN', 'Descrizione', 'Tipo', 'Valuta', 'Note_Rischio', 'Prezzo_Display', 'Scadenza', 'YTM_Grezzo']].copy()
             
-            # Formattazione
             st.dataframe(
                 df_show.style.format({
                     'Prezzo_Display': f'{{:.2f}} {target_currency}', 
                     'YTM_Grezzo': '{:.2f}%',
                     'Scadenza': '{:%d/%m/%Y}'
-                }).background_gradient(subset=['YTM_Grezzo'], cmap='Greens'),
+                })
+                .map(lambda v: 'color: orange; font-weight: bold;' if v == '⚠️ Rischio Cambio' else 'color: green;', subset=['Note_Rischio'])
+                .background_gradient(subset=['YTM_Grezzo'], cmap='Greens'),
                 use_container_width=True,
                 height=600,
                 column_config={
                     "Prezzo_Display": st.column_config.NumberColumn(
-                        f"Prezzo ({target_currency})", 
-                        help=f"Prezzo convertito in {target_currency}."
+                        f"Prezzo Reale ({target_currency})", 
+                        help=f"Quanto paghi effettivamente in {target_currency} oggi."
                     ),
                     "YTM_Grezzo": st.column_config.NumberColumn(
-                        "Rendimento Lordo",
-                        help="Rendimento annuo nella valuta del titolo."
+                        "Rendimento Lordo (Nominale)",
+                        help="Attenzione: è il rendimento nella valuta del bond! Se la valuta crolla, questo rendimento in Euro sparisce."
                     ),
+                    "Note_Rischio": st.column_config.TextColumn("Info Cambio"),
                     "Valuta": st.column_config.TextColumn("Valuta", width="small")
                 }
             )
             
-            st.caption(f"💡 Prezzi convertiti in **{target_currency}**. Rendimenti in valuta originale.")
-            
-            # Sezione Rapida per Analizzare
+            # Analisi Rapida
             st.write("")
-            st.markdown("### 🚀 Analizza un titolo specifico")
-            c_input, c_btn = st.columns([3, 1])
-            with c_input:
-                isin_to_analyze = st.text_input("Copia qui un ISIN dalla tabella", placeholder="IT...").strip().upper()
-            with c_btn:
-                st.write("") 
+            st.markdown("### 🚀 Analizza nel dettaglio")
+            c1, c2 = st.columns([3, 1])
+            with c1: isin_input = st.text_input("Incolla ISIN per simulazione cambio", placeholder="IT...").strip().upper()
+            with c2: 
+                st.write(""); 
                 if st.button("Vai allo Scanner 👉"):
-                    if isin_to_analyze:
-                        st.session_state.selected_isin_from_chart = isin_to_analyze
+                    if isin_input:
+                        st.session_state.selected_isin_from_chart = isin_input
                         st.session_state.page = "Scanner"
                         st.rerun()
-                    else:
-                        st.warning("Inserisci un ISIN.")
         else:
-            st.info("Nessun bond trovato con questi parametri.")
+            st.info("Nessun bond trovato. Prova ad allargare i filtri numerici.")
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
     elif st.session_state.page == "Alerts": alert_manager_ui()
