@@ -1202,27 +1202,32 @@ def main_app():
                     col_usc, col_entr = st.columns(2)
                     
                     with col_usc:
-                        with st.container(border=True):
-                            st.error("📉 USCITE (OGGI)", icon="💸")
-                            st.markdown(f"""
-                            **Costo Titoli:** {investimento * d['pr'] / 100:,.2f} €  
-                            *(Prezzo: {d['pr']})*
-                            ➕ **Rateo Interessi:** {costo_rateo:,.2f} €  
-                            ➕ **Commissioni:** {commissioni:,.2f} €
-                            ---
-                            ### 🔴 Totale: -{spesa_tot:,.2f} €
-                            """)
+                        st.markdown(f"""
+                        <div class="receipt-box" style="border-left: 4px solid #FF4B4B; background-color: rgba(255, 75, 75, 0.05); padding: 15px; border-radius: 8px;">
+                            <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px; font-size:14px;">📉 USCITE (OGGI)</div>
+                            <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Costo Titoli ({d['pr']:.2f}):</span> <span>{investimento * d['pr'] / 100:,.2f} €</span></div>
+                            <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Rateo Interessi:</span> <span>{costo_rateo:,.2f} €</span></div>
+                            <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Commissioni:</span> <span>{commissioni:,.2f} €</span></div>
+                            <hr style="margin: 10px 0; border-color: #444;">
+                            <div class="receipt-total" style="color: #FF4B4B; font-size:16px; font-weight:bold; display:flex; justify-content:space-between;">
+                                <span>TOTALE ADDEBITO:</span> <span>-{spesa_tot:,.2f} €</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
                     with col_entr:
-                        with st.container(border=True):
-                            st.success("📈 ENTRATE (FUTURO)", icon="💰")
-                            st.markdown(f"""
-                            **Cedole Nette:** +{totale_cedole_nette:,.2f} €  
-                            ➕ **Rimborso Capitale:** +{investimento:,.2f} €  
-                            ➕ **Capital Gain Netto:** +{plusvalenza_netta:,.2f} €  
-                            ---
-                            ### 🟢 Totale: +{incasso_tot:,.2f} €
-                            """)
+                        st.markdown(f"""
+                        <div class="receipt-box" style="border-left: 4px solid #00CC96; background-color: rgba(0, 204, 150, 0.05); padding: 15px; border-radius: 8px;">
+                            <div style="font-weight:bold; color:#00CC96; margin-bottom:10px; font-size:14px;">📈 ENTRATE (FUTURO)</div>
+                            <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Cedole Nette Totali:</span> <span>+{totale_cedole_nette:,.2f} €</span></div>
+                            <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Rimborso Capitale:</span> <span>+{investimento:,.2f} €</span></div>
+                            <div class="receipt-row" style="color:#888; font-size:12px; display:flex; justify-content:space-between; margin-bottom:5px;"><span>(Capital Gain incluso: {plusvalenza_netta:,.2f} €)</span> <span></span></div>
+                            <hr style="margin: 10px 0; border-color: #444;">
+                            <div class="receipt-total" style="color: #00CC96; font-size:16px; font-weight:bold; display:flex; justify-content:space-between;">
+                                <span>TOTALE INCASSO:</span> <span>+{incasso_tot:,.2f} €</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
                     st.info(f"**💰 RISULTATO:** Spendi **{spesa_tot:,.2f}€** oggi per avere **{incasso_tot:,.2f}€**. Guadagno Netto: **+{guadagno_netto:,.2f} €**")
 
