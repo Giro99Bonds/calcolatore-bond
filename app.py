@@ -1319,13 +1319,14 @@ def main_app():
                         </div>
                         """, unsafe_allow_html=True)
 
-                    # VERDETTO FINALE (CON ROI ANNUO)
+                    
+                    # VERDETTO FINALE (NEUTRO)
                     if guadagno_netto_user > 0:
-                        st.success(f"✅ **AFFARE:** Guadagno netto di **+{guadagno_netto_user:,.2f} {valuta_user}**\nRendimento Totale: +{roi_pct_totale:.2f}% | **Rendimento Annuo: +{roi_annuo:.2f}%**")
+                        st.success(f"✅ **Risultato Stimato:** Guadagno netto di **+{guadagno_netto_user:,.2f} {valuta_user}**\nRendimento Totale: +{roi_pct_totale:.2f}% | Rendimento Annuo: +{roi_annuo:.2f}%")
                     else:
-                        st.error(f"❌ **PERDITA:** Perdi **{guadagno_netto_user:,.2f} {valuta_user}**\nRendimento Totale: {roi_pct_totale:.2f}% | **Rendimento Annuo: {roi_annuo:.2f}%**")
-
+                        st.error(f"❌ **Risultato Stimato:** Perdita di **{guadagno_netto_user:,.2f} {valuta_user}**\nRendimento Totale: {roi_pct_totale:.2f}% | Rendimento Annuo: {roi_annuo:.2f}%")
                     # --- GRAFICO BREAKEVEN (LINEE COLORATE + STELLA + PUNTO ZERO) ---
+                    # --- GRAFICO BREAKEVEN (CON TESTO COMPLETO) ---
                     st.subheader("🗓️ Recupero Capitale nel Tempo")
                     df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
                     
@@ -1344,8 +1345,17 @@ def main_app():
                             df_neg = pd.concat([df_neg, row_zero], ignore_index=True)
                             df_pos = pd.concat([row_zero, df_pos], ignore_index=True)
 
+                    # QUI HO RIMESSO IL TESTO CHE VOLEVI 👇
                     if breakeven_date:
-                        st.markdown(f"""<div style="background-color: #e6fffa; padding: 10px; border-radius: 8px; border-left: 5px solid #00CC96; color: #1e2130;">✅ <b>Pareggio:</b> {breakeven_date.strftime('%d/%m/%Y')}</div>""", unsafe_allow_html=True)
+                        days_to_be = (breakeven_date - date.today()).days
+                        st.markdown(f"""
+                        <div style="background-color: #e6fffa; padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; color: #1e2130; margin-bottom: 10px;">
+                            ✅ <b>Punto di Pareggio:</b> Raggiunto il <b>{breakeven_date.strftime('%d/%m/%Y')}</b> (tra <b style="color: #007755;">{days_to_be} giorni</b>).
+                            <br>Da quel momento in poi è tutto <b>Profitto Netto</b>.
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""<div style="background-color: #fff8e1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffa500; color: #1e2130; margin-bottom: 10px;">⏳ <b>Recupero capitale</b> solo a scadenza.</div>""", unsafe_allow_html=True)
 
                     fig = go.Figure()
                     if not df_neg.empty: fig.add_trace(go.Scatter(x=df_neg['Data'], y=df_neg['Cumulativo'], mode='lines', line=dict(color='#FF4B4B', width=3), name='Sotto Zero'))
