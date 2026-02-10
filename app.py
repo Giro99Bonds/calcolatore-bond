@@ -12,10 +12,9 @@ import os
 from scipy.optimize import newton
 import hashlib
 import json
-from typing import Dict, List, Optional
 
 # ==============================================================================
-# 1. CONFIGURAZIONE PAGINA E STILI CSS (VERSIONE ESTESA ORIGINALE)
+# 1. CONFIGURAZIONE PAGINA E STILI CSS (ORIGINALE ESTESO)
 # ==============================================================================
 
 st.set_page_config(
@@ -48,37 +47,21 @@ st.markdown("""
     .bg-corp { background: linear-gradient(135deg, #1e3a5f 0%, #17a2b8 100%); }
     .bg-spec { background: linear-gradient(135deg, #581845 0%, #d63384 100%); }
 
-    /* --- SCONTRINO SIMULATORE (Stile Backup) --- */
+    /* --- SCONTRINO (Style Nativo Streamlit) --- */
     .receipt-box {
-        border: 2px dashed rgba(128, 128, 128, 0.3);
-        padding: 20px;
-        border-radius: 10px;
-        background-color: rgba(128, 128, 128, 0.05);
-        margin-top: 10px;
-        height: 100%;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 10px;
+        background-color: rgba(255, 255, 255, 0.02);
     }
-    .receipt-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
-    .receipt-total { display: flex; justify-content: space-between; margin-top: 15px; border-top: 2px solid #00CC96; padding-top: 10px; font-weight: bold; font-size: 18px; color: #00CC96; }
-    .receipt-sub { font-size: 12px; color: gray; text-align: right; margin-top: -5px; }
+    .receipt-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 14px; }
+    .receipt-total { display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; margin-top: 10px; padding-top: 10px; border-top: 1px solid #444; }
 
     /* --- ALTRI STILI --- */
-    .explanation-box { background-color: rgba(128, 128, 128, 0.1); border-left: 4px solid #00CC96; padding: 15px; border-radius: 5px; margin-bottom: 15px; }
-    .explanation-title { font-weight: bold; color: #00CC96; font-size: 16px; margin-bottom: 5px; }
-    .explanation-text { font-size: 14px; color: inherit; opacity: 0.9; }
-    
-    .score-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.2); }
-    .score-good { color: #00CC96; font-weight: bold; }
-    .score-bad { color: #FF4B4B; font-weight: bold; }
-    .score-neutral { color: #FFAA00; font-weight: bold; }
-    
     .user-box { padding: 10px; background-color: rgba(0, 204, 150, 0.1); border-left: 5px solid #00CC96; border-radius: 5px; margin-bottom: 20px; font-weight: bold; color: inherit; }
     
     [data-testid="stSidebar"] div.stButton > button { background-color: transparent; border: none; text-align: left; color: inherit !important; font-weight: 600; }
     [data-testid="stSidebar"] div.stButton > button:hover { padding-left: 10px; background-color: rgba(128, 128, 128, 0.1); border-radius: 5px; }
-    
-    .red-flag { border-left: 5px solid #ff4b4b; background-color: #2d1b1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
-    .green-flag { border-left: 5px solid #00cc96; background-color: #1b2d24; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
-    .warning-flag { border-left: 5px solid #ffa500; background-color: #2d2a1b; padding: 10px; margin-bottom: 5px; color: white; border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -129,7 +112,7 @@ def init_session_state():
 init_session_state()
 
 # ==============================================================================
-# 3. MAPPA FONTI (ESTESA - 29 DATASETS) & MAPPING CATEGORIE UI
+# 3. MAPPA FONTI (ESTESA - 29 DATASETS)
 # ==============================================================================
 
 SOURCES_MAP = {
@@ -180,7 +163,6 @@ SOURCES_MAP = {
     ]
 }
 
-# --- MAPPING CATEGORIE PULITO (UX) ---
 MACRO_CATEGORIES = {
     "🌐 TUTTE": [], 
     "🏛️ GOVERNATIVI": ["GOV_IT", "GOV_EU", "GOV_PERIF", "GOV_WORLD", "SUPRA"],
@@ -245,9 +227,9 @@ def processa_riga(row, info):
             except: return None
         if sc <= date.today(): return None
         
-        desc = str(row[c_de])
-        ced = 0.0
+        desc = str(row[c_de]).replace("â‚¬", "€").strip()
         m = re.search(r'(\d+(?:[.,]\d+)?)\s*%', desc)
+        ced = 0.0
         if m: ced = float(m.group(1).replace(',', '.'))
         
         taglio = 1000.0
@@ -283,7 +265,7 @@ def identikit_bond(dati):
     return chi, tipo, tempo, risk_msg
 
 # ==============================================================================
-# 5. RISK ENGINE E SCORECARD (COMPLETO)
+# 5. RISK ENGINE E SCORECARD
 # ==============================================================================
 
 def calcola_ytm_preciso(prezzo, cedola_pct, scadenza, freq, face_value=100):
@@ -409,6 +391,11 @@ def carica_dati_mercato():
             except: continue
     return pd.DataFrame(all_bonds)
 
+@st.cache_data(ttl=3600)
+def carica_tutto_mercato():
+    """Versione ottimizzata per dashboard e analisi"""
+    return carica_dati_mercato().rename(columns={'Categoria': 'Tipo', 'Desc': 'Descrizione'})
+
 def trova_alternative_migliori(bond_target, df_mercato, categoria_obbligatoria=None):
     if df_mercato.empty: return pd.DataFrame()
     anni_target = (bond_target['sc'] - date.today()).days / 365.25
@@ -464,22 +451,7 @@ def aggiorna_db():
 
 def cerca_db(isin, cat_macro):
     if not valida_isin(isin): return None, None
-    
-    # ----------------------------------------------------
-    # FIX: LOGICA DI RICERCA CORRETTA PER MACRO CATEGORIE
-    # ----------------------------------------------------
-    search_keys = []
-    
-    # Se cat_macro è vuoto o "TUTTE", cerchiamo ovunque
-    if not cat_macro or cat_macro == "🌐 TUTTE":
-        search_keys = list(SOURCES_MAP.keys())
-    # Altrimenti cerchiamo solo nelle sottocategorie mappate
-    elif cat_macro in MACRO_CATEGORIES:
-        search_keys = MACRO_CATEGORIES[cat_macro]
-    else:
-        search_keys = list(SOURCES_MAP.keys())
-
-    # Itera sulle chiavi selezionate
+    search_keys = list(SOURCES_MAP.keys()) if not cat_macro or cat_macro == "🌐 TUTTE" else MACRO_CATEGORIES.get(cat_macro, [])
     for key in search_keys:
         sources = SOURCES_MAP.get(key, [])
         for src in sources:
@@ -1296,7 +1268,144 @@ def main_app():
                     
                     # Cedolario
                     st.subheader("📅 Cedolario")
-                    st.dataframe(df_flussi[['Data','Tipo','Importo','Dettagli']].style.format({'Importo':'{:,.2f}€', 'Data': lambda x: x.strftime('%d/%m/%Y')}), use_container_width=True)
+                    def style_cedola_custom(val):
+                        if isinstance(val, (int, float)):
+                            color = '#ff4b4b' if val < 0 else '#00cc96'
+                            return f'color: {color}; font-weight: bold;'
+                        return ''
+
+                    st.dataframe(
+                        df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style
+                        .format({
+                            'Importo': '{:+,.2f} €', 
+                            'Data': lambda x: x.strftime('%d/%m/%Y')
+                        })
+                        .map(style_cedola_custom, subset=['Importo']),
+                        use_container_width=True,
+                        height=400
+                    )
+
+    # --- SMART ANALYSIS ---
+    elif st.session_state.page == "SmartAnalysis":
+        st.title("🧠 Smart Analysis")
+        st.caption("Confronta il tuo bond con il mercato reale e trova alternative.")
+        
+        # 1. Caricamento Dati
+        with st.spinner("Analisi curve dei tassi..."):
+            df_m = carica_tutto_mercato()
+        
+        if df_m.empty: 
+            st.warning("⚠️ Database vuoto. Vai su Aggiorna Dati.")
+        else:
+            c_s, _ = st.columns([1, 2])
+            isin_s = c_s.text_input("Inserisci ISIN da analizzare", placeholder="IT...").strip().upper()
+            
+            if isin_s:
+                # Cerca il bond specifico nel dataframe globale
+                target_bond = df_m[df_m['ISIN'] == isin_s]
+                
+                if not target_bond.empty:
+                    # Estrai dati bond target
+                    b = target_bond.iloc[0]
+                    ytm_target = b['YTM_Grezzo']
+                    # Calcolo anni residui dalla data scadenza
+                    try:
+                        anni_target = (pd.to_datetime(b['Scadenza']) - date.today()).days / 365.25
+                    except:
+                        anni_target = 0
+                    cat_target = b['Tipo']
+                    
+                    # 2. METRICHE DI CONFRONTO
+                    # Filtra i "Peer" (stessa categoria)
+                    peers = df_m[df_m['Tipo'] == cat_target]
+                    avg_ytm = peers['YTM_Grezzo'].mean()
+                    spread = ytm_target - avg_ytm
+                    
+                    st.divider()
+                    st.subheader(f"📊 Analisi Posizionamento ({cat_target})")
+                    
+                    k1, k2, k3 = st.columns(3)
+                    k1.metric("Rendimento Tuo Bond", f"{ytm_target:.2f}%")
+                    k2.metric(f"Media Mercato {cat_target}", f"{avg_ytm:.2f}%")
+                    k3.metric("Spread vs Media", f"{spread:+.2f}%", delta_color="normal", 
+                              help="Se positivo, il tuo bond rende più della media della sua categoria.")
+
+                    # 3. GRAFICO SCATTER (Tu sei qui)
+                    st.markdown("##### 📍 Il tuo bond nella 'Nuvola' del mercato")
+                    
+                    # Filtro per pulire il grafico (zoom intelligente)
+                    df_zoom = df_m[
+                        (df_m['Tipo'] == cat_target) & 
+                        (df_m['YTM_Grezzo'] > -2) & 
+                        (df_m['YTM_Grezzo'] < 15) &
+                        (df_m['Anni'] > anni_target - 5) &
+                        (df_m['Anni'] < anni_target + 5)
+                    ].copy()
+                    
+                    # Creazione Grafico
+                    fig = px.scatter(
+                        df_zoom, x='Anni', y='YTM_Grezzo', 
+                        color='Tipo', opacity=0.5, 
+                        hover_data=['Descrizione', 'Prezzo'],
+                        color_discrete_map={'Governativo':'#00CC96', 'Corporate':'#636EFA', 'Bancario':'#AB63FA'},
+                        title=f"Yield Curve: {cat_target} (Zoom ±5 anni)"
+                    )
+                    
+                    # Aggiungi il marker del TUO bond (Rombo Gigante)
+                    fig.add_trace(go.Scatter(
+                        x=[anni_target], y=[ytm_target],
+                        mode='markers+text',
+                        marker=dict(color='#FF00FF', size=25, symbol='diamond', line=dict(color='white', width=2)),
+                        name='TUO BOND',
+                        text=["TU SEI QUI"], textposition="top center",
+                        textfont=dict(color='#FF00FF', size=14, family="Arial Black")
+                    ))
+                    
+                    fig.update_layout(template="plotly_dark", height=500, showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Analisi testuale
+                    if spread > 0.5:
+                        st.success("✅ **OTTIMO:** Questo bond rende decisamente più della media dei suoi simili!")
+                    elif spread < -0.5:
+                        st.error("❌ **ATTENZIONE:** Questo bond rende meno della media. Probabilmente è troppo caro.")
+                    else:
+                        st.info("⚖️ **FAIR:** Il rendimento è allineato al mercato.")
+
+                    # 4. SMART SWITCH (Alternative Migliori)
+                    st.divider()
+                    st.subheader("🔄 Smart Switch: Esiste di meglio?")
+                    st.caption(f"Cerco bond {cat_target} con scadenza simile ({anni_target:.1f} anni ± 2) ma rendimento più alto.")
+                    
+                    # Logica trova alternative
+                    alternatives = peers[
+                        (peers['Anni'] >= anni_target - 2) & 
+                        (peers['Anni'] <= anni_target + 2) &
+                        (peers['Prezzo'] <= 105) & 
+                        (peers['YTM_Grezzo'] > ytm_target + 0.10) # Almeno 0.10% in più
+                    ].sort_values('YTM_Grezzo', ascending=False).head(5).copy()
+                    
+                    if not alternatives.empty:
+                        alternatives['Extra Rendimento'] = alternatives['YTM_Grezzo'] - ytm_target
+                        
+                        st.dataframe(
+                            alternatives[['ISIN', 'Descrizione', 'Prezzo', 'YTM_Grezzo', 'Extra Rendimento']].style.format({
+                                'Prezzo': '{:.2f} €',
+                                'YTM_Grezzo': '{:.2f}%',
+                                'Extra Rendimento': '+{:.2f}%'
+                            }),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                        st.caption("💡 Questi bond offrono un rendimento maggiore a parità di durata temporale.")
+                    else:
+                        st.balloons()
+                        st.success("🏆 Complimenti! Non abbiamo trovato alternative nettamente migliori nel database. Hai scelto bene.")
+
+                else:
+                    st.error("❌ ISIN non trovato nel database caricato. Prova ad aggiornare i dati nella Sidebar.")
+            else:
+                st.info("Inserisci un ISIN per avviare l'intelligenza artificiale.")
 
     elif st.session_state.page == "Screener": bond_screener_ui()
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
