@@ -1368,7 +1368,7 @@ def main_app():
                     
                     
                     # 1.2 NOTA INFLAZIONE (TESTO UX MIGLIORATO)
-                        if infl_sim > 0:
+                    if infl_sim > 0:
                             st.info(f"""
                             **📉 Valore reale dell’incasso**
                             
