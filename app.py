@@ -1076,11 +1076,12 @@ def main_app():
 # --- SCANNER (CODICE COMPLETO E CORRETTO) ---
 # --- SCANNER (GRAFICA ORIGINALE + VALUTA LIVE + CEDOLARIO COLORATO) ---
 # --- SCANNER (GRAFICA PREMIUM + VALUTA LIVE + INFOBOX) ---
+# --- SCANNER (VERSIONE DEFINITIVA: GRAFICA PREMIUM + FUNZIONI LIVE) ---
     if st.session_state.page == "Scanner":
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Analisi approfondita con conversione valutaria live.")
         
-        # 1. LEGENDA CATEGORIE (RIPRISTINATO STILE CON BADGE ARROTONDATI)
+        # 1. LEGENDA CATEGORIE (Stile Premium con Badge)
         st.markdown("### 🧭 Guida alle Categorie")
         c1, c2, c3, c4 = st.columns(4)
         
@@ -1088,7 +1089,7 @@ def main_app():
             st.markdown("""
             <div class="cat-card bg-gov">
                 <div class="cat-title">🏛️ GOVERNATIVI</div>
-                <div class="cat-desc">Titoli di Stato (es. BTP, Bund). Massima sicurezza.</div>
+                <div class="cat-desc">Titoli di Stato (es. BTP). Sicurezza massima.</div>
                 <div><span class="cat-meta">Rischio: BASSO</span><span class="cat-meta">Tax: 12.5%</span></div>
             </div>
             """, unsafe_allow_html=True)
@@ -1097,7 +1098,7 @@ def main_app():
             st.markdown("""
             <div class="cat-card bg-bank">
                 <div class="cat-title">🏦 BANCARI</div>
-                <div class="cat-desc">Obbligazioni emesse da banche. Rendimento medio.</div>
+                <div class="cat-desc">Obbligazioni bancarie. Rendimento medio.</div>
                 <div><span class="cat-meta">Rischio: MEDIO</span><span class="cat-meta">Tax: 26%</span></div>
             </div>
             """, unsafe_allow_html=True)
@@ -1115,7 +1116,7 @@ def main_app():
             st.markdown("""
             <div class="cat-card bg-spec">
                 <div class="cat-title">💎 SPECIALI</div>
-                <div class="cat-desc">Strumenti complessi (Subordinate, Callable).</div>
+                <div class="cat-desc">Strumenti complessi (Sub, Callable).</div>
                 <div><span class="cat-meta">Rischio: VARIO</span><span class="cat-meta">Tax: Mista</span></div>
             </div>
             """, unsafe_allow_html=True)
@@ -1134,7 +1135,7 @@ def main_app():
             st.write(""); st.write("")
             trigger_search = st.button("🔎 Cerca", use_container_width=True)
         
-        # Logica
+        # Logica Principale
         if isin and (trigger_search or isin):
             if not valida_isin(isin): st.error("❌ ISIN non valido")
             else:
@@ -1143,14 +1144,16 @@ def main_app():
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
-                    # Calcoli
+                    # Calcoli Finanziari
                     tax = determina_tasse(d['fonte'], d['desc'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     qual = analizza_bond_quality_dettagliata(d, risk, tax, st.session_state.patrimonio)
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
+                    
+                    # Rilevamento Valuta
                     valuta_bond = detect_valuta(d['desc'], d['isin'])
 
-                    # Box Informativo Principale
+                    # Header del Bond (Box con Gradiente)
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -1173,32 +1176,35 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Dati Chiave (CON INFO BOX AGGIUNTI)
+                    # Dati Chiave (CON INFO BOX AGGIUNTI 'help=...')
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     simbolo = "€" if valuta_bond == "EUR" else valuta_bond
                     
-                    c1.metric("Prezzo", f"{d['pr']} {simbolo}", help="Prezzo attuale di mercato")
-                    c2.metric("Rend. Netto (Locale)", f"{qual['ytm_netto']:.2f}%", help="Rendimento annuo pulito dalle tasse (nella valuta del bond)")
-                    c3.metric("Rend. Lordo", f"{risk['ytm']:.2f}%", help="Yield to Maturity (Lordo) annualizzato")
-                    c4.metric("Cedola", f"{d['ced']}%", help="Tasso di interesse periodico pagato sul nominale")
-                    c5.metric("Valuta", valuta_bond, help="Valuta in cui il titolo paga le cedole e il rimborso")
-                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni", help="Sensibilità del prezzo al variare dei tassi (Duration Modificata)")
+                    c1.metric("Prezzo", f"{d['pr']} {simbolo}", help="Prezzo di mercato attuale. Se > 100 è 'Sopra la pari'.")
+                    c2.metric("Rend. Netto (Locale)", f"{qual['ytm_netto']:.2f}%", help="Rendimento annuale al netto delle tasse (nella valuta del titolo).")
+                    c3.metric("Rend. Lordo", f"{risk['ytm']:.2f}%", help="Yield to Maturity lordo. Include cedole e guadagno in conto capitale.")
+                    c4.metric("Cedola", f"{d['ced']}%", help="Interesse periodico pagato sul valore nominale.")
+                    c5.metric("Valuta", valuta_bond, help="La valuta in cui verrai pagato (attenzione al rischio cambio!).")
+                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni", help="Sensibilità ai tassi. Più è alta, più il prezzo oscilla.")
 
                     st.divider()
                     
-                    # === 💰 SIMULATORE AVANZATO ===
+                    # === 💰 SIMULATORE AVANZATO (LISTA ESTESA + LIVE) ===
                     st.subheader("💰 Simulatore di Investimento")
                     
                     col_set1, col_set2, col_set3 = st.columns(3)
                     with col_set1:
-                        valuta_user = st.selectbox("La tua Valuta (Conto)", ["EUR", "USD"], index=0)
+                        # LISTA VALUTE COMPLETA
+                        liste_valute = ["EUR", "USD", "GBP", "CHF", "TRY", "BRL", "RON", "JPY", "CAD", "AUD"]
+                        valuta_user = st.selectbox("La tua Valuta (Conto)", liste_valute, index=0)
+                    
                     with col_set2:
-                        Importo_Convertito = st.number_input(f"Capitale da Investire ({valuta_user})", value=10000.0, step=1000.0)
+                        importo_user = st.number_input(f"Capitale da Investire ({valuta_user})", value=10000.0, step=1000.0)
                     with col_set3:
                         infl_sim = st.number_input("Inflazione Stimata %", value=2.0, step=0.5)
 
-                    # LOGICA CAMBIO
+                    # LOGICA CAMBIO LIVE
                     tasso_spot = get_tasso_cambio_live(valuta_user, valuta_bond)
                     
                     if valuta_user != valuta_bond:
@@ -1211,29 +1217,30 @@ def main_app():
                         scenario_fx = 0
                         
                     # Calcoli Flussi
-                    nominale_bond = Importo_Convertito * tasso_spot 
+                    nominale_bond = importo_user * tasso_spot 
                     commissioni = 5.0 
                     
+                    # Generazione flussi in valuta locale
                     df_flussi, spesa_loc, incasso_loc, rateo_loc, tot_ced_loc, _ = genera_flussi_dettagliati(d, nominale_bond, tax, 0, d['pr'])
                     
-                    # Conversione
+                    # Conversione Flussi in Valuta Utente
                     rate_rientro = tasso_spot * (1 - (scenario_fx/100)) if valuta_user != valuta_bond else 1.0
                     if rate_rientro <= 0.001: rate_rientro = 0.001
                     
-                    df_flussi['Importo_Convertito'] = df_flussi.apply(
+                    df_flussi['Importo_User'] = df_flussi.apply(
                         lambda x: (x['Importo'] / tasso_spot) if x['Tipo'] == 'USCITA' else (x['Importo'] / rate_rientro), axis=1
                     )
                     
-                    # Totali
-                    spesa_reale_user = Importo_Convertito + commissioni
+                    # Totali per Scontrino
+                    spesa_reale_user = importo_user + commissioni
                     costo_titolo_user = (nominale_bond * d['pr'] / 100) / tasso_spot
                     rateo_user = rateo_loc / tasso_spot
-                    incasso_reale_user = df_flussi[df_flussi['Tipo'] == 'ENTRATA']['Importo_Convertito'].sum()
+                    incasso_reale_user = df_flussi[df_flussi['Tipo'] == 'ENTRATA']['Importo_User'].sum()
                     cedole_tot_user = tot_ced_loc / rate_rientro
                     rimborso_user = (nominale_bond) / rate_rientro 
                     guadagno_netto_user = incasso_reale_user - spesa_reale_user
 
-                    # --- SCONTRINO ---
+                    # --- SCONTRINO (STILE HTML PREMIUM RIPRISTINATO) ---
                     st.write("")
                     st.markdown(f"### 🧾 Analisi Flussi di Cassa (In {valuta_user})")
                     col_usc, col_entr = st.columns(2)
@@ -1272,126 +1279,62 @@ def main_app():
 
                     st.divider()
 
-                    # --- GRAFICO BREAKEVEN ---
-# --- GRAFICO BREAKEVEN (LINEA BICOLORE + PUNTO PAREGGIO) ---
+                    # --- GRAFICO BREAKEVEN (Linea Rossa/Verde + Stella Pareggio) ---
                     st.subheader("🗓️ Recupero Capitale")
+                    df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
                     
-                    # 1. Calcolo Cumulato
-                    df_flussi['Cumulativo'] = df_flussi['Importo_Convertito'].cumsum()
-                    
-                    # 2. Separazione dati Sotto/Sopra lo Zero
                     df_neg = df_flussi[df_flussi['Cumulativo'] < 0].copy()
                     df_pos = df_flussi[df_flussi['Cumulativo'] >= 0].copy()
                     
-                    # 3. Calcolo Punto Esatto di Pareggio (Interpolazione Lineare)
-                    # Serve per unire la linea rossa e verde senza lasciare "buchi" nel grafico
                     breakeven_date = None
-                    breakeven_val = 0
-                    
+                    # Interpolazione matematica per trovare il giorno zero esatto
                     if not df_neg.empty and not df_pos.empty:
                         last_neg = df_neg.iloc[-1]
                         first_pos = df_pos.iloc[0]
-                        
-                        # Calcolo matematico della data esatta in cui la linea tocca lo 0
-                        y1 = last_neg['Cumulativo']
-                        y2 = first_pos['Cumulativo']
-                        x1 = last_neg['Data'].toordinal()
-                        x2 = first_pos['Data'].toordinal()
-                        
-                        # Formula: x = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
+                        y1, y2 = last_neg['Cumulativo'], first_pos['Cumulativo']
+                        x1, x2 = last_neg['Data'].toordinal(), first_pos['Data'].toordinal()
                         if y2 != y1:
                             x_zero = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
                             breakeven_date = date.fromordinal(int(x_zero))
-                            
-                            # Aggiungiamo il punto zero sia alla fine della rossa che all'inizio della verde
-                            # così si toccano perfettamente
+                            # Creiamo il punto zero per unire le linee
                             row_zero = pd.DataFrame({'Data': [breakeven_date], 'Cumulativo': [0]})
                             df_neg = pd.concat([df_neg, row_zero], ignore_index=True)
                             df_pos = pd.concat([row_zero, df_pos], ignore_index=True)
 
-                    # 4. Messaggio Utente
                     if breakeven_date:
                         days_to_be = (breakeven_date - date.today()).days
                         st.markdown(f"""
                         <div style="background-color: #e6fffa; padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; color: #1e2130; margin-bottom: 10px;">
                             ✅ <b>Punto di Pareggio:</b> Raggiunto il <b>{breakeven_date.strftime('%d/%m/%Y')}</b> (tra {days_to_be} giorni).
-                            <br>Da quel momento in poi è tutto <b>Profitto Netto</b>.
                         </div>
                         """, unsafe_allow_html=True)
                     else:
-                        st.markdown(f"""
-                        <div style="background-color: #fff8e1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffa500; color: #1e2130; margin-bottom: 10px;">
-                            ⏳ <b>Recupero capitale:</b> Il capitale viene recuperato solo alla <b>scadenza</b> (o non viene recuperato integralmente).
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown(f"""<div style="background-color: #fff8e1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffa500; color: #1e2130; margin-bottom: 10px;">⏳ <b>Recupero capitale</b> solo a scadenza.</div>""", unsafe_allow_html=True)
 
-                    # 5. Creazione Grafico
                     fig = go.Figure()
-                    
-                    # Linea ROSSA (Sotto Zero)
                     if not df_neg.empty:
-                        fig.add_trace(go.Scatter(
-                            x=df_neg['Data'], y=df_neg['Cumulativo'],
-                            mode='lines+markers',
-                            line=dict(color='#FF4B4B', width=3), # Rosso
-                            marker=dict(size=6),
-                            name='Capitale non recuperato',
-                            hovertemplate="Data: %{x}<br>Saldo: %{y:,.2f}<extra></extra>"
-                        ))
-                    
-                    # Linea VERDE (Sopra Zero)
+                        fig.add_trace(go.Scatter(x=df_neg['Data'], y=df_neg['Cumulativo'], mode='lines+markers', line=dict(color='#FF4B4B', width=3), marker=dict(size=6), name='Capitale non recuperato'))
                     if not df_pos.empty:
-                        fig.add_trace(go.Scatter(
-                            x=df_pos['Data'], y=df_pos['Cumulativo'],
-                            mode='lines+markers',
-                            line=dict(color='#00CC96', width=3), # Verde
-                            marker=dict(size=6),
-                            name='Profitto Netto',
-                            hovertemplate="Data: %{x}<br>Profitto: +%{y:,.2f}<extra></extra>"
-                        ))
-                        
-                    # Marker STELLA sul punto esatto di pareggio
+                        fig.add_trace(go.Scatter(x=df_pos['Data'], y=df_pos['Cumulativo'], mode='lines+markers', line=dict(color='#00CC96', width=3), marker=dict(size=6), name='Profitto Netto'))
                     if breakeven_date:
-                        fig.add_trace(go.Scatter(
-                            x=[breakeven_date], y=[0],
-                            mode='markers',
-                            marker=dict(color='yellow', size=15, symbol='star', line=dict(color='white', width=1)),
-                            name='PUNTO DI PAREGGIO',
-                            hovertemplate="<b>PAREGGIO RAGGIUNTO!</b><br>%{x}<extra></extra>"
-                        ))
+                        fig.add_trace(go.Scatter(x=[breakeven_date], y=[0], mode='markers', marker=dict(color='yellow', size=15, symbol='star', line=dict(color='white', width=1)), name='PAREGGIO'))
 
-                    # Linea orizzontale Zero
                     fig.add_hline(y=0, line_color='white', line_width=1, line_dash="dash")
-                    
-                    fig.update_layout(
-                        template="plotly_dark", 
-                        height=400, 
-                        margin=dict(l=20,r=20,t=40,b=20), 
-                        hovermode="closest",
-                        legend=dict(orientation="h", y=1.1),
-                        yaxis=dict(title=f"Saldo Cumulato ({valuta_user})")
-                    )
-                    
+                    fig.update_layout(template="plotly_dark", height=400, margin=dict(l=20,r=20,t=40,b=20), hovermode="closest", legend=dict(orientation="h", y=1.1), yaxis=dict(title=f"Saldo ({valuta_user})"))
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # --- CEDOLARIO (VISIBILE E COLORATO) ---
+                    # --- CEDOLARIO (TABELLA VISIBILE E COLORATA) ---
                     st.subheader("📅 Cedolario Dettagliato")
                     
-                    # Funzione stile (Verde se entrata, Rosso se uscita)
                     def style_cedola(v):
                         color = '#00CC96' if v >= 0 else '#FF4B4B'
                         return f'color: {color}; font-weight: bold;'
                     
                     st.dataframe(
-                        df_flussi[['Data', 'Tipo', 'Importo', 'Importo_Convertito', 'Dettagli']]
-                        .style
-                        .format({
-                            'Importo': f'{{:+,.2f}} {valuta_bond}', 
-                            'Importo_Convertito': f'{{:+,.2f}} {valuta_user}'
-                        })
-                        .map(style_cedola, subset=['Importo', 'Importo_Convertito']),
-                        use_container_width=True,
-                        height=400
+                        df_flussi[['Data', 'Tipo', 'Importo', 'Importo_User', 'Dettagli']]
+                        .style.format({'Importo': f'{{:+,.2f}} {valuta_bond}', 'Importo_User': f'{{:+,.2f}} {valuta_user}'})
+                        .map(style_cedola, subset=['Importo', 'Importo_User']),
+                        use_container_width=True, height=400
                     )
 
                 else: st.error("❌ Nessun risultato trovato.")
