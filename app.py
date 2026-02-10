@@ -1221,183 +1221,173 @@ def main_app():
 
                     st.divider()
                     
-                    # === 💰 SIMULATORE DI INVESTIMENTO REALE (FIXED) ===
-                    st.subheader("💰 Simulatore di Investimento Reale")
+                    # === 💰 SIMULATORE DI INVESTIMENTO REALE (FIXED v4) ===
+                    st.subheader("💰 Simulatore di Investimento")
                     
                     c_sim1, c_sim2, c_sim3 = st.columns(3)
                     with c_sim1:
-                        # 1.4 Formattazione input con virgola non supportata nativamente in input, ma gestita nel dataframe dopo
-                        investimento = st.number_input("Quanto vuoi investire? (€)", value=10000.0, step=1000.0, format="%.2f")
+                        # 1.4 Formattazione input: usiamo step e format per gestire i decimali
+                        investimento = st.number_input("Nominale da acquistare (€)", value=10000.0, step=1000.0, format="%.2f")
                     with c_sim2:
                         commissioni = st.number_input("Commissioni Banca (€)", value=5.0, step=1.0, format="%.2f")
                     with c_sim3:
                         infl, _ = get_inflazione_ufficiale()
-                        infl_sim = st.number_input("Inflazione Stimata (Annua) %", value=infl, step=0.5)
+                        infl_sim = st.number_input("Inflazione Stimata %", value=infl, step=0.5)
                     
-                    # Calcolo Flussi
-                    df_flussi, spesa_tot, incasso_tot, costo_rateo, totale_cedole_nette, plusvalenza_netta = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
+                    # Calcoli Finanziari Motore
+                    df_flussi, spesa_tot, incasso_tot, costo_rateo, totale_cedole_nette_periodic, plusvalenza_netta = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
                     guadagno_netto = incasso_tot - spesa_tot
                     anni_durata = (d['sc'] - date.today()).days / 365.25
                     
                     # 1.2 CALCOLO INFLAZIONE
-                    # Formula corretta: Valore Attuale = Montante / (1 + tasso)^anni
                     valore_reale = incasso_tot / ((1 + infl_sim/100) ** anni_durata)
+
+                    # Calcoli specifici per Scontrino Cassa (Cash Flow View)
+                    gain_puro_prezzo = max(0, 100 - d['pr'])
+                    tassa_gain_totale = (gain_puro_prezzo / 100) * investimento * (tax / 100)
+                    rimborso_netto_scadenza = investimento - tassa_gain_totale
+                    cedole_totali_reali = incasso_tot - rimborso_netto_scadenza
+
+                    # --- 1.3 SCONTRINO PULITO (LOGICA CASSA) ---
+                    st.write("")
+                    st.markdown("### 🧾 Scontrino Fiscale (Cash Flow)")
                     
-                    # BOX VERDE RISULTATO
-                    st.markdown(f"""
-                    <div style="background: linear-gradient(135deg, #00CC96, #00AA76); padding: 25px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.3); margin-top: 15px;">
-                        <div style="font-size: 16px; opacity: 0.9;">PROFITTO NETTO NOMINALE</div>
-                        <h1 style="margin: 5px 0; font-size: 42px; font-weight: bold;">+ {guadagno_netto:,.2f} €</h1>
-                        <hr style="border-color: rgba(255,255,255,0.3); margin: 15px 0;">
-                        <div style="display: flex; justify-content: space-around; font-size: 16px;">
-                            <div>Uscita Oggi: <b style="color:#ffdddd;">-{spesa_tot:,.2f}€</b></div>
-                            <div>Incasso Totale: <b>{incasso_tot:,.2f}€</b></div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    col_out, col_in = st.columns(2)
                     
-                    st.divider()
-                    
-                    c_det1, c_det2 = st.columns([1, 1])
-                    
-                    # --- 1.3 SCONTRINO CHIARO ---
-                    with c_det1:
-                        st.subheader("🧾 Scontrino Fiscale")
-                        
-                        # Calcolo costo secco per display
-                        costo_secco = investimento * d['pr'] / 100
-                        
+                    # COLONNA USCITE (OGGI) - ROSSO CHIARO
+                    with col_out:
+                        st.error("📉 USCITE OGGI (Dal tuo C/C)")
+                        costo_titoli_visual = investimento * d['pr'] / 100
                         st.markdown(f"""
-                        <div class="receipt-box">
-                            <div style="color:gray; font-size:12px; margin-bottom:10px;">USCITE (OGGI)</div>
-                            <div class="receipt-row"><span>Costo Titoli ({d['pr']:.2f}):</span> <span>{costo_secco:,.2f} €</span></div>
+                        <div class="receipt-box" style="border-color: #ff4b4b;">
+                            <div class="receipt-row"><span>Costo Titoli (al prezzo {d['pr']:.2f}):</span> <span>{costo_titoli_visual:,.2f} €</span></div>
                             <div class="receipt-row"><span>+ Rateo (Interessi anticipati):</span> <span>{costo_rateo:,.2f} €</span></div>
-                            <div class="receipt-row"><span>+ Commissioni:</span> <span>{commissioni:,.2f} €</span></div>
-                            
-                            <div class="receipt-total" style="color: #FF4B4B; border-top: 2px solid #FF4B4B;">
-                                <span>TOTALE PAGARE:</span>
-                                <span>-{spesa_tot:,.2f} €</span>
-                            </div>
-                            
-                            <hr style="margin: 20px 0; border-top: 1px dashed gray;">
-                            
-                            <div style="color:gray; font-size:12px; margin-bottom:10px;">ENTRATE FUTURE (STIMA)</div>
-                            <div class="receipt-row" style="color:#00CC96;">
-                                <span>1. Cedole Nette Totali:</span>
-                                <span>+{totale_cedole_nette:,.2f} €</span>
-                            </div>
-                            <div class="receipt-row" style="color:#00CC96;">
-                                <span>2. Guadagno Capitale:</span>
-                                <span>+{plusvalenza_netta:,.2f} €</span>
-                            </div>
-                            <div class="receipt-row" style="color:#FF4B4B;">
-                                <span>3. Recupero Costi:</span>
-                                <span>-{commissioni:,.2f} €</span>
+                            <div class="receipt-row"><span>+ Commissioni Banca:</span> <span>{commissioni:,.2f} €</span></div>
+                            <hr style="border-top: 1px solid #555; margin: 10px 0;">
+                            <div class="receipt-total" style="color: #ff4b4b; border:none; padding-top:0;">
+                                <span>TOTALE ADDEBITO:</span> <span>-{spesa_tot:,.2f} €</span>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                        # BOX INFO RICHIESTO
-                        st.info("""
-                        **ℹ️ Legenda Voci:**
-                        * **Rateo:** Parte di cedola che anticipi al venditore. Ti rientra col primo incasso.
-                        * **Cedole Nette:** Somma di tutti i bonifici interessi che riceverai.
-                        * **Guadagno Capitale:** Differenza tra il valore di rimborso (es. 100) e il tuo prezzo di acquisto fiscale.
-                        """)
 
-                    # --- 1.1 GRAFICO BREAKEVEN CON PUNTO EVIDENZIATO ---
-                    with c_det2:
-                        st.subheader("🗓️ Recupero Capitale")
-                        
-                        df_flussi['Cumulativo'] = df_flussi['Importo'].cumsum()
-                        
-                        # Trova punto di breakeven (primo valore positivo)
-                        df_pos = df_flussi[(df_flussi['Cumulativo'] >= 0) & (df_flussi['Data'] > date.today())]
-                        
-                        if not df_pos.empty:
-                            breakeven_date = df_pos.iloc[0]['Data']
-                            breakeven_val = df_pos.iloc[0]['Cumulativo']
-                            giorni = (breakeven_date - date.today()).days
-                            msg_p = f"Vai in pari (Breakeven) tra **{giorni} giorni** ({breakeven_date.strftime('%d/%m/%Y')})."
-                            col_bg = "rgba(0, 204, 150, 0.1)"; ico = "✅"
-                        else:
-                            breakeven_date = None
-                            msg_p = "Recupero capitale solo a scadenza."
-                            col_bg = "rgba(255, 170, 0, 0.1)"; ico = "⏳"
+                    # COLONNA ENTRATE (FUTURO) - VERDE CHIARO
+                    with col_in:
+                        st.success("📈 ENTRATE FUTURE (Sul tuo C/C)")
+                        st.markdown(f"""
+                        <div class="receipt-box" style="border-color: #00cc96;">
+                            <div class="receipt-row"><span>Cedole Nette Totali:</span> <span>+{cedole_totali_reali:,.2f} €</span></div>
+                            <div class="receipt-row"><span>Rimborso Capitale (Netto):</span> <span>+{rimborso_netto_scadenza:,.2f} €</span></div>
+                            <div class="receipt-row" style="color: gray; font-size: 12px;"><span>(Include restituzione capitale + gain)</span> <span></span></div>
+                            <hr style="border-top: 1px solid #555; margin: 10px 0;">
+                            <div class="receipt-total" style="color: #00cc96; border:none; padding-top:0;">
+                                <span>TOTALE INCASSO:</span> <span>+{incasso_tot:,.2f} €</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                        st.markdown(f"""<div style="background-color: {col_bg}; padding: 15px; border-radius: 10px; border-left: 5px solid white; margin-bottom: 15px;"><span style="font-size: 20px;">{ico}</span> <span style="font-size: 16px;">{msg_p}</span></div>""", unsafe_allow_html=True)
+                    # KPI FINALE
+                    st.info(f"""
+                    **💰 RISULTATO FINALE:** Tra cedole e rimborso avrai incassato **{incasso_tot:,.2f} €** a fronte di una spesa di **{spesa_tot:,.2f} €**.  
+                    **Guadagno Netto Pulito: +{guadagno_netto:,.2f} €**
+                    """)
 
-                        # Costruzione Grafico
-                        fig_pnl = go.Figure()
-                        
-                        # 1. Linea Rossa (Fino al Breakeven)
-                        mask_neg = df_flussi['Cumulativo'] < 0
+                    st.divider()
+
+                    # --- 1.1 GRAFICO BREAKEVEN (LINEA UNICA + AREA) ---
+                    st.subheader("🗓️ Recupero Capitale (Breakeven)")
+                    
+                    df_flussi['Cumulativo'] = df_flussi['Importo'].cumsum()
+                    
+                    # Analisi data pareggio
+                    df_pos = df_flussi[(df_flussi['Cumulativo'] >= 0) & (df_flussi['Data'] > date.today())]
+                    if not df_pos.empty:
+                        breakeven_date = df_pos.iloc[0]['Data']
+                        breakeven_val = df_pos.iloc[0]['Cumulativo']
+                        giorni_mancanti = (breakeven_date - date.today()).days
+                        msg_p = f"✅ **Pareggio Raggiunto:** Tra {giorni_mancanti} giorni ({breakeven_date.strftime('%d/%m/%Y')}). Da qui in poi sei in profitto."
+                        col_bg = "rgba(0, 204, 150, 0.1)"; ico = "✅"
+                    else:
+                        breakeven_date = None
+                        msg_p = "⏳ Il capitale rientra interamente solo alla scadenza del titolo."
+                        col_bg = "rgba(255, 170, 0, 0.1)"; ico = "⏳"
+
+                    st.markdown(f"""<div style="background-color: {col_bg}; padding: 15px; border-radius: 10px; border-left: 5px solid white; margin-bottom: 15px;"><span style="font-size: 20px;">{ico}</span> <span style="font-size: 16px;">{msg_p}</span></div>""", unsafe_allow_html=True)
+
+                    # COSTRUZIONE GRAFICO PULITO
+                    fig_pnl = go.Figure()
+
+                    # 1. Linea Rossa (Parte negativa)
+                    df_neg = df_flussi[df_flussi['Cumulativo'] <= 0]
+                    if not df_neg.empty:
                         fig_pnl.add_trace(go.Scatter(
-                            x=df_flussi[mask_neg]['Data'], 
-                            y=df_flussi[mask_neg]['Cumulativo'],
-                            mode='lines',
-                            line=dict(color='#FF4B4B', width=3),
-                            fill='tozeroy',
-                            fillcolor='rgba(255, 75, 75, 0.2)',
-                            name='Sotto Zero'
+                            x=df_neg['Data'], y=df_neg['Cumulativo'],
+                            mode='lines', line=dict(color='#FF4B4B', width=3),
+                            fill='tozeroy', fillcolor='rgba(255, 75, 75, 0.2)',
+                            name='Sotto Zero (Recupero)'
                         ))
-                        
-                        # 2. Linea Verde (Dal Breakeven in poi)
-                        mask_pos = df_flussi['Cumulativo'] >= 0
-                        if not df_pos.empty:
-                            # Aggiungiamo l'ultimo punto negativo per collegare la linea visivamente
-                            last_neg_idx = df_flussi[mask_neg].index[-1] if any(mask_neg) else None
-                            if last_neg_idx is not None:
-                                # Trucco visivo: colleghiamo l'ultimo rosso al primo verde
-                                x_connect = [df_flussi.loc[last_neg_idx, 'Data'], df_flussi[mask_pos]['Data'].iloc[0]]
-                                y_connect = [df_flussi.loc[last_neg_idx, 'Cumulativo'], df_flussi[mask_pos]['Cumulativo'].iloc[0]]
-                                fig_pnl.add_trace(go.Scatter(x=x_connect, y=y_connect, mode='lines', line=dict(color='#00CC96', width=3, dash='dot'), showlegend=False))
 
+                    # 2. Linea Verde (Parte positiva)
+                    df_pos_chart = df_flussi[df_flussi['Cumulativo'] >= 0]
+                    if not df_pos_chart.empty:
+                        # Trucco per collegare visivamente l'ultimo punto rosso al primo verde
+                        if not df_neg.empty:
+                            last_neg = df_neg.iloc[-1]
+                            first_pos = df_pos_chart.iloc[0]
+                            # Linea di collegamento tratteggiata
                             fig_pnl.add_trace(go.Scatter(
-                                x=df_flussi[mask_pos]['Data'], 
-                                y=df_flussi[mask_pos]['Cumulativo'],
-                                mode='lines',
-                                line=dict(color='#00CC96', width=3),
-                                fill='tozeroy',
-                                fillcolor='rgba(0, 204, 150, 0.2)',
-                                name='Guadagno'
-                            ))
-                            
-                            # 3. IL PUNTO DI BREAKEVEN (Pallino)
-                            fig_pnl.add_trace(go.Scatter(
-                                x=[breakeven_date], 
-                                y=[breakeven_val],
-                                mode='markers+text',
-                                marker=dict(color='#00CC96', size=12, symbol='star', line=dict(color='white', width=2)),
-                                text=["BREAKEVEN"],
-                                textposition="top center",
-                                name='Punto Pareggio'
+                                x=[last_neg['Data'], first_pos['Data']],
+                                y=[last_neg['Cumulativo'], first_pos['Cumulativo']],
+                                mode='lines', line=dict(color='gray', width=2, dash='dot'),
+                                showlegend=False, hoverinfo='skip'
                             ))
 
-                        fig_pnl.update_layout(
-                            template="plotly_dark", 
-                            height=300, 
-                            showlegend=False, 
-                            margin=dict(l=20, r=20, t=20, b=20),
-                            yaxis_title="Saldo Conto (€)",
-                            hovermode="x unified"
-                        )
-                        st.plotly_chart(fig_pnl, use_container_width=True)
-                        
-                        st.warning(f"⚠️ **Inflazione:** I tuoi {incasso_tot:,.0f}€ futuri avranno un potere d'acquisto pari a **{valore_reale:,.0f}€** di oggi.", icon="💸")
+                        fig_pnl.add_trace(go.Scatter(
+                            x=df_pos_chart['Data'], y=df_pos_chart['Cumulativo'],
+                            mode='lines', line=dict(color='#00CC96', width=3),
+                            fill='tozeroy', fillcolor='rgba(0, 204, 150, 0.2)',
+                            name='In Guadagno'
+                        ))
 
-                    # --- 1.4 CEDOLARIO FORMATTATO ---
+                    # 3. Punto di Breakeven (Stella)
+                    if breakeven_date:
+                        fig_pnl.add_trace(go.Scatter(
+                            x=[breakeven_date], y=[breakeven_val],
+                            mode='markers', marker=dict(color='yellow', size=12, symbol='star', line=dict(color='white', width=1)),
+                            name='Punto Pareggio', hovertemplate="Pareggio: %{x}<extra></extra>"
+                        ))
+
+                    fig_pnl.update_layout(
+                        template="plotly_dark", height=350, 
+                        showlegend=True, legend=dict(orientation="h", y=1.1),
+                        yaxis_title="Saldo Conto (€)", 
+                        hovermode="x unified",
+                        margin=dict(l=20, r=20, t=20, b=20)
+                    )
+                    st.plotly_chart(fig_pnl, use_container_width=True)
+                    
+                    # 1.2 NOTA INFLAZIONE CHIARA
+                    if infl_sim > 0:
+                        st.warning(f"⚠️ **Potere d'Acquisto:** A causa dell'inflazione stimata ({infl_sim}%), i **{incasso_tot:,.2f}€** che incasserai alla fine varranno come **{valore_reale:,.2f}€** di oggi.", icon="💸")
+
+                    # --- 1.4 CEDOLARIO (TABELLA SEMPLICE) ---
                     st.subheader("📅 Cedolario & Flussi")
                     
-                    def color_nums(val):
-                        color = '#ff4b4b' if val < 0 else '#00cc96'
+                    # Funzione styling
+                    def style_negative_red(val):
+                        # Gestisce sia float che stringhe formattate
+                        try:
+                            v = float(str(val).replace('€','').replace(',',''))
+                        except:
+                            v = 0
+                        color = '#ff4b4b' if v < 0 else '#00cc96'
                         return f'color: {color}; font-weight: bold;'
 
+                    # Tabella nativa con formattazione
                     st.dataframe(
                         df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style
-                        .map(color_nums, subset=['Importo'])
+                        .map(style_negative_red, subset=['Importo'])
                         .format({
-                            'Importo': '{:,.2f} €',  # Virgola aggiunta qui
+                            'Importo': '{:,.2f} €', # Virgola migliaia
                             'Data': lambda x: x.strftime('%d/%m/%Y')
                         }),
                         use_container_width=True,
