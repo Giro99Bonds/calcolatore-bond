@@ -1194,7 +1194,7 @@ def main_app():
                     with col_set1:
                         valuta_user = st.selectbox("La tua Valuta (Conto)", ["EUR", "USD"], index=0)
                     with col_set2:
-                        Importo Convertito = st.number_input(f"Capitale da Investire ({valuta_user})", value=10000.0, step=1000.0)
+                        Importo_Convertito = st.number_input(f"Capitale da Investire ({valuta_user})", value=10000.0, step=1000.0)
                     with col_set3:
                         infl_sim = st.number_input("Inflazione Stimata %", value=2.0, step=0.5)
 
@@ -1211,7 +1211,7 @@ def main_app():
                         scenario_fx = 0
                         
                     # Calcoli Flussi
-                    nominale_bond = Importo Convertito * tasso_spot 
+                    nominale_bond = Importo_Convertito * tasso_spot 
                     commissioni = 5.0 
                     
                     df_flussi, spesa_loc, incasso_loc, rateo_loc, tot_ced_loc, _ = genera_flussi_dettagliati(d, nominale_bond, tax, 0, d['pr'])
@@ -1220,15 +1220,15 @@ def main_app():
                     rate_rientro = tasso_spot * (1 - (scenario_fx/100)) if valuta_user != valuta_bond else 1.0
                     if rate_rientro <= 0.001: rate_rientro = 0.001
                     
-                    df_flussi['Importo Convertito'] = df_flussi.apply(
+                    df_flussi['Importo_Convertito'] = df_flussi.apply(
                         lambda x: (x['Importo'] / tasso_spot) if x['Tipo'] == 'USCITA' else (x['Importo'] / rate_rientro), axis=1
                     )
                     
                     # Totali
-                    spesa_reale_user = Importo Convertito + commissioni
+                    spesa_reale_user = Importo_Convertito + commissioni
                     costo_titolo_user = (nominale_bond * d['pr'] / 100) / tasso_spot
                     rateo_user = rateo_loc / tasso_spot
-                    incasso_reale_user = df_flussi[df_flussi['Tipo'] == 'ENTRATA']['Importo Convertito'].sum()
+                    incasso_reale_user = df_flussi[df_flussi['Tipo'] == 'ENTRATA']['Importo_Convertito'].sum()
                     cedole_tot_user = tot_ced_loc / rate_rientro
                     rimborso_user = (nominale_bond) / rate_rientro 
                     guadagno_netto_user = incasso_reale_user - spesa_reale_user
@@ -1277,7 +1277,7 @@ def main_app():
                     st.subheader("🗓️ Recupero Capitale")
                     
                     # 1. Calcolo Cumulato
-                    df_flussi['Cumulativo'] = df_flussi['Importo Convertito'].cumsum()
+                    df_flussi['Cumulativo'] = df_flussi['Importo_Convertito'].cumsum()
                     
                     # 2. Separazione dati Sotto/Sopra lo Zero
                     df_neg = df_flussi[df_flussi['Cumulativo'] < 0].copy()
@@ -1383,13 +1383,13 @@ def main_app():
                         return f'color: {color}; font-weight: bold;'
                     
                     st.dataframe(
-                        df_flussi[['Data', 'Tipo', 'Importo', 'Importo Convertito', 'Dettagli']]
+                        df_flussi[['Data', 'Tipo', 'Importo', 'Importo_Convertito', 'Dettagli']]
                         .style
                         .format({
                             'Importo': f'{{:+,.2f}} {valuta_bond}', 
-                            'Importo Convertito': f'{{:+,.2f}} {valuta_user}'
+                            'Importo_Convertito': f'{{:+,.2f}} {valuta_user}'
                         })
-                        .map(style_cedola, subset=['Importo', 'Importo Convertito']),
+                        .map(style_cedola, subset=['Importo', 'Importo_Convertito']),
                         use_container_width=True,
                         height=400
                     )
