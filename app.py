@@ -12,9 +12,10 @@ import os
 from scipy.optimize import newton
 import hashlib
 import json
+from typing import Dict, List, Optional
 
 # ==============================================================================
-# 1. CONFIGURAZIONE PAGINA E STILI CSS (ORIGINALI COMPLETI)
+# 1. CONFIGURAZIONE PAGINA E STILI CSS (VERSIONE ESTESA ORIGINALE)
 # ==============================================================================
 
 st.set_page_config(
@@ -47,7 +48,7 @@ st.markdown("""
     .bg-corp { background: linear-gradient(135deg, #1e3a5f 0%, #17a2b8 100%); }
     .bg-spec { background: linear-gradient(135deg, #581845 0%, #d63384 100%); }
 
-    /* --- SCONTRINO (Style Nativo Streamlit usato nel codice, questo è backup) --- */
+    /* --- SCONTRINO SIMULATORE (Stile Backup) --- */
     .receipt-box {
         border: 2px dashed rgba(128, 128, 128, 0.3);
         padding: 20px;
@@ -56,11 +57,19 @@ st.markdown("""
         margin-top: 10px;
         height: 100%;
     }
+    .receipt-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
+    .receipt-total { display: flex; justify-content: space-between; margin-top: 15px; border-top: 2px solid #00CC96; padding-top: 10px; font-weight: bold; font-size: 18px; color: #00CC96; }
+    .receipt-sub { font-size: 12px; color: gray; text-align: right; margin-top: -5px; }
 
     /* --- ALTRI STILI --- */
     .explanation-box { background-color: rgba(128, 128, 128, 0.1); border-left: 4px solid #00CC96; padding: 15px; border-radius: 5px; margin-bottom: 15px; }
     .explanation-title { font-weight: bold; color: #00CC96; font-size: 16px; margin-bottom: 5px; }
     .explanation-text { font-size: 14px; color: inherit; opacity: 0.9; }
+    
+    .score-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.2); }
+    .score-good { color: #00CC96; font-weight: bold; }
+    .score-bad { color: #FF4B4B; font-weight: bold; }
+    .score-neutral { color: #FFAA00; font-weight: bold; }
     
     .user-box { padding: 10px; background-color: rgba(0, 204, 150, 0.1); border-left: 5px solid #00CC96; border-radius: 5px; margin-bottom: 20px; font-weight: bold; color: inherit; }
     
@@ -1135,7 +1144,7 @@ def main_app():
                     
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
                     
-                    # --- BOX INFORMATIVO UNICO (FIX GRAFICA) ---
+                    # --- BOX INFORMATIVO UNICO ---
                     st.markdown(f"""
 <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -1160,58 +1169,16 @@ def main_app():
                     
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
-                    c1.metric("Prezzo", f"{d['pr']}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari", 
-                              help="💰 **Cosa significa?**\n\n• **Sotto la Pari (<100):** Paghi meno del valore che ti rimborseranno. Es: paghi 90, ricevi 100. La differenza è guadagno extra.\n• **Sopra la Pari (>100):** Paghi di più. Es: paghi 105, ricevi 100. È normale se la cedola è alta.")
-                    
-                    c2.metric("Rendimento Netto", f"{qual['ytm_netto']:.2f}%", 
-                              help="📈 **Cosa significa?**\n\nÈ il guadagno reale annuo che ti rimane in tasca, GIA' SOTTRATTE le tasse (12.5% o 26%). È il numero più importante da guardare.")
-                    
-                    c3.metric("Rendimento Lordo", f"{risk['ytm']:.2f}%",
-                              help="È il guadagno annuo PRIMA delle tasse. Serve per confrontare bond con tassazione diversa.")
-                    
-                    c4.metric("Cedola", f"{d['ced']}%", 
-                              help="💸 **Cosa significa?**\n\nÈ l'interesse periodico (il bonifico) che l'emittente ti paga. Es: 4% su 1.000€ = 40€ lordi l'anno.")
-                    
-                    c5.metric("Taglio Minimo", f"{d['taglio']:,.0f}€", 
-                              help="🧱 **Cosa significa?**\n\nÈ la quantità minima che puoi comprare. Se è 1.000€, non puoi investirne 500€.")
-                    
-                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni", 
-                              help="📉 **Cosa significa?**\n\nIndica quanto è rischioso il prezzo. Se la Duration è 6 anni, e i tassi salgono dell'1%, il prezzo del bond scenderà circa del 6%.")
-
-                    st.divider()
-                    st.subheader("💡 Analisi in Breve")
-                    t1, t2, t3 = st.columns(3)
-                    
-                    with t1:
-                        st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
-                        st.markdown('<div class="explanation-title">1. Quanto Rende?</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="explanation-text">Il rendimento annuo netto è del <b>{qual["ytm_netto"]:.2f}%</b>. Questo numero include sia le cedole che ricevi sia il guadagno finale (se compri a sconto) o la perdita (se compri a premio).</div>', unsafe_allow_html=True)
-                        st.markdown('</div>', unsafe_allow_html=True)
-                        
-                    with t2:
-                        st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
-                        st.markdown('<div class="explanation-title">2. Soldi in Tasca</div>', unsafe_allow_html=True)
-                        cedola_netta_euro = (1000 * (d['ced']/100) * (1 - tax/100))
-                        
-                        if d['freq'] == 1: freq_txt = "in un'unica soluzione annuale"
-                        elif d['freq'] == 2: freq_txt = f"in 2 cedole semestrali da {cedola_netta_euro/2:.2f}€"
-                        elif d['freq'] == 4: freq_txt = f"in 4 cedole trimestrali da {cedola_netta_euro/4:.2f}€"
-                        elif d['freq'] == 0: freq_txt = "(Zero Coupon: tutto a scadenza)"
-                        else: freq_txt = ""
-                        
-                        st.markdown(f'<div class="explanation-text">Ogni 1.000€ investiti, riceverai circa <b>{cedola_netta_euro:.2f}€ netti</b> all\'anno, {freq_txt}.</div>', unsafe_allow_html=True)
-                        st.markdown('</div>', unsafe_allow_html=True)
-                        
-                    with t3:
-                        st.markdown('<div class="explanation-box">', unsafe_allow_html=True)
-                        st.markdown('<div class="explanation-title">3. Rischio Prezzo</div>', unsafe_allow_html=True)
-                        volatilita = "BASSA" if risk['mod_dur'] < 3 else "MEDIA" if risk['mod_dur'] < 7 else "ALTA"
-                        st.markdown(f'<div class="explanation-text">Volatilità: <b>{volatilita}</b>. Se i tassi salgono dell\'1%, il prezzo scende del {risk["mod_dur"]:.1f}%.</div>', unsafe_allow_html=True)
-                        st.markdown('</div>', unsafe_allow_html=True)
+                    c1.metric("Prezzo", f"{d['pr']}€", delta="Sopra la Pari" if d['pr']>100 else "Sotto la Pari")
+                    c2.metric("Rendimento Netto", f"{qual['ytm_netto']:.2f}%")
+                    c3.metric("Rendimento Lordo", f"{risk['ytm']:.2f}%")
+                    c4.metric("Cedola", f"{d['ced']}%")
+                    c5.metric("Taglio Minimo", f"{d['taglio']:,.0f}€")
+                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni")
 
                     st.divider()
                     
-                    # === 💰 SIMULATORE DI INVESTIMENTO (FIXED GRAPHIC & LOGIC) ===
+                    # === 💰 SIMULATORE DI INVESTIMENTO (CORRETTO V5) ===
                     st.subheader("💰 Simulatore di Investimento")
                     
                     c_sim1, c_sim2, c_sim3 = st.columns(3)
@@ -1223,172 +1190,111 @@ def main_app():
                         infl, _ = get_inflazione_ufficiale()
                         infl_sim = st.number_input("Inflazione Stimata %", value=infl, step=0.5)
                     
-                    # --- MOTORE DI CALCOLO ---
+                    # Motore Calcolo
                     df_flussi, spesa_tot, incasso_tot, costo_rateo, totale_cedole_nette, plusvalenza_netta = genera_flussi_dettagliati(d, investimento, tax, commissioni, d['pr'])
                     guadagno_netto = incasso_tot - spesa_tot
                     anni_durata = (d['sc'] - date.today()).days / 365.25
                     valore_reale = incasso_tot / ((1 + infl_sim/100) ** anni_durata)
 
-                    # --- 1.3 SCONTRINO NATIVO (SOLIDO) ---
+                    # --- SCONTRINO NATIVO ---
                     st.write("")
                     st.markdown("### 🧾 Analisi Flussi di Cassa")
-                    
-                    # Usiamo container nativi per evitare errori HTML
                     col_usc, col_entr = st.columns(2)
                     
                     with col_usc:
                         with st.container(border=True):
-                            st.error("📉 USCITE (OGGI)")
+                            st.error("📉 USCITE (OGGI)", icon="💸")
                             st.markdown(f"""
                             **Costo Titoli:** {investimento * d['pr'] / 100:,.2f} €  
                             *(Prezzo: {d['pr']})*
-                            
                             ➕ **Rateo Interessi:** {costo_rateo:,.2f} €  
-                            *(Anticipo cedola)*
-                            
                             ➕ **Commissioni:** {commissioni:,.2f} €
-                            
                             ---
                             ### 🔴 Totale: -{spesa_tot:,.2f} €
                             """)
 
                     with col_entr:
                         with st.container(border=True):
-                            st.success("📈 ENTRATE (FUTURO)")
+                            st.success("📈 ENTRATE (FUTURO)", icon="💰")
                             st.markdown(f"""
                             **Cedole Nette:** +{totale_cedole_nette:,.2f} €  
-                            *(Bonifici totali)*
-                            
                             ➕ **Rimborso Capitale:** +{investimento:,.2f} €  
-                            *(A scadenza)*
-                            
                             ➕ **Capital Gain Netto:** +{plusvalenza_netta:,.2f} €  
-                            *(Già incluso nel rimborso)*
-                            
                             ---
                             ### 🟢 Totale: +{incasso_tot:,.2f} €
                             """)
 
-                    # KPI FINALE
-                    st.info(f"""
-                    **💰 RISULTATO:** Spendi **{spesa_tot:,.2f}€** oggi per avere **{incasso_tot:,.2f}€**.  
-                    Guadagno Netto: **+{guadagno_netto:,.2f} €** ({(guadagno_netto/spesa_tot)*100:.1f}% ROI)
-                    """)
+                    st.info(f"**💰 RISULTATO:** Spendi **{spesa_tot:,.2f}€** oggi per avere **{incasso_tot:,.2f}€**. Guadagno Netto: **+{guadagno_netto:,.2f} €**")
 
                     st.divider()
 
-                    # --- 1.1 GRAFICO BREAKEVEN CORRETTO (LINEA UNICA, NO AREE) ---
+                    # --- GRAFICO BREAKEVEN CORRETTO ---
                     st.subheader("🗓️ Recupero Capitale")
-                    
                     df_flussi['Cumulativo'] = df_flussi['Importo'].cumsum()
                     
-                    df_pos = df_flussi[(df_flussi['Cumulativo'] >= 0) & (df_flussi['Data'] > date.today())]
-                    
-                    breakeven_date = None
-                    if not df_pos.empty:
-                        breakeven_date = df_pos.iloc[0]['Data']
-                        days = (breakeven_date - date.today()).days
-                        msg_chart = f"✅ **Pareggio:** Tra {days} giorni ({breakeven_date.strftime('%d/%m/%Y')})."
-                        col_bg = "rgba(0, 204, 150, 0.1)"; ico = "✅"
-                    else:
-                        msg_chart = "⏳ Il pareggio avviene solo a scadenza."
-                        col_bg = "rgba(255, 170, 0, 0.1)"; ico = "⏳"
-
-                    st.markdown(f"""<div style="background-color: {col_bg}; padding: 15px; border-radius: 10px; border-left: 5px solid white; margin-bottom: 15px;"><span style="font-size: 20px;">{ico}</span> <span style="font-size: 16px;">{msg_chart}</span></div>""", unsafe_allow_html=True)
-
-                    fig = go.Figure()
-
-                    # 1. Linea Rossa (Fase di Recupero)
                     df_neg = df_flussi[df_flussi['Cumulativo'] < 0]
-                    if not df_neg.empty:
-                        fig.add_trace(go.Scatter(
-                            x=df_neg['Data'], 
-                            y=df_neg['Cumulativo'],
-                            mode='lines+markers',
-                            line=dict(color='#FF4B4B', width=3), # Rosso
-                            name='Sotto Zero'
-                        ))
-
-                    # 2. Linea Verde (Fase di Guadagno)
-                    if not df_pos.empty:
-                        if not df_neg.empty:
-                            last_neg_row = df_neg.iloc[[-1]]
-                            df_green_line = pd.concat([last_neg_row, df_pos])
+                    df_pos = df_flussi[df_flussi['Cumulativo'] >= 0]
+                    
+                    exact_breakeven_date = None
+                    if not df_neg.empty and not df_pos.empty:
+                        last_neg = df_neg.iloc[-1]
+                        first_pos = df_pos.iloc[0]
+                        y1, y2 = last_neg['Cumulativo'], first_pos['Cumulativo']
+                        x1, x2 = last_neg['Data'].toordinal(), first_pos['Data'].toordinal()
+                        if y2 != y1:
+                            x_zero = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
+                            exact_breakeven_date = date.fromordinal(int(x_zero))
                         else:
-                            df_green_line = df_pos
+                            exact_breakeven_date = first_pos['Data']
 
-                        fig.add_trace(go.Scatter(
-                            x=df_green_line['Data'], 
-                            y=df_green_line['Cumulativo'],
-                            mode='lines+markers',
-                            line=dict(color='#00CC96', width=3), # Verde
-                            name='In Profitto'
-                        ))
-                        
-                        # 3. Stella del Breakeven (SULL'ASSE X)
-                        fig.add_trace(go.Scatter(
-                            x=[breakeven_date], 
-                            y=[0], # FORZATO A ZERO
-                            mode='markers',
-                            marker=dict(color='yellow', size=18, symbol='star', line=dict(color='white', width=1)),
-                            name='Punto Pareggio',
-                            hoverinfo='x'
-                        ))
+                    # Box Testo Pareggio
+                    if exact_breakeven_date:
+                        giorni = (exact_breakeven_date - date.today()).days
+                        st.markdown(f"""
+                        <div style="background-color: #e6fffa; padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; color: #1e2130;">
+                            ✅ <b>Pareggio Raggiunto:</b> Tra <b style="color: #007755;">{giorni} giorni</b> ({exact_breakeven_date.strftime('%d/%m/%Y')}).
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+                        <div style="background-color: #fff8e1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffa500; color: #1e2130;">
+                            ⏳ <b>Recupero capitale</b> solo a scadenza.
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                    # Linea dello Zero
-                    fig.add_hline(y=0, line_color="gray", line_width=1, line_dash="dash")
+                    # Grafico Plotly
+                    fig = go.Figure()
+                    if not df_neg.empty:
+                        fig.add_trace(go.Scatter(x=df_neg['Data'], y=df_neg['Cumulativo'], mode='lines+markers', line=dict(color='#FF4B4B', width=3), name='Sotto Zero'))
+                    if not df_neg.empty and not df_pos.empty:
+                        last = df_neg.iloc[-1]
+                        first = df_pos.iloc[0]
+                        fig.add_trace(go.Scatter(x=[last['Data'], first['Data']], y=[last['Cumulativo'], first['Cumulativo']], mode='lines', line=dict(color='#00CC96', width=2, dash='dot'), showlegend=False))
+                    if not df_pos.empty:
+                        fig.add_trace(go.Scatter(x=df_pos['Data'], y=df_pos['Cumulativo'], mode='lines+markers', line=dict(color='#00CC96', width=3), name='Profitto'))
+                    if exact_breakeven_date:
+                        fig.add_trace(go.Scatter(x=[exact_breakeven_date], y=[0], mode='markers', marker=dict(color='yellow', size=18, symbol='star', line=dict(color='white', width=1)), name='Pareggio'))
 
-                    fig.update_layout(
-                        template="plotly_dark", 
-                        height=350, 
-                        showlegend=True, 
-                        legend=dict(orientation="h", y=1.1),
-                        yaxis_title="Saldo Conto (€)", 
-                        hovermode="x unified",
-                        margin=dict(l=20, r=20, t=20, b=20)
-                    )
+                    fig.add_hline(y=0, line_color='gray', line_width=1)
+                    fig.update_layout(template="plotly_dark", height=350, margin=dict(l=20,r=20,t=40,b=20), hovermode="x unified", legend=dict(orientation="h", y=1.1))
                     st.plotly_chart(fig, use_container_width=True)
-
-                    # 1.2 INFLAZIONE
+                    
+                    # Box Inflazione Educativo
                     if infl_sim > 0:
                         st.info(f"""
-                        **📉 Valore reale dell’incasso**
-                        
+                        ### 📉 Valore reale dell’incasso
                         Questo bond scade tra **{anni_durata:.1f} anni**.
-                        
                         Assumendo un’inflazione media del **{infl_sim}% annuo**, i **{incasso_tot:,.2f} €** che riceverai alla scadenza avranno un potere d’acquisto equivalente a circa **{valore_reale:,.2f} €** di oggi.
-                        
-                        *Il valore nominale non cambia, ma il potere d’acquisto sì.*
                         
                         💡 **In altre parole:** Con quei {incasso_tot:,.2f} € tra {anni_durata:.1f} anni potrai comprare ciò che oggi costerebbe circa **{valore_reale:,.2f} €**.
                         """, icon="💸")
-
-                    # --- 1.4 CEDOLARIO ---
-                    st.subheader("📅 Lista Movimenti")
                     
-                    def style_nums(val):
-                        # Gestione sicura del valore
-                        try:
-                            v = float(str(val).replace('€','').replace(',','').replace(' ',''))
-                        except:
-                            v = 0
-                        color = '#ff4b4b' if v < 0 else '#00cc96'
-                        return f'color: {color}; font-weight: bold;'
-
-                    st.dataframe(
-                        df_flussi[['Data', 'Tipo', 'Importo', 'Dettagli']].style
-                        .map(style_nums, subset=['Importo'])
-                        .format({
-                            'Importo': '{:,.2f} €', 
-                            'Data': lambda x: x.strftime('%d/%m/%Y')
-                        }),
-                        use_container_width=True,
-                        height=400
-                    )
+                    # Cedolario
+                    st.subheader("📅 Cedolario")
+                    st.dataframe(df_flussi[['Data','Tipo','Importo','Dettagli']].style.format({'Importo':'{:,.2f}€', 'Data': lambda x: x.strftime('%d/%m/%Y')}), use_container_width=True)
 
     elif st.session_state.page == "Screener": bond_screener_ui()
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
-    elif st.session_state.page == "SmartAnalysis": smart_analysis_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
     elif st.session_state.page == "Alerts": alert_manager_ui()
 
