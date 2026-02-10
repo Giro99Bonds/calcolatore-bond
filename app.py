@@ -548,7 +548,7 @@ def bond_screener_ui():
 
     # Filtri categoria
     col4, col5 = st.columns(2)
-    
+
     with col4:
         categorie_sel = st.multiselect(
             "🏷️ Categorie",
@@ -1445,12 +1445,17 @@ def main_app():
                         alternatives['Extra Spread'] = alternatives['YTM_Grezzo'] - ytm_target
                         top_alt = alternatives.sort_values('Extra Spread', ascending=False).head(10)
                         
-                        # TABELLA SEMPLIFICATA (SENZA FUNZIONI CHE CRASHANO)
+# TABELLA CON NOMI COLONNE IN ITALIANO (RETAIL FRIENDLY)
                         st.dataframe(
-                            top_alt[['Descrizione', 'Tipo', 'Prezzo', 'Scadenza', 'YTM_Grezzo', 'Extra Spread', 'ISIN']].style.format({
+                            top_alt[['Descrizione', 'Tipo', 'Prezzo', 'Scadenza', 'YTM_Grezzo', 'Extra Spread', 'ISIN']]
+                            .rename(columns={
+                                'YTM_Grezzo': 'Rendimento Lordo',  # <--- ECCO LA MODIFICA
+                                'Extra Spread': 'Guadagno Extra'
+                            })
+                            .style.format({
                                 'Prezzo': '{:.2f} €',
-                                'YTM_Grezzo': '{:.2f}%',
-                                'Extra Spread': '+{:.2f}%'
+                                'Rendimento Lordo': '{:.2f}%',     # Devi cambiare anche qui per mantenere il formato %
+                                'Guadagno Extra': '+{:.2f}%'
                             }),
                             use_container_width=True,
                             hide_index=True
