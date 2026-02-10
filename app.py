@@ -1527,7 +1527,11 @@ def main_app():
                 
             with f2:
                 # FILTRO CATEGORIA
-                sel_cat = st.multiselect("2. Categoria", list(MACRO_CATEGORIES.keys()), default=["Governativo", "Corporate"])
+                sel_cat = st.multiselect(
+                    "2. Categoria", 
+                    list(MACRO_CATEGORIES.keys()), 
+                    default=["🏛️ GOVERNATIVI", "🏭 CORPORATE"]
+                )
                 
             with f3:
                 # OPZIONE VISUALIZZAZIONE PREZZI
