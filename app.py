@@ -1371,7 +1371,7 @@ def main_app():
                         "Bancario": "rgba(30, 144, 255, 0.7)",       # Blu
                         "Corporate": "rgba(255, 140, 0, 0.7)",       # Arancio
                         "Speciali": "rgba(138, 43, 226, 0.7)",       # Viola
-                        "Altro": "rgba(200, 200, 200, 0.2)"          # GRIGIO QUASI INVISIBILE
+                        "Altro": "rgba(102, 51, 153, 0.6)"          # Viola Scuro
                     }
 
                     # -- DISEGNO PUNTI --
