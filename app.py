@@ -1276,118 +1276,115 @@ def main_app():
                     """)
 
                     # --- 1.1 GRAFICO BREAKEVEN CON INTERPOLAZIONE MATEMATICA ---
-                    st.divider()
-                    st.subheader("🗓️ Recupero Capitale")
-                    
-                    # Preparazione Dati
-                    df_flussi['Cumulativo'] = df_flussi['Importo'].cumsum()
-                    
-                    # Separiamo i dati negativi e positivi
-                    df_neg = df_flussi[df_flussi['Cumulativo'] < 0]
-                    df_pos = df_flussi[df_flussi['Cumulativo'] >= 0]
-                    
-                    # Calcolo del punto ESATTO di intersezione con lo zero (Interpolazione Lineare)
-                    exact_breakeven_date = None
-                    if not df_neg.empty and not df_pos.empty:
-                        last_neg = df_neg.iloc[-1]
-                        first_pos = df_pos.iloc[0]
+                    # --- 1.1 GRAFICO BREAKEVEN PERFETTO (V5) ---
+                    with c_det2:
+                        st.subheader("🗓️ Recupero Capitale")
                         
-                        # Matematica: Trova la X dove Y=0 tra due punti (x1,y1) e (x2,y2)
-                        y1, y2 = last_neg['Cumulativo'], first_pos['Cumulativo']
-                        x1, x2 = last_neg['Data'].toordinal(), first_pos['Data'].toordinal()
+                        df_flussi['Cumulativo'] = df_flussi['Importo'].cumsum()
                         
-                        if y2 != y1:
-                            x_zero = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
-                            exact_breakeven_date = date.fromordinal(int(x_zero))
+                        # Dati
+                        df_neg = df_flussi[df_flussi['Cumulativo'] < 0]
+                        df_pos = df_flussi[df_flussi['Cumulativo'] >= 0]
+                        
+                        # Calcolo punto esatto (matematica)
+                        exact_breakeven_date = None
+                        if not df_neg.empty and not df_pos.empty:
+                            last_neg = df_neg.iloc[-1]
+                            first_pos = df_pos.iloc[0]
+                            y1, y2 = last_neg['Cumulativo'], first_pos['Cumulativo']
+                            x1, x2 = last_neg['Data'].toordinal(), first_pos['Data'].toordinal()
+                            if y2 != y1:
+                                x_zero = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
+                                exact_breakeven_date = date.fromordinal(int(x_zero))
+                            else:
+                                exact_breakeven_date = first_pos['Data']
+
+                        # 2. BOX LEGGIBILE (Testo Scuro su Sfondo Chiaro)
+                        if exact_breakeven_date:
+                            giorni_mancanti = (exact_breakeven_date - date.today()).days
+                            msg_html = f"""
+                            <div style="background-color: #e6fffa; padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <span style="font-size: 24px;">✅</span>
+                                <span style="font-size: 16px; color: #1e2130; font-weight: 500;">
+                                    <b>Pareggio Raggiunto:</b> Tra <b style="color: #007755;">{giorni_mancanti} giorni</b> ({exact_breakeven_date.strftime('%d/%m/%Y')}). <br>
+                                    <span style="font-size: 14px; opacity: 0.8;">Da quel momento sei in profitto puro.</span>
+                                </span>
+                            </div>
+                            """
                         else:
-                            exact_breakeven_date = first_pos['Data']
-
-                    # 2. TESTO MIGLIORATO (Bold sui giorni)
-                    if exact_breakeven_date:
-                        giorni_mancanti = (exact_breakeven_date - date.today()).days
-                        msg_html = f"""
-                        <div style="background-color: rgba(0, 204, 150, 0.1); padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 24px;">✅</span>
-                            <span style="font-size: 16px; color: white;">
-                                <b>Pareggio Raggiunto:</b> Tra <b style="color: #00CC96; font-size: 18px;">{giorni_mancanti} giorni</b> ({exact_breakeven_date.strftime('%d/%m/%Y')}). <br>
-                                Da quel momento in poi, ogni incasso è puro profitto.
-                            </span>
-                        </div>
-                        """
-                    else:
-                        msg_html = f"""
-                        <div style="background-color: rgba(255, 170, 0, 0.1); padding: 15px; border-radius: 10px; border-left: 5px solid #ffa500; display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 24px;">⏳</span>
-                            <span style="font-size: 16px; color: white;">Recupero capitale solo a scadenza.</span>
-                        </div>
-                        """
-                    
-                    st.markdown(msg_html, unsafe_allow_html=True)
-
-                    # 3. GRAFICO PRECISO (La stella tocca la linea)
-                    fig_pnl = go.Figure()
-
-                    # A. Linea Rossa (Fino all'ultimo punto negativo)
-                    if not df_neg.empty:
-                        fig_pnl.add_trace(go.Scatter(
-                            x=df_neg['Data'], y=df_neg['Cumulativo'],
-                            mode='lines+markers', line=dict(color='#FF4B4B', width=3),
-                            name='Sotto Zero'
-                        ))
-
-                    # B. Linea di Collegamento (Il "Ponte" che attraversa lo zero)
-                    # Collega l'ultimo punto rosso al primo punto verde. La stella starà su questa linea.
-                    if not df_neg.empty and not df_pos.empty:
-                        last_neg = df_neg.iloc[-1]
-                        first_pos = df_pos.iloc[0]
-                        fig_pnl.add_trace(go.Scatter(
-                            x=[last_neg['Data'], first_pos['Data']],
-                            y=[last_neg['Cumulativo'], first_pos['Cumulativo']],
-                            mode='lines', line=dict(color='gray', width=2, dash='dot'), # Tratteggiata grigia per la transizione
-                            showlegend=False, hoverinfo='skip'
-                        ))
-
-                    # C. Linea Verde (Dal primo punto positivo)
-                    if not df_pos.empty:
-                        fig_pnl.add_trace(go.Scatter(
-                            x=df_pos['Data'], y=df_pos['Cumulativo'],
-                            mode='lines+markers', line=dict(color='#00CC96', width=3),
-                            name='Profitto'
-                        ))
-
-                    # D. La Stella Perfetta (Sull'asse X esatto)
-                    if exact_breakeven_date:
-                        fig_pnl.add_trace(go.Scatter(
-                            x=[exact_breakeven_date], 
-                            y=[0], # FORZATO A ZERO PERFETTO
-                            mode='markers',
-                            marker=dict(color='yellow', size=18, symbol='star', line=dict(color='white', width=1)),
-                            name='Punto Pareggio',
-                            hoverinfo='x'
-                        ))
-
-                    fig_pnl.add_hline(y=0, line_color="gray", line_width=1)
-                    fig_pnl.update_layout(
-                        template="plotly_dark", height=350, 
-                        margin=dict(l=20,r=20,t=40,b=20),
-                        yaxis_title="Saldo (€)", hovermode="x unified",
-                        legend=dict(orientation="h", y=1.1)
-                    )
-                    st.plotly_chart(fig_pnl, use_container_width=True)
-                    
-                    # 1. NOTA INFLAZIONE EDUCATIVA (Stile richiesto)
-                    if infl_sim > 0:
-                        st.info(f"""
-                        ### 📉 Valore reale dell’incasso
-                        Questo bond scade tra **{anni_durata:.1f} anni**.
-
-                        Assumendo un’inflazione media del **{infl_sim}% annuo**, i **{incasso_tot:,.2f} €** che riceverai alla scadenza avranno un potere d’acquisto equivalente a circa **{valore_reale:,.2f} €** di oggi.
+                            msg_html = f"""
+                            <div style="background-color: #fff8e1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffa500; display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                <span style="font-size: 24px;">⏳</span>
+                                <span style="font-size: 16px; color: #1e2130;">Recupero capitale solo a scadenza.</span>
+                            </div>
+                            """
                         
-                        *Il valore nominale non cambia, ma il potere d’acquisto sì.*
+                        st.markdown(msg_html, unsafe_allow_html=True)
 
-                        💡 **In altre parole:** Con quei {incasso_tot:,.2f} € tra {anni_durata:.1f} anni potrai comprare ciò che oggi costerebbe circa **{valore_reale:,.2f} €**.
-                        """, icon="💸")
+                        # 3. GRAFICO (Linea Verde Tratteggiata)
+                        fig_pnl = go.Figure()
+
+                        # A. Linea Rossa
+                        if not df_neg.empty:
+                            fig_pnl.add_trace(go.Scatter(
+                                x=df_neg['Data'], y=df_neg['Cumulativo'],
+                                mode='lines+markers', line=dict(color='#FF4B4B', width=3),
+                                name='Sotto Zero'
+                            ))
+
+                        # B. Linea di Collegamento (VERDE TRATTEGGIATA)
+                        if not df_neg.empty and not df_pos.empty:
+                            last_neg = df_neg.iloc[-1]
+                            first_pos = df_pos.iloc[0]
+                            fig_pnl.add_trace(go.Scatter(
+                                x=[last_neg['Data'], first_pos['Data']],
+                                y=[last_neg['Cumulativo'], first_pos['Cumulativo']],
+                                mode='lines', 
+                                line=dict(color='#00CC96', width=2, dash='dot'), # ORA È VERDE
+                                showlegend=False, hoverinfo='skip'
+                            ))
+
+                        # C. Linea Verde
+                        if not df_pos.empty:
+                            fig_pnl.add_trace(go.Scatter(
+                                x=df_pos['Data'], y=df_pos['Cumulativo'],
+                                mode='lines+markers', line=dict(color='#00CC96', width=3),
+                                name='Profitto'
+                            ))
+
+                        # D. Stella su Asse X
+                        if exact_breakeven_date:
+                            fig_pnl.add_trace(go.Scatter(
+                                x=[exact_breakeven_date], 
+                                y=[0], 
+                                mode='markers',
+                                marker=dict(color='yellow', size=18, symbol='star', line=dict(color='white', width=1)),
+                                name='Punto Pareggio',
+                                hoverinfo='x'
+                            ))
+
+                        fig_pnl.add_hline(y=0, line_color="gray", line_width=1)
+                        fig_pnl.update_layout(
+                            template="plotly_dark", height=350, 
+                            margin=dict(l=20,r=20,t=40,b=20),
+                            yaxis_title="Saldo (€)", hovermode="x unified",
+                            legend=dict(orientation="h", y=1.1)
+                        )
+                        st.plotly_chart(fig_pnl, use_container_width=True)
                         
+                        # 1. NOTA INFLAZIONE
+                        if infl_sim > 0:
+                            st.info(f"""
+                            ### 📉 Valore reale dell’incasso
+                            Questo bond scade tra **{anni_durata:.1f} anni**.
+
+                            Assumendo un’inflazione media del **{infl_sim}% annuo**, i **{incasso_tot:,.2f} €** che riceverai alla scadenza avranno un potere d’acquisto equivalente a circa **{valore_reale:,.2f} €** di oggi.
+                            
+                            *Il valore nominale non cambia, ma il potere d’acquisto sì.*
+
+                            💡 **In altre parole:** Con quei {incasso_tot:,.2f} € tra {anni_durata:.1f} anni potrai comprare ciò che oggi costerebbe circa **{valore_reale:,.2f} €**.
+                            """, icon="💸")
+                            
                     # --- 1.4 CEDOLARIO ---
                     st.subheader("📅 Lista Movimenti")
                     
