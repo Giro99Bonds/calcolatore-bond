@@ -11,6 +11,7 @@ import plotly.express as px
 import os
 from scipy.optimize import newton
 import hashlib
+import matplotlib.pyplot as plt
 import json
 import yfinance as yf 
 
