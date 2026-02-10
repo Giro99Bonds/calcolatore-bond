@@ -1301,15 +1301,16 @@ def main_app():
                     # Analisi data pareggio
                     df_pos = df_flussi[(df_flussi['Cumulativo'] >= 0) & (df_flussi['Data'] > date.today())]
                     if not df_pos.empty:
-                        breakeven_date = df_pos.iloc[0]['Data']
-                        breakeven_val = df_pos.iloc[0]['Cumulativo']
-                        giorni_mancanti = (breakeven_date - date.today()).days
-                        msg_p = f"✅ **Pareggio Raggiunto:** Tra {giorni_mancanti} giorni ({breakeven_date.strftime('%d/%m/%Y')}). Da qui in poi sei in profitto."
-                        col_bg = "rgba(0, 204, 150, 0.1)"; ico = "✅"
-                    else:
-                        breakeven_date = None
-                        msg_p = "⏳ Il capitale rientra interamente solo alla scadenza del titolo."
-                        col_bg = "rgba(255, 170, 0, 0.1)"; ico = "⏳"
+                            breakeven_date = df_pos.iloc[0]['Data']
+                            breakeven_val = df_pos.iloc[0]['Cumulativo']
+                            giorni_mancanti = (breakeven_date - date.today()).days
+                            # CORREZIONE QUI SOTTO: Uso <b> invece di **
+                            msg_p = f"<b>Pareggio Raggiunto:</b> Tra {giorni_mancanti} giorni ({breakeven_date.strftime('%d/%m/%Y')}). Da qui in poi sei in profitto."
+                            col_bg = "rgba(0, 204, 150, 0.1)"; ico = "✅"
+                        else:
+                            breakeven_date = None
+                            msg_p = "Il capitale rientra interamente solo alla scadenza del titolo."
+                            col_bg = "rgba(255, 170, 0, 0.1)"; ico = "⏳"
 
                     st.markdown(f"""<div style="background-color: {col_bg}; padding: 15px; border-radius: 10px; border-left: 5px solid white; margin-bottom: 15px;"><span style="font-size: 20px;">{ico}</span> <span style="font-size: 16px;">{msg_p}</span></div>""", unsafe_allow_html=True)
 
