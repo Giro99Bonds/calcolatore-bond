@@ -1491,169 +1491,172 @@ def main_app():
 
             else: st.error("❌ ISIN non trovato.")
     # --- SCREENER AVANZATO (FILTRI VALUTA + CONVERSIONE PREZZI) ---
-# --- SCREENER (VERSIONE DEFINITIVA: RANKING CONVERTITO) ---
+# --- SCREENER (LOGICA DIRETTA: DAL TUO PORTAFOGLIO AL MERCATO) ---
     elif st.session_state.page == "Screener":
-        st.title("⚡ Screener & Ranking Obbligazionario")
-        st.caption("Classifica i migliori bond in base ai tuoi parametri e alla tua valuta.")
+        st.title("⚡ Screener & Ranking")
+        st.caption("Trova i migliori rendimenti in base alla tua valuta di partenza.")
         
-        # 1. CARICAMENTO DATI
-        with st.spinner("Scansione mercati in corso..."):
-            df = carica_tutto_mercato()
-            
+        # 1. Caricamento Dati
+        df = carica_tutto_mercato()
         if df.empty:
-            st.warning("⚠️ Database vuoto. Clicca 'Aggiorna Dati' nella sidebar.")
+            st.warning("⚠️ Database vuoto. Clicca 'Aggiorna Dati'.")
             st.stop()
 
-        # 2. RICONOSCIMENTO VALUTE
+        # 2. Arricchimento
         if 'Valuta' not in df.columns:
             df['Valuta'] = df.apply(lambda x: detect_valuta(x['Descrizione'], x['ISIN']), axis=1)
 
         # =====================================================================
-        # 🎛️ CONFIGURAZIONE RANKING (UTENTE)
+        # 🎛️ CONFIGURAZIONE (DENTRO IL FORM PER NON RICARICARE SEMPRE)
         # =====================================================================
         
-        # BOX 1: IMPOSTAZIONI VALUTA (FONDAMENTALE)
-        with st.container():
-            c1, c2 = st.columns([1, 2])
+        with st.expander("🛠️ IMPOSTA LA RICERCA", expanded=True):
             
-            with c1:
-                # LA TUA VALUTA DI PARTENZA
-                valuta_conto = st.selectbox(
-                    "1. La Valuta del tuo Conto", 
-                    ["EUR", "USD"], 
-                    index=0,
-                    help="Tutti i prezzi di acquisto verranno convertiti in questa valuta."
-                )
-            
-            with c2:
-                # QUALI VALUTE VUOI VEDERE NEL RANKING?
-                # Default: Solo EUR (così l'utente medio non vede spazzatura)
-                all_curr = sorted(df['Valuta'].unique().tolist())
-                default_curr = [valuta_conto] if valuta_conto in all_curr else all_curr[:1]
+            with st.form(key="ranking_form"):
                 
-                target_valute = st.multiselect(
-                    "2. Includi queste valute nel Ranking",
-                    options=all_curr,
-                    default=default_curr,
-                    help="Seleziona EUR per vedere solo titoli sicuri. Aggiungi USD o TRY se vuoi confrontarli, ma occhio al cambio!"
-                )
+                # --- SEZIONE 1: CHI SEI E COSA VUOI ---
+                st.markdown("##### 1️⃣ Il Tuo Profilo")
+                c_val, c_scope = st.columns(2)
+                
+                with c_val:
+                    # TUA VALUTA
+                    valuta_wallet = st.selectbox("La valuta del tuo portafoglio", ["EUR", "USD"], index=0)
+                
+                with c_scope:
+                    # PERIMETRO (La modifica richiesta)
+                    perimetro = st.radio(
+                        "Quali obbligazioni vuoi vedere in classifica?",
+                        [f"🔒 Solo titoli in {valuta_wallet} (Nessun rischio cambio)", 
+                         "🌍 Tutto il Mercato Globale (Max rendimento, ma rischio cambio)"],
+                        index=0
+                    )
 
-        st.divider()
+                st.divider()
 
-        # BOX 2: I TUOI PARAMETRI (FILTRI NUMERICI MANUALI)
-        with st.expander("🛠️ Filtra Parametri (Rendimento, Durata, Prezzo)", expanded=True):
-            f1, f2, f3 = st.columns(3)
-            
-            with f1:
-                min_y = st.number_input("Rendimento Lordo Minimo (%)", value=3.0, step=0.5)
-            with f2:
-                max_anni = st.number_input("Scadenza Massima (Anni)", value=10, step=1)
-            with f3:
-                # Prezzo massimo nella valuta ORIGINALE del bond (per evitare bond sopra la pari)
-                max_pz_orig = st.number_input("Prezzo Max (Valuta Bond)", value=102.0, step=1.0, help="Filtra i bond che costano troppo (sopra la pari).")
+                # --- SEZIONE 2: I PARAMETRI DEL BOND ---
+                st.markdown("##### 2️⃣ I Parametri del Bond")
+                f1, f2, f3 = st.columns(3)
+                
+                with f1:
+                    min_y = st.number_input("Rendimento Minimo (%)", value=3.0, step=0.5)
+                with f2:
+                    max_anni = st.number_input("Scadenza Massima (Anni)", value=10, step=1)
+                with f3:
+                    # Questo filtro agisce sul prezzo CONVERTITO nella tua valuta
+                    max_pz = st.number_input(f"Prezzo Massimo ({valuta_wallet})", value=105.0, step=1.0)
 
-            # FILTRO CATEGORIA
-            cats = ["🌐 TUTTE LE CATEGORIE"] + list(MACRO_CATEGORIES.keys())
-            filtro_cat = st.selectbox("Filtra per Categoria Emittente", cats, index=0)
+                # Categoria
+                cats = ["🌐 TUTTE LE CATEGORIE"] + list(MACRO_CATEGORIES.keys())
+                filtro_cat = st.selectbox("Filtra Categoria Emittente", cats, index=0)
+                
+                st.write("") 
+                
+                # BOTTONE
+                submitted = st.form_submit_button("🚀 GENERA CLASSIFICA", type="primary", use_container_width=True)
 
         # =====================================================================
-        # ⚙️ MOTORE DI CALCOLO E RANKING
+        # ⚙️ MOTORE DI RANKING (SCATTA SOLO COL BOTTONE O AL PRIMO AVVIO)
         # =====================================================================
         
-        # 1. Filtro Valute Scelte
-        if not target_valute:
-            st.error("⚠️ Seleziona almeno una valuta nel punto 2.")
-            st.stop()
-            
-        df_filt = df[df['Valuta'].isin(target_valute)].copy()
+        # Logica di filtraggio iniziale (Valuta)
+        if "Solo titoli" in perimetro:
+            # Mostro solo la roba sicura nella mia valuta
+            df_work = df[df['Valuta'] == valuta_wallet].copy()
+        else:
+            # Mostro tutto
+            df_work = df.copy()
 
-        # 2. Filtro Categoria
+        # Logica Categoria
         if filtro_cat != "🌐 TUTTE LE CATEGORIE":
-            if "GOVERNATIVI" in filtro_cat: df_filt = df_filt[df_filt['Tipo'] == 'Governativo']
-            elif "BANCARI" in filtro_cat: df_filt = df_filt[df_filt['Tipo'] == 'Bancario']
-            elif "CORPORATE" in filtro_cat: df_filt = df_filt[df_filt['Tipo'] == 'Corporate']
-            elif "SPECIALI" in filtro_cat: df_filt = df_filt[df_filt['Tipo'].isin(['Altro', 'Speciali'])]
+            if "GOVERNATIVI" in filtro_cat: df_work = df_work[df_work['Tipo'] == 'Governativo']
+            elif "BANCARI" in filtro_cat: df_work = df_work[df_work['Tipo'] == 'Bancario']
+            elif "CORPORATE" in filtro_cat: df_work = df_work[df_work['Tipo'] == 'Corporate']
+            elif "SPECIALI" in filtro_cat: df_work = df_work[df_work['Tipo'].isin(['Altro', 'Speciali'])]
 
-        # 3. Filtri Numerici (Base)
-        df_filt = df_filt[
-            (df_filt['YTM_Grezzo'] >= min_y) &
-            (df_filt['Anni'] <= max_anni) &
-            (df_filt['Prezzo'] <= max_pz_orig)
+        # Filtri Preliminari
+        df_work = df_work[
+            (df_work['YTM_Grezzo'] >= min_y) &
+            (df_work['Anni'] <= max_anni)
         ]
 
-        # 4. CONVERSIONE E NORMALIZZAZIONE
-        if not df_filt.empty:
-            # Scarichiamo i tassi live per le valute necessarie
+        # ⚙️ CALCOLO CONVERSIONI PER IL RANKING
+        if not df_work.empty:
+            # Recupero tassi live solo per le valute diverse dalla mia
             tassi_live = {}
-            for v in df_filt['Valuta'].unique():
-                if v != valuta_conto:
-                    tassi_live[v] = get_tasso_cambio_live(valuta_conto, v) # Es: EURUSD=X
-            
-            def calcola_ranking(row):
-                curr = row['Valuta']
+            unique_currencies = df_work['Valuta'].unique()
+            for v in unique_currencies:
+                if v != valuta_wallet:
+                    tassi_live[v] = get_tasso_cambio_live(valuta_wallet, v)
+
+            def engine_ranking(row):
+                curr_bond = row['Valuta']
                 
-                # Conversione Prezzo (Quanto pago in Euro?)
-                if curr == valuta_conto:
+                # 1. PREZZO REALE (Quanto mi esce dal conto oggi)
+                if curr_bond == valuta_wallet:
                     pz_reale = row['Prezzo']
                     tasso = 1.0
                 else:
-                    tasso = tassi_live.get(curr, 1.0)
+                    tasso = tassi_live.get(curr_bond, 1.0)
                     pz_reale = row['Prezzo'] / tasso if tasso > 0 else 0
                 
-                # Note per il Ranking
-                if curr != valuta_conto:
-                    note = "⚠️ Valuta Estera"
-                else:
-                    note = "✅ Valuta Locale"
-                    
-                return pd.Series([pz_reale, note])
+                # 2. STATUS RISCHIO
+                risk_label = "✅ Sicuro" if curr_bond == valuta_wallet else "⚠️ Rischio FX"
+                
+                return pd.Series([pz_reale, risk_label])
 
-            df_filt[['Prezzo_Conto', 'Status']] = df_filt.apply(calcola_ranking, axis=1)
+            df_work[['Prezzo_Wallet', 'Risk_Status']] = df_work.apply(engine_ranking, axis=1)
             
-            # ORDINAMENTO (RANKING)
-            # Ordiniamo per Rendimento Lordo Decrescente
-            df_filt = df_filt.sort_values(by='YTM_Grezzo', ascending=False)
+            # FILTRO SUL PREZZO CONVERTITO (Ora che so quanto costa in Euro)
+            df_work = df_work[df_work['Prezzo_Wallet'] <= max_pz]
+            
+            # ORDINAMENTO
+            # Ordiniamo per rendimento decrescente
+            df_work = df_work.sort_values(by='YTM_Grezzo', ascending=False)
 
             # =================================================================
-            # 📊 VISUALIZZAZIONE CLASSIFICA
+            # 🏆 VISUALIZZAZIONE CLASSIFICA
             # =================================================================
-            st.subheader(f"🏆 Top {len(df_filt)} Bond Trovati")
-            st.caption(f"Ordinati per rendimento lordo. Prezzi convertiti in **{valuta_conto}**.")
+            st.divider()
             
-            # Colonne pulite
-            cols = ['ISIN', 'Descrizione', 'Valuta', 'Status', 'Prezzo_Conto', 'YTM_Grezzo', 'Scadenza']
+            if "Solo titoli" in perimetro:
+                st.subheader(f"🏆 Top {len(df_work)} Bond in {valuta_wallet}")
+            else:
+                st.subheader(f"🌍 Classifica Globale ({len(df_work)} Bond)")
+                st.info(f"💡 **Nota:** I prezzi sono stati convertiti in **{valuta_wallet}**. Il rendimento visualizzato è quello offerto dal bond nella sua valuta originale.")
+
+            cols = ['Descrizione', 'Valuta', 'Prezzo_Wallet', 'YTM_Grezzo', 'Scadenza', 'Risk_Status', 'ISIN']
             
             st.dataframe(
-                df_filt[cols].style
+                df_work[cols].style
                 .format({
-                    'Prezzo_Conto': f'{{:.2f}} {valuta_conto}', 
+                    'Prezzo_Wallet': f'{{:.2f}} {valuta_wallet}', 
                     'YTM_Grezzo': '{:.2f}%',
                     'Scadenza': '{:%d/%m/%Y}'
                 })
                 .background_gradient(subset=['YTM_Grezzo'], cmap='Greens')
-                .map(lambda x: 'color: orange; font-weight: bold;' if 'Estera' in x else 'color: #00CC96;', subset=['Status']),
+                .map(lambda x: 'color: #ff4b4b; font-weight: bold;' if 'FX' in x else 'color: #00CC96;', subset=['Risk_Status']),
                 use_container_width=True,
                 height=600,
                 column_config={
-                    "Prezzo_Conto": st.column_config.NumberColumn(
-                        f"Prezzo ({valuta_conto})", 
-                        help=f"Costo effettivo di acquisto convertito in {valuta_conto}."
+                    "Descrizione": st.column_config.TextColumn("Nome Bond", width="medium"),
+                    "Prezzo_Wallet": st.column_config.NumberColumn(
+                        f"Prezzo ({valuta_wallet})", 
+                        help=f"Costo reale addebitato sul tuo conto {valuta_wallet}."
                     ),
                     "YTM_Grezzo": st.column_config.NumberColumn(
-                        "Rendimento Lordo",
-                        help="Rendimento annuo nominale. Attenzione: se Valuta Estera, soggetto a rischio cambio!"
+                        "Rendimento Annuo",
+                        help="Rendimento nominale annuo."
                     ),
-                    "Status": st.column_config.TextColumn("Rischio", width="small"),
+                    "Risk_Status": st.column_config.TextColumn("Rischio", width="small"),
                     "Valuta": st.column_config.TextColumn("Divisa", width="small")
                 }
             )
             
-            # BOX DI APPROFONDIMENTO
+            # AZIONE
             st.write("")
-            st.markdown("### 🔎 Analizza un bond della classifica")
             c1, c2 = st.columns([3, 1])
             with c1:
-                isin_pick = st.text_input("Copia qui l'ISIN che ti interessa", placeholder="Es. IT000...").strip().upper()
+                isin_pick = st.text_input("Inserisci ISIN per simulazione dettagliata", placeholder="Es. IT000...").strip().upper()
             with c2:
                 st.write("")
                 if st.button("Vai allo Scanner ➡️", type="primary"):
@@ -1661,11 +1664,8 @@ def main_app():
                         st.session_state.selected_isin_from_chart = isin_pick
                         st.session_state.page = "Scanner"
                         st.rerun()
-                    else:
-                        st.warning("Inserisci un ISIN.")
-
         else:
-            st.info("Nessun bond trovato con questi filtri. Prova a:\n1. Abbassare il Rendimento Minimo\n2. Alzare la Scadenza Massima\n3. Includere altre valute nel Ranking.")
+            st.info("Nessun bond trovato. Prova ad allargare i filtri e premi 'GENERA CLASSIFICA'.")
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
     elif st.session_state.page == "Alerts": alert_manager_ui()
