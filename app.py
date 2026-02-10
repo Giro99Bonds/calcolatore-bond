@@ -1220,7 +1220,6 @@ def main_app():
                         st.markdown('</div>', unsafe_allow_html=True)
 
                   
-    )
                    st.divider()
                     
                     # === 💰 SIMULATORE DI INVESTIMENTO REALE (FIXED) ===
