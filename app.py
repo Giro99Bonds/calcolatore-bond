@@ -1290,7 +1290,7 @@ def main_app():
     elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Confronto")
         st.markdown("""
-        **Ciao Marco!** 👋 Qui verifichiamo se il bond che hai scelto è davvero un affare o se c'è di meglio.
+        👋 Qui verifichiamo se il bond che hai scelto è davvero un affare o se c'è di meglio.
         """)
         
         # 1. Caricamento Dati
