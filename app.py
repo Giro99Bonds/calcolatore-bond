@@ -1307,7 +1307,7 @@ def main_app():
                             # CORREZIONE QUI SOTTO: Uso <b> invece di **
                             msg_p = f"<b>Pareggio Raggiunto:</b> Tra {giorni_mancanti} giorni ({breakeven_date.strftime('%d/%m/%Y')}). Da qui in poi sei in profitto."
                             col_bg = "rgba(0, 204, 150, 0.1)"; ico = "✅"
-                        else:
+                    else:
                             breakeven_date = None
                             msg_p = "Il capitale rientra interamente solo alla scadenza del titolo."
                             col_bg = "rgba(255, 170, 0, 0.1)"; ico = "⏳"
