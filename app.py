@@ -1286,7 +1286,7 @@ def main_app():
                     )
 
     # --- SMART ANALYSIS ---
-elif st.session_state.page == "SmartAnalysis":
+    elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Confronto")
         st.caption("Analisi di posizionamento: Il tuo bond vs La Curva di Mercato.")
         
