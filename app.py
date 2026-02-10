@@ -1220,7 +1220,7 @@ def main_app():
                         st.markdown('</div>', unsafe_allow_html=True)
 
                   
-                   st.divider()
+                    st.divider()
                     
                     # === 💰 SIMULATORE DI INVESTIMENTO REALE (FIXED) ===
                     st.subheader("💰 Simulatore di Investimento Reale")
