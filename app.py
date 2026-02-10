@@ -1285,13 +1285,12 @@ def main_app():
                         height=400
                     )
 
-    # --- SMART ANALYSIS ---
-    # --- SMART ANALYSIS (MODALITÀ "MARCO RETAIL") ---
-    # --- SMART ANALYSIS (MODALITÀ "MARCO RETAIL" - FIX GRAFICO & ERRORE) ---
+
+    # --- SMART ANALYSIS (NUOVO CODICE PULITO & CORRETTO) ---
     elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Confronto")
         st.markdown("""
-        👋 Qui verifichiamo se il bond che hai scelto è davvero un affare o se c'è di meglio.
+        **Ciao Marco!** 👋 Qui verifichiamo se il bond che hai scelto è davvero un affare o se c'è di meglio.
         """)
         
         # 1. Caricamento Dati
@@ -1347,75 +1346,91 @@ def main_app():
                     k3.metric("Verdetto", msg_delta, delta=f"{delta:.2f}%", delta_color=col_delta)
 
                     # ---------------------------------------------------------
-                    # 2. GRAFICO SCATTER EVOLUTO (VERSIONE PULITA LIGHT)
+                    # 2. GRAFICO SCATTER (ZOOM AUTOMATICO E PULIZIA)
                     # ---------------------------------------------------------
-                    st.subheader(f"📍 La Mappa del Tesoro (Yield Curve)")
-                    st.caption("Ogni punto è un bond. Più in alto è, più guadagni. Il tuo è il ROMBO ROSSO.")
+                    st.subheader(f"📍 La Mappa del Tesoro")
+                    st.caption("Il grafico si concentra automaticamente sulla tua scadenza.")
                     
                     fig = go.Figure()
 
-                    # -- DEFINIZIONE COLORI (PIÙ SATURI PER SFONDO BIANCO) --
+                    # -- FILTRO UX: TOGLIAMO I BOND TROPPO LUNGHI (> 50 ANNI) --
+                    df_viz = df_cloud[
+                        (df_cloud['Anni'] <= 50) & 
+                        (df_cloud['YTM_Grezzo'] < 12) & 
+                        (df_cloud['YTM_Grezzo'] > -1)
+                    ].copy()
+
+                    # -- CALCOLO RANGE DI ZOOM (FOCUS SU MARCO) --
+                    # Se il bond è a 5 anni, mostriamo fino a 10. Max 50.
+                    max_x_view = max(10, anni_target * 2.0) 
+                    max_x_view = min(max_x_view, 50) 
+                    
+                    # -- COLORI --
                     palette_colori = {
-                        "Governativo": "rgba(34, 139, 34, 0.8)",     # Verde Foresta
-                        "Bancario": "rgba(30, 144, 255, 0.8)",       # Blu Dodger
-                        "Corporate": "rgba(255, 140, 0, 0.8)",       # Arancione Scuro
-                        "Speciali": "rgba(138, 43, 226, 0.8)",       # Viola
-                        "Altro": "rgba(169, 169, 169, 0.3)"          # Grigio CHIARO e TRASPARENTE
+                        "Governativo": "rgba(34, 139, 34, 0.7)",     # Verde
+                        "Bancario": "rgba(30, 144, 255, 0.7)",       # Blu
+                        "Corporate": "rgba(255, 140, 0, 0.7)",       # Arancio
+                        "Speciali": "rgba(138, 43, 226, 0.7)",       # Viola
+                        "Altro": "rgba(200, 200, 200, 0.2)"          # GRIGIO QUASI INVISIBILE
                     }
 
-                    # -- LOOP PER CREARE LE SERIE --
-                    tipi_presenti = df_cloud['Tipo'].unique()
+                    # -- DISEGNO PUNTI --
+                    tipi_presenti = df_viz['Tipo'].unique()
                     
-                    for tipo in tipi_presenti:
-                        subset = df_cloud[df_cloud['Tipo'] == tipo]
-                        colore = palette_colori.get(tipo, "rgba(169, 169, 169, 0.3)")
-                        
-                        # Se è "Altro", li facciamo piccoli per non disturbare
-                        size_pt = 4 if tipo == "Altro" or tipo == "nan" else 7
-                        
+                    # Prima lo sfondo ("Altro")
+                    if "Altro" in tipi_presenti:
+                        subset = df_viz[df_viz['Tipo'] == "Altro"]
                         fig.add_trace(go.Scatter(
-                            x=subset['Anni'], 
-                            y=subset['YTM_Grezzo'],
+                            x=subset['Anni'], y=subset['YTM_Grezzo'],
+                            mode='markers', marker=dict(color=palette_colori["Altro"], size=4),
+                            name="Altro", hoverinfo='none'
+                        ))
+
+                    # Poi le categorie vere
+                    for tipo in [t for t in tipi_presenti if t != "Altro"]:
+                        subset = df_viz[df_viz['Tipo'] == tipo]
+                        colore = palette_colori.get(tipo, palette_colori["Altro"])
+                        fig.add_trace(go.Scatter(
+                            x=subset['Anni'], y=subset['YTM_Grezzo'],
                             mode='markers',
-                            marker=dict(
-                                color=colore, 
-                                size=size_pt,
-                                line=dict(width=0) 
-                            ), 
+                            marker=dict(color=colore, size=6, line=dict(width=0)), 
                             name=str(tipo), 
                             text=subset['Descrizione'],
                             hovertemplate="<b>%{text}</b><br>Tipo: " + str(tipo) + "<br>Scadenza: %{x:.1f} anni<br>YTM: %{y:.2f}%<extra></extra>"
                         ))
 
-                    # -- IL BOND DI MARCO (IL TARGET - BEN VISIBILE) --
+                    # -- IL BOND DI MARCO (ROSSO E GRANDE) --
                     fig.add_trace(go.Scatter(
                         x=[anni_target], y=[ytm_target],
                         mode='markers',
-                        marker=dict(
-                            color='red',         # ROSSO PURO
-                            size=18,             # GIGANTE
-                            symbol='diamond',    
-                            line=dict(color='black', width=2) # Bordo Nero per contrasto massimo
-                        ),
+                        marker=dict(color='#FF0000', size=16, symbol='diamond', line=dict(color='black', width=2)),
                         name='👉 IL TUO BOND',
                         hovertemplate="<b>IL TUO BOND</b><br>Rendimento: %{y:.2f}%<extra></extra>"
                     ))
 
-                    # Layout BIANCO E PULITO
+                    # -- LAYOUT PULITO CON ZOOM --
                     fig.update_layout(
-                        template="plotly_white",  # <--- FONDAMENTALE: Sfondo bianco
-                        height=550,
-                        title=dict(text="Confronto Visivo: Il tuo bond vs Il Mercato", font=dict(color="black")),
-                        xaxis=dict(title="Scadenza (Anni)", showgrid=True, gridcolor='lightgray'),
-                        yaxis=dict(title="Rendimento Lordo (%)", showgrid=True, gridcolor='lightgray'),
-                        legend=dict(orientation="h", y=1.1, x=0, bgcolor='rgba(255,255,255,0.8)'),
-                        margin=dict(l=20, r=20, t=60, b=20),
+                        template="plotly_white",
+                        height=500,
+                        title=dict(text="📍 Dove si trova il tuo titolo", font=dict(size=20, color="black")),
+                        xaxis=dict(
+                            title="Scadenza (Anni)", 
+                            range=[0, max_x_view], # ZOOM ATTIVO QUI
+                            showgrid=True, gridcolor='#f0f0f0'
+                        ),
+                        yaxis=dict(
+                            title="Rendimento Lordo (%)", 
+                            range=[0, max(ytm_target + 4, 8)], # ZOOM ATTIVO QUI
+                            showgrid=True, gridcolor='#f0f0f0'
+                        ),
+                        legend=dict(orientation="h", y=-0.2, x=0.5, xanchor='center', bgcolor='rgba(255,255,255,0)'),
+                        margin=dict(l=20, r=20, t=50, b=80),
                         hovermode="closest"
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # ---------------------------------------------------------
-                    # 3. ALTERNATIVE MIGLIORI (FIX TABLE)
+                    # 3. ALTERNATIVE MIGLIORI (CORREZIONE ERRORE TABLE)
                     # ---------------------------------------------------------
                     st.divider()
                     st.subheader("🔄 Alternative Interessanti")
@@ -1432,8 +1447,7 @@ def main_app():
                         alternatives['Extra Spread'] = alternatives['YTM_Grezzo'] - ytm_target
                         top_alt = alternatives.sort_values('Extra Spread', ascending=False).head(10)
                         
-                        # FIX CRASH: Rimossa la funzione .background_gradient che richiedeva matplotlib
-                        # Usiamo solo la formattazione numerica standard
+                        # TABELLA SEMPLIFICATA (SENZA FUNZIONI CHE CRASHANO)
                         st.dataframe(
                             top_alt[['Descrizione', 'Tipo', 'Prezzo', 'Scadenza', 'YTM_Grezzo', 'Extra Spread', 'ISIN']].style.format({
                                 'Prezzo': '{:.2f} €',
