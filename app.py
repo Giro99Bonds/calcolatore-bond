@@ -1252,7 +1252,7 @@ def main_app():
                         <hr style="border-color: rgba(255,255,255,0.3); margin: 15px 0;">
                         <div style="display: flex; justify-content: space-around; font-size: 16px;">
                             <div>Uscita Oggi: <b style="color:#ffdddd;">-{spesa_tot:,.2f}€</b></div>
-                            <div>Incasso Totale: <b>{incasso_tot:,.2f}€</b></div>
+                            <div>Incasso Totale a scadenza: <b>{incasso_tot:,.2f}€</b></div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
