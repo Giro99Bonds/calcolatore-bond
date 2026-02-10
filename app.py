@@ -1366,10 +1366,20 @@ def main_app():
                     )
                     st.plotly_chart(fig_pnl, use_container_width=True)
                     
-                    # 1.2 NOTA INFLAZIONE CHIARA
-                    if infl_sim > 0:
-                        st.warning(f"⚠️ **Potere d'Acquisto:** A causa dell'inflazione stimata ({infl_sim}%), i **{incasso_tot:,.2f}€** che incasserai alla fine varranno come **{valore_reale:,.2f}€** di oggi.", icon="💸")
-
+                    
+                    # 1.2 NOTA INFLAZIONE (TESTO UX MIGLIORATO)
+                        if infl_sim > 0:
+                            st.info(f"""
+                            **📉 Valore reale dell’incasso**
+                            
+                            Questo bond scade tra **{anni_durata:.1f} anni**.
+                            
+                            Assumendo un’inflazione media del **{infl_sim}% annuo**, i **{incasso_tot:,.2f} €** che riceverai alla scadenza avranno un potere d’acquisto equivalente a circa **{valore_reale:,.2f} €** di oggi.
+                            
+                            *Il valore nominale non cambia, ma il potere d’acquisto sì.*
+                            
+                            💡 **In altre parole:** Con quei {incasso_tot:,.2f} € tra {anni_durata:.1f} anni potrai comprare ciò che oggi costerebbe circa **{valore_reale:,.2f} €**.
+                            """, icon="💸")
                     # --- 1.4 CEDOLARIO (TABELLA SEMPLICE) ---
                     st.subheader("📅 Cedolario & Flussi")
                     
