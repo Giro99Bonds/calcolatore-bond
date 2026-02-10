@@ -1075,11 +1075,12 @@ def main_app():
     # --- ROUTING PAGINE ---
 # --- SCANNER (CODICE COMPLETO E CORRETTO) ---
 # --- SCANNER (GRAFICA ORIGINALE + VALUTA LIVE + CEDOLARIO COLORATO) ---
+# --- SCANNER (GRAFICA PREMIUM + VALUTA LIVE + INFOBOX) ---
     if st.session_state.page == "Scanner":
         st.title("🔎 Scanner Obbligazionario")
         st.caption("Analisi approfondita con conversione valutaria live.")
         
-        # 1. LEGENDA CATEGORIE (TORNATA BELLA CON CSS)
+        # 1. LEGENDA CATEGORIE (RIPRISTINATO STILE CON BADGE ARROTONDATI)
         st.markdown("### 🧭 Guida alle Categorie")
         c1, c2, c3, c4 = st.columns(4)
         
@@ -1087,7 +1088,8 @@ def main_app():
             st.markdown("""
             <div class="cat-card bg-gov">
                 <div class="cat-title">🏛️ GOVERNATIVI</div>
-                <div class="cat-desc">Titoli di Stato. Sicurezza massima, Tassazione 12.5%.</div>
+                <div class="cat-desc">Titoli di Stato (es. BTP, Bund). Massima sicurezza.</div>
+                <div><span class="cat-meta">Rischio: BASSO</span><span class="cat-meta">Tax: 12.5%</span></div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1095,7 +1097,8 @@ def main_app():
             st.markdown("""
             <div class="cat-card bg-bank">
                 <div class="cat-title">🏦 BANCARI</div>
-                <div class="cat-desc">Obbligazioni Bancarie. Rendimento medio, Tax 26%.</div>
+                <div class="cat-desc">Obbligazioni emesse da banche. Rendimento medio.</div>
+                <div><span class="cat-meta">Rischio: MEDIO</span><span class="cat-meta">Tax: 26%</span></div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1103,7 +1106,8 @@ def main_app():
             st.markdown("""
             <div class="cat-card bg-corp">
                 <div class="cat-title">🏭 CORPORATE</div>
-                <div class="cat-desc">Aziende (Eni, Fiat...). Rendimenti più alti, Tax 26%.</div>
+                <div class="cat-desc">Aziende (Eni, Fiat...). Rendimenti più alti.</div>
+                <div><span class="cat-meta">Rischio: ALTO</span><span class="cat-meta">Tax: 26%</span></div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -1111,7 +1115,8 @@ def main_app():
             st.markdown("""
             <div class="cat-card bg-spec">
                 <div class="cat-title">💎 SPECIALI</div>
-                <div class="cat-desc">Strumenti complessi (Subordinate, Callable, Zero Coupon).</div>
+                <div class="cat-desc">Strumenti complessi (Subordinate, Callable).</div>
+                <div><span class="cat-meta">Rischio: VARIO</span><span class="cat-meta">Tax: Mista</span></div>
             </div>
             """, unsafe_allow_html=True)
         
@@ -1168,16 +1173,17 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Dati Chiave
+                    # Dati Chiave (CON INFO BOX AGGIUNTI)
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     simbolo = "€" if valuta_bond == "EUR" else valuta_bond
-                    c1.metric("Prezzo", f"{d['pr']} {simbolo}")
-                    c2.metric("Rend. Netto (Locale)", f"{qual['ytm_netto']:.2f}%")
-                    c3.metric("Rend. Lordo", f"{risk['ytm']:.2f}%")
-                    c4.metric("Cedola", f"{d['ced']}%")
-                    c5.metric("Valuta", valuta_bond)
-                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni")
+                    
+                    c1.metric("Prezzo", f"{d['pr']} {simbolo}", help="Prezzo attuale di mercato")
+                    c2.metric("Rend. Netto (Locale)", f"{qual['ytm_netto']:.2f}%", help="Rendimento annuo pulito dalle tasse (nella valuta del bond)")
+                    c3.metric("Rend. Lordo", f"{risk['ytm']:.2f}%", help="Yield to Maturity (Lordo) annualizzato")
+                    c4.metric("Cedola", f"{d['ced']}%", help="Tasso di interesse periodico pagato sul nominale")
+                    c5.metric("Valuta", valuta_bond, help="Valuta in cui il titolo paga le cedole e il rimborso")
+                    c6.metric("Duration", f"{risk['mod_dur']:.2f} Anni", help="Sensibilità del prezzo al variare dei tassi (Duration Modificata)")
 
                     st.divider()
                     
@@ -1235,7 +1241,7 @@ def main_app():
                     with col_usc:
                         st.markdown(f"""
                         <div class="receipt-box" style="border-left: 4px solid #FF4B4B; background-color: rgba(255, 75, 75, 0.05); padding: 15px; border-radius: 8px;">
-                            <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px; font-size:14px;">📉 USCITE (OGGI)</div>
+                            <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px; font-size:14px;">📉 USCITE (OGGI al tasso {tasso_spot:.2f})</div>
                             <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Costo Titoli:</span> <span>{costo_titolo_user:,.2f} {valuta_user}</span></div>
                             <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Rateo Interessi:</span> <span>{rateo_user:,.2f} {valuta_user}</span></div>
                             <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Commissioni:</span> <span>{commissioni:,.2f} {valuta_user}</span></div>
@@ -1251,10 +1257,10 @@ def main_app():
                         tasso_futuro_lbl = f"{rate_rientro:.2f}" if valuta_user != valuta_bond else "1.0"
                         st.markdown(f"""
                         <div class="receipt-box" style="border-left: 4px solid {color_res}; background-color: rgba(0, 204, 150, 0.05); padding: 15px; border-radius: 8px;">
-                            <div style="font-weight:bold; color:{color_res}; margin-bottom:10px; font-size:14px;">📈 ENTRATE (FUTURO)</div>
+                            <div style="font-weight:bold; color:{color_res}; margin-bottom:10px; font-size:14px;">📈 ENTRATE (FUTURO al tasso {tasso_futuro_lbl})</div>
                             <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Cedole Nette Totali:</span> <span>+{cedole_tot_user:,.2f} {valuta_user}</span></div>
                             <div class="receipt-row" style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Rimborso Capitale:</span> <span>+{rimborso_user:,.2f} {valuta_user}</span></div>
-                            <div class="receipt-row" style="color:#888; font-size:12px; display:flex; justify-content:space-between; margin-bottom:5px;"><span>(Cambio scadenza stimato: {tasso_futuro_lbl})</span> <span></span></div>
+                            <div class="receipt-row" style="color:#888; font-size:12px; display:flex; justify-content:space-between; margin-bottom:5px;"><span>(Effetto Cambio: {scenario_fx}%)</span> <span></span></div>
                             <hr style="margin: 10px 0; border-color: #444;">
                             <div class="receipt-total" style="color: {color_res}; font-size:16px; font-weight:bold; display:flex; justify-content:space-between;">
                                 <span>TOTALE INCASSO:</span> <span>+{incasso_reale_user:,.2f} {valuta_user}</span>
@@ -1309,7 +1315,6 @@ def main_app():
                     )
 
                 else: st.error("❌ Nessun risultato trovato.")
-    # --- SMART ANALYSIS (NUOVO CODICE PULITO & CORRETTO) ---
 # --- SMART ANALYSIS (GRAFICO MARCO + ZOOM + LIVE EXCHANGE) ---
     elif st.session_state.page == "SmartAnalysis":
         st.title("🧠 Smart Analysis & Confronto")
