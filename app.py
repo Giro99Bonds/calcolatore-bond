@@ -1348,45 +1348,51 @@ def main_app():
                     # ---------------------------------------------------------
                     # 2. GRAFICO SCATTER (ZOOM AUTOMATICO E PULIZIA)
                     # ---------------------------------------------------------
+                    # ---------------------------------------------------------
+                    # 2. GRAFICO SCATTER (ZOOM + TOOLTIP ATTIVI SU TUTTO)
+                    # ---------------------------------------------------------
                     st.subheader(f"📍 La Mappa del Tesoro")
-                    st.caption("Il grafico si concentra automaticamente sulla tua scadenza.")
+                    st.caption("Passa il mouse sui punti per vedere i dettagli. Il tuo è il ROMBO ROSSO.")
                     
                     fig = go.Figure()
 
-                    # -- FILTRO UX: TOGLIAMO I BOND TROPPO LUNGHI (> 50 ANNI) --
+                    # -- FILTRO UX --
                     df_viz = df_cloud[
                         (df_cloud['Anni'] <= 50) & 
                         (df_cloud['YTM_Grezzo'] < 12) & 
                         (df_cloud['YTM_Grezzo'] > -1)
                     ].copy()
 
-                    # -- CALCOLO RANGE DI ZOOM (FOCUS SU MARCO) --
-                    # Se il bond è a 5 anni, mostriamo fino a 10. Max 50.
+                    # -- ZOOM --
                     max_x_view = max(10, anni_target * 2.0) 
                     max_x_view = min(max_x_view, 50) 
                     
-                    # -- COLORI --
+                    # -- COLORI (CON VIOLA PER 'ALTRO') --
                     palette_colori = {
                         "Governativo": "rgba(34, 139, 34, 0.7)",     # Verde
                         "Bancario": "rgba(30, 144, 255, 0.7)",       # Blu
                         "Corporate": "rgba(255, 140, 0, 0.7)",       # Arancio
-                        "Speciali": "rgba(138, 43, 226, 0.7)",       # Viola
-                        "Altro": "rgba(102, 51, 153, 0.6)"          # Viola Scuro
+                        "Speciali": "rgba(138, 43, 226, 0.7)",       # Lilla
+                        "Altro": "rgba(102, 51, 153, 0.6)"           # VIOLA SCURO (Ben visibile)
                     }
 
                     # -- DISEGNO PUNTI --
                     tipi_presenti = df_viz['Tipo'].unique()
                     
-                    # Prima lo sfondo ("Altro")
+                    # 1. Disegniamo "Altro" (Ora con INFO ATTIVE)
                     if "Altro" in tipi_presenti:
                         subset = df_viz[df_viz['Tipo'] == "Altro"]
                         fig.add_trace(go.Scatter(
                             x=subset['Anni'], y=subset['YTM_Grezzo'],
-                            mode='markers', marker=dict(color=palette_colori["Altro"], size=4),
-                            name="Altro", hoverinfo='none'
+                            mode='markers', 
+                            marker=dict(color=palette_colori["Altro"], size=5),
+                            name="Altro",
+                            # 👇 QUI HO ATTIVATO LE INFO 👇
+                            text=subset['Descrizione'],
+                            hovertemplate="<b>%{text}</b><br>Tipo: Altro<br>Scadenza: %{x:.1f} anni<br>YTM: %{y:.2f}%<extra></extra>"
                         ))
 
-                    # Poi le categorie vere
+                    # 2. Disegniamo le altre categorie
                     for tipo in [t for t in tipi_presenti if t != "Altro"]:
                         subset = df_viz[df_viz['Tipo'] == tipo]
                         colore = palette_colori.get(tipo, palette_colori["Altro"])
@@ -1399,7 +1405,7 @@ def main_app():
                             hovertemplate="<b>%{text}</b><br>Tipo: " + str(tipo) + "<br>Scadenza: %{x:.1f} anni<br>YTM: %{y:.2f}%<extra></extra>"
                         ))
 
-                    # -- IL BOND DI MARCO (ROSSO E GRANDE) --
+                    # -- IL BOND DI MARCO (ROSSO) --
                     fig.add_trace(go.Scatter(
                         x=[anni_target], y=[ytm_target],
                         mode='markers',
@@ -1408,21 +1414,13 @@ def main_app():
                         hovertemplate="<b>IL TUO BOND</b><br>Rendimento: %{y:.2f}%<extra></extra>"
                     ))
 
-                    # -- LAYOUT PULITO CON ZOOM --
+                    # -- LAYOUT --
                     fig.update_layout(
                         template="plotly_white",
                         height=500,
-                        title=dict(text="📍 Dove si trova il tuo titolo", font=dict(size=20, color="black")),
-                        xaxis=dict(
-                            title="Scadenza (Anni)", 
-                            range=[0, max_x_view], # ZOOM ATTIVO QUI
-                            showgrid=True, gridcolor='#f0f0f0'
-                        ),
-                        yaxis=dict(
-                            title="Rendimento Lordo (%)", 
-                            range=[0, max(ytm_target + 4, 8)], # ZOOM ATTIVO QUI
-                            showgrid=True, gridcolor='#f0f0f0'
-                        ),
+                        title=dict(text="📍 Analisi Mercato", font=dict(size=20, color="black")),
+                        xaxis=dict(title="Scadenza (Anni)", range=[0, max_x_view], showgrid=True, gridcolor='#f0f0f0'),
+                        yaxis=dict(title="Rendimento Lordo (%)", range=[0, max(ytm_target + 4, 8)], showgrid=True, gridcolor='#f0f0f0'),
                         legend=dict(orientation="h", y=-0.2, x=0.5, xanchor='center', bgcolor='rgba(255,255,255,0)'),
                         margin=dict(l=20, r=20, t=50, b=80),
                         hovermode="closest"
