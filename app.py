@@ -270,24 +270,124 @@ def identikit_bond(dati):
 # 5. RISK ENGINE E SCORECARD
 # ==============================================================================
 
+# ==============================================================================
+# 5. RISK ENGINE E SCORECARD (VERSIONE INDISTRUTTIBILE)
+# ==============================================================================
+
 def calcola_ytm_preciso(prezzo, cedola_pct, scadenza, freq, face_value=100):
-    if prezzo <= 0 or freq == 0: return None
-    cedola_annua = cedola_pct / 100
-    giorni = (scadenza - date.today()).days
-    anni = giorni / 365.25
-    if anni <= 0: return None
-    n_periodi = max(1, int(anni * freq))
-    c = (cedola_annua * face_value) / freq
-    ytm_guess = (cedola_annua + (face_value - prezzo) / anni) / ((face_value + prezzo) / 2)
-    def price_func(y):
-        if y <= -1: return float('inf')
-        pv = sum([c / ((1 + y/freq) ** t) for t in range(1, n_periodi + 1)])
-        pv += face_value / ((1 + y/freq) ** n_periodi)
-        return pv - prezzo
+    """Calcolo iterativo preciso (XIRR style)"""
     try:
+        if prezzo <= 0: return None
+        # Se la frequenza è 0 o non definita, assumiamo annuale (1) per non bloccare il calcolo
+        if freq is None or freq <= 0: freq = 1
+        
+        cedola_annua = cedola_pct / 100
+        giorni = (scadenza - date.today()).days
+        anni = giorni / 365.25
+        
+        if anni <= 0: return 0.0 # Scaduto o scade oggi
+        
+        n_periodi = max(1, int(anni * freq))
+        c = (cedola_annua * face_value) / freq
+        
+        # Stima iniziale (Rendimento Grezzo)
+        ytm_guess = (cedola_annua + (face_value - prezzo) / anni) / ((face_value + prezzo) / 2)
+        
+        # Funzione prezzo per Newton
+        def price_func(y):
+            if y <= -1: return float('inf') # Protezione matematica
+            pv = sum([c / ((1 + y/freq) ** t) for t in range(1, n_periodi + 1)])
+            pv += face_value / ((1 + y/freq) ** n_periodi)
+            return pv - prezzo
+            
+        # Tentativo di risoluzione
         ytm = newton(price_func, ytm_guess, maxiter=50)
-        return max(0, ytm)
-    except: return ytm_guess
+        return ytm
+    except:
+        return None # Se fallisce Newton, restituisce None e attiviamo il fallback
+
+def calcola_metriche_rischio(prezzo, cedola_pct, scadenza, freq):
+    """
+    Calcola YTM e Duration. 
+    Se il metodo preciso fallisce, usa il metodo grezzo (Fallback).
+    Non restituisce MAI None che fa crashare l'app.
+    """
+    try:
+        if prezzo <= 0: 
+            return {"ytm": 0.0, "mod_dur": 0.0}
+
+        # 1. TENTATIVO PRECISO
+        ytm = calcola_ytm_preciso(prezzo, cedola_pct, scadenza, freq)
+        
+        # 2. FALLBACK: METODO GREZZO (Se il preciso fallisce)
+        if ytm is None:
+            giorni = (scadenza - date.today()).days
+            anni = max(giorni / 365.25, 0.01) # Evita div by zero
+            # Formula scolastica: (Cedola + (GuadagnoCapitale/Anni)) / Prezzo
+            guadagno_capitale = (100 - prezzo)
+            ytm = ((cedola_pct + (guadagno_capitale / anni)) / prezzo) / 100
+
+        # Calcolo Duration approssimata
+        giorni = (scadenza - date.today()).days
+        anni = max(giorni / 365.25, 0.0)
+        # Modified Duration semplificata
+        mod_dur = anni / (1 + ytm) if ytm > -0.9 else 0 
+
+        return {"ytm": ytm * 100, "mod_dur": mod_dur}
+        
+    except Exception as e:
+        # CASO DISPERATO (Dati corrotti)
+        return {"ytm": 0.0, "mod_dur": 0.0}
+
+def determina_tasse(nome, desc):
+    keys = ["BTP", "BOT", "BUND", "OAT", "USA", "TREASURY", "BEI", "EU", "ROMANIA", "UNGHERIA", "TURCHIA"]
+    if any(k in nome.upper() or k in desc.upper() for k in keys): return 12.5
+    return 26.0
+
+def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
+    breakdown = []
+    score = 100
+    
+    # Check Dati
+    taglio = dati.get('taglio', 1000.0)
+    prezzo = dati.get('pr', 100.0)
+    
+    # 1. Peso in Portafoglio
+    peso_bond = (taglio / patrimonio) * 100
+    if peso_bond > 20: punti = -30; msg = f"Rischio alto: pesa il {peso_bond:.1f}%"; colore = "score-bad"
+    elif peso_bond > 10: punti = -10; msg = f"Taglio impegnativo: pesa il {peso_bond:.1f}%"; colore = "score-neutral"
+    else: punti = 0; msg = f"Taglio sostenibile: pesa il {peso_bond:.1f}%"; colore = "score-good"
+    score += punti
+    breakdown.append({"cat": "🏗️ Sostenibilità", "val": f"{taglio/1000:.0f}k €", "msg": msg, "pts": punti, "col": colore})
+
+    # 2. Prezzo
+    if prezzo > 110: puntos = -15; msg="Molto sopra la pari"; col="score-bad"
+    elif prezzo > 102: puntos = -5; msg="Sopra la pari"; col="score-neutral"
+    elif prezzo < 95: puntos = +5; msg="Sotto la pari"; col="score-good"
+    else: puntos=0; msg="Prezzo Fair"; col="score-good"
+    score += puntos
+    breakdown.append({"cat": "🏷️ Prezzo", "val": f"{prezzo:.2f}", "msg": msg, "pts": puntos, "col": col})
+
+    # 3. Rendimento
+    ytm_lordo = risk['ytm']
+    ytm_net = ytm_lordo * (1 - tax / 100)
+    
+    if ytm_net < 1.5: puntos=-20; msg="Rendimento basso"; col="score-bad"
+    elif ytm_net > 3.0: puntos=+15; msg="Ottimo rendimento"; col="score-good"
+    else: puntos=0; msg="Rendimento medio"; col="score-neutral"
+    score += puntos
+    breakdown.append({"cat": "📈 Rendimento", "val": f"{ytm_net:.2f}%", "msg": msg, "pts": puntos, "col": col})
+
+    # 4. Tassazione
+    if tax < 20: puntos=+5; msg="Tassazione agevolata"; col="score-good"
+    else: puntos=-5; msg="Tassazione piena"; col="score-neutral"
+    score += puntos
+    breakdown.append({"cat": "🏛️ Tassazione", "val": f"{tax}%", "msg": msg, "pts": puntos, "col": col})
+
+    flags = []
+    if score < 50: flags.append(("red", "Score Basso"))
+    
+    return {"score": max(0, min(100, score)), "breakdown": breakdown, "ytm_netto": ytm_net, "flags": flags}
 
 def calcola_metriche_rischio(prezzo, cedola_pct, scadenza, freq):
     if prezzo <= 0: return None
