@@ -1320,11 +1320,25 @@ def main_app():
                         """, unsafe_allow_html=True)
 
                     
-                    # VERDETTO FINALE (NEUTRO)
+   # -- CALCOLO FORMATTAZIONE TEMPORALE --
+                    giorni_residui = (d['sc'] - date.today()).days
+                    anni_residui = giorni_residui / 365.25
+                    str_durata = f"{anni_residui:.1f} anni" if anni_residui >= 1 else f"{giorni_residui} giorni"
+
+                    # VERDETTO FINALE (PRIORITÀ AL RENDIMENTO ANNUO)
+                    st.divider()
                     if guadagno_netto_user > 0:
-                        st.success(f"✅ **Risultato Stimato:** Guadagno netto di **+{guadagno_netto_user:,.2f} {valuta_user}**\nRendimento Totale: +{roi_pct_totale:.2f}% | Rendimento Annuo: +{roi_annuo:.2f}%")
+                        st.success(
+                            f"✅ **GUADAGNO NETTO:** +{guadagno_netto_user:,.2f} {valuta_user}\n\n"
+                            f"📊 **Rendimento Annuo Reale: +{roi_annuo:.2f}%**\n"
+                            f"*(Rendimento Cumulato Totale: +{roi_pct_totale:.2f}% spalmato su {str_durata})*"
+                        )
                     else:
-                        st.error(f"❌ **Risultato Stimato:** Perdita di **{guadagno_netto_user:,.2f} {valuta_user}**\nRendimento Totale: {roi_pct_totale:.2f}% | Rendimento Annuo: {roi_annuo:.2f}%")
+                        st.error(
+                            f"❌ **PERDITA STIMATA:** {guadagno_netto_user:,.2f} {valuta_user}\n\n"
+                            f"📉 **Rendimento Annuo Reale: {roi_annuo:.2f}%**\n"
+                            f"*(Perdita Cumulata Totale: {roi_pct_totale:.2f}% su {str_durata})*"
+                        )
                     # --- GRAFICO BREAKEVEN (LINEE COLORATE + STELLA + PUNTO ZERO) ---
                     # --- GRAFICO BREAKEVEN (CON TESTO COMPLETO) ---
                     st.subheader("🗓️ Recupero Capitale nel Tempo")
