@@ -1273,25 +1273,105 @@ def main_app():
                     st.divider()
 
                     # --- GRAFICO BREAKEVEN ---
+# --- GRAFICO BREAKEVEN (LINEA BICOLORE + PUNTO PAREGGIO) ---
                     st.subheader("🗓️ Recupero Capitale")
-                    df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum() 
                     
-                    df_neg = df_flussi[df_flussi['Cumulativo'] < 0]
-                    df_pos = df_flussi[df_flussi['Cumulativo'] >= 0]
+                    # 1. Calcolo Cumulato
+                    df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
                     
-                    exact_date = None
-                    if not df_neg.empty and not df_pos.empty: exact_date = df_pos.iloc[0]['Data']
+                    # 2. Separazione dati Sotto/Sopra lo Zero
+                    df_neg = df_flussi[df_flussi['Cumulativo'] < 0].copy()
+                    df_pos = df_flussi[df_flussi['Cumulativo'] >= 0].copy()
+                    
+                    # 3. Calcolo Punto Esatto di Pareggio (Interpolazione Lineare)
+                    # Serve per unire la linea rossa e verde senza lasciare "buchi" nel grafico
+                    breakeven_date = None
+                    breakeven_val = 0
+                    
+                    if not df_neg.empty and not df_pos.empty:
+                        last_neg = df_neg.iloc[-1]
+                        first_pos = df_pos.iloc[0]
+                        
+                        # Calcolo matematico della data esatta in cui la linea tocca lo 0
+                        y1 = last_neg['Cumulativo']
+                        y2 = first_pos['Cumulativo']
+                        x1 = last_neg['Data'].toordinal()
+                        x2 = first_pos['Data'].toordinal()
+                        
+                        # Formula: x = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
+                        if y2 != y1:
+                            x_zero = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
+                            breakeven_date = date.fromordinal(int(x_zero))
+                            
+                            # Aggiungiamo il punto zero sia alla fine della rossa che all'inizio della verde
+                            # così si toccano perfettamente
+                            row_zero = pd.DataFrame({'Data': [breakeven_date], 'Cumulativo': [0]})
+                            df_neg = pd.concat([df_neg, row_zero], ignore_index=True)
+                            df_pos = pd.concat([row_zero, df_pos], ignore_index=True)
 
-                    if exact_date:
-                        giorni = (exact_date - date.today()).days
-                        st.markdown(f"""<div style="background-color: #e6fffa; padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; color: #1e2130;">✅ <b>Pareggio in valuta locale:</b> Tra <b style="color: #007755;">{giorni} giorni</b> ({exact_date.strftime('%d/%m/%Y')}).</div>""", unsafe_allow_html=True)
+                    # 4. Messaggio Utente
+                    if breakeven_date:
+                        days_to_be = (breakeven_date - date.today()).days
+                        st.markdown(f"""
+                        <div style="background-color: #e6fffa; padding: 15px; border-radius: 10px; border-left: 5px solid #00CC96; color: #1e2130; margin-bottom: 10px;">
+                            ✅ <b>Punto di Pareggio:</b> Raggiunto il <b>{breakeven_date.strftime('%d/%m/%Y')}</b> (tra {days_to_be} giorni).
+                            <br>Da quel momento in poi è tutto <b>Profitto Netto</b>.
+                        </div>
+                        """, unsafe_allow_html=True)
                     else:
-                        st.markdown(f"""<div style="background-color: #fff8e1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffa500; color: #1e2130;">⏳ <b>Recupero capitale</b> solo a scadenza.</div>""", unsafe_allow_html=True)
+                        st.markdown(f"""
+                        <div style="background-color: #fff8e1; padding: 15px; border-radius: 10px; border-left: 5px solid #ffa500; color: #1e2130; margin-bottom: 10px;">
+                            ⏳ <b>Recupero capitale:</b> Il capitale viene recuperato solo alla <b>scadenza</b> (o non viene recuperato integralmente).
+                        </div>
+                        """, unsafe_allow_html=True)
 
+                    # 5. Creazione Grafico
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df_flussi['Data'], y=df_flussi['Cumulativo'], mode='lines+markers', line=dict(color='#00CC96', width=3), name='Flusso Cumulato'))
-                    fig.add_hline(y=0, line_color='white', line_dash="dash")
-                    fig.update_layout(template="plotly_dark", height=350, margin=dict(l=20,r=20,t=40,b=20), hovermode="x unified")
+                    
+                    # Linea ROSSA (Sotto Zero)
+                    if not df_neg.empty:
+                        fig.add_trace(go.Scatter(
+                            x=df_neg['Data'], y=df_neg['Cumulativo'],
+                            mode='lines+markers',
+                            line=dict(color='#FF4B4B', width=3), # Rosso
+                            marker=dict(size=6),
+                            name='Capitale non recuperato',
+                            hovertemplate="Data: %{x}<br>Saldo: %{y:,.2f}<extra></extra>"
+                        ))
+                    
+                    # Linea VERDE (Sopra Zero)
+                    if not df_pos.empty:
+                        fig.add_trace(go.Scatter(
+                            x=df_pos['Data'], y=df_pos['Cumulativo'],
+                            mode='lines+markers',
+                            line=dict(color='#00CC96', width=3), # Verde
+                            marker=dict(size=6),
+                            name='Profitto Netto',
+                            hovertemplate="Data: %{x}<br>Profitto: +%{y:,.2f}<extra></extra>"
+                        ))
+                        
+                    # Marker STELLA sul punto esatto di pareggio
+                    if breakeven_date:
+                        fig.add_trace(go.Scatter(
+                            x=[breakeven_date], y=[0],
+                            mode='markers',
+                            marker=dict(color='yellow', size=15, symbol='star', line=dict(color='white', width=1)),
+                            name='PUNTO DI PAREGGIO',
+                            hovertemplate="<b>PAREGGIO RAGGIUNTO!</b><br>%{x}<extra></extra>"
+                        ))
+
+                    # Linea orizzontale Zero
+                    fig.add_hline(y=0, line_color='white', line_width=1, line_dash="dash")
+                    
+                    fig.update_layout(
+                        template="plotly_dark", 
+                        height=400, 
+                        margin=dict(l=20,r=20,t=40,b=20), 
+                        hovermode="closest",
+                        legend=dict(orientation="h", y=1.1),
+                        yaxis=dict(title=f"Saldo Cumulato ({valuta_user})")
+                    )
+                    
                     st.plotly_chart(fig, use_container_width=True)
                     
                     # --- CEDOLARIO (VISIBILE E COLORATO) ---
