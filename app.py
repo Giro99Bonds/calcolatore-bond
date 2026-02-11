@@ -1504,7 +1504,7 @@ def main_app():
                     else:
                         st.warning(f"⚠️ Budget insufficiente. Minimo {lotto_min:,.0f} {valuta_bond}.")
                 
-                else: st.error("❌ Nessun risultato trovato.")
+            else: st.error("❌ Nessun risultato trovato.")
     # --- SCREENER AVANZATO (FILTRI VALUTA + CONVERSIONE PREZZI) ---
 # --- SCREENER (LOGICA DIRETTA: DAL TUO PORTAFOGLIO AL MERCATO) ---
     elif st.session_state.page == "Screener":
