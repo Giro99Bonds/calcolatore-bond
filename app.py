@@ -238,7 +238,56 @@ def processa_riga(row, info):
         
         return {"desc": desc, "pr": pr, "sc": sc, "ced": ced, "freq": info['freq'], "fonte": info['nome'], "taglio": taglio, "rating": rating, "isin": isin_val}
     except: return None
+# ==============================================================================
+# FUNZIONE MANCANTE: INTELLIGENZA BOND
+# ==============================================================================
 
+def detect_bond_features(desc, isin):
+    """
+    Analizza la descrizione per capire la struttura del bond.
+    Rileva: Cumulative, Zero Coupon, Callable, Tassazione.
+    """
+    desc = str(desc).upper()
+    features = {
+        'is_cumulative': False,     # Cedola pagata solo a scadenza
+        'is_zero_coupon': False,    # Nessuna cedola
+        'is_callable': False,       # Emittente può rimborsare prima
+        'is_floating': False,       # Tasso variabile
+        'tax_rate': 26.0            # Default (Corporate/Bank)
+    }
+    
+    # 1. Rilevamento Struttura (Parole Chiave)
+    if "CUMUL" in desc or "ZC" in desc or "ZERO" in desc or "STRIP" in desc:
+        features['is_cumulative'] = True
+        if "ZERO" in desc or "ZC" in desc or "STRIP" in desc:
+            features['is_zero_coupon'] = True
+            
+    if "CALL" in desc or "CALLABLE" in desc:
+        features['is_callable'] = True
+        
+    if "TV" in desc or "VAR" in desc or "EURIBOR" in desc:
+        features['is_floating'] = True
+
+    # 2. Rilevamento Tassazione Agevolata (White List 12.5%)
+    # Se il nome contiene questi termini, la tassa scende al 12.5%
+    whitelist_tax = [
+        "BTP", "BOT", "CCT", "BUND", "OAT", "TREASURY", "USA ", 
+        "BEI", "EU ", "WORLD BANK", "EIB", "ROMANIA", "UNGHERIA", "TURCHIA"
+    ]
+    if any(x in desc for x in whitelist_tax):
+        features['tax_rate'] = 12.5
+        
+    return features
+
+def detect_valuta(desc, isin):
+    """Rileva la valuta dalla descrizione"""
+    desc = str(desc).upper()
+    if "USA" in desc or "TREASURY" in desc or "DOLLAR" in desc: return "USD"
+    if "TURCHIA" in desc or "TRY" in desc or "LIRA" in desc: return "TRY"
+    if "BRASILE" in desc or "BRL" in desc or "REAL" in desc: return "BRL"
+    if "ROMANIA" in desc or "RON" in desc: return "RON"
+    if "GBP" in desc or "UK" in desc: return "GBP"
+    return "EUR" # Default
 def identikit_bond(dati):
     desc = dati['desc'].upper()
     fonte = dati['fonte'].upper()
