@@ -1309,7 +1309,7 @@ def main_app():
                 row, info = cerca_db(isin, filtro_cat)
                 d = processa_riga(row, info) if row is not None else None
                 
-  if d:
+            if d:
                     # --- A. MOTORE MATEMATICO ---
                     feats = detect_bond_features(d['desc'], d.get('isin', ''))
                     tax_rate = feats['tax_rate']
