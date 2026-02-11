@@ -1268,52 +1268,38 @@ def main_app():
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
-
                     # 1. AUTO-DETECTION INTELLIGENTE
-                    # Capisce da solo se è Cumulative, Callable o ZC analizzando la descrizione
                     feats = detect_bond_features(d['desc'], d.get('isin', ''))
                     valuta_bond = detect_valuta(d['desc'], d.get('isin', ''))
                     
-                    # 2. PANNELLO PARAMETRI AVANZATI (Per Override Manuale)
-                    # Qui l'utente può correggere il tiro se il bond è Callable o il prezzo è cambiato
+                    # 2. PANNELLO PARAMETRI (Override Manuale)
                     with st.expander("⚙️ Parametri Avanzati & Struttura (Clicca per modificare)", expanded=False):
                         c_p1, c_p2, c_p3 = st.columns(3)
-                        
-                        # Prezzo modificabile
                         new_price = c_p1.number_input("Prezzo Acquisto", value=d['pr'], step=0.1, format="%.2f")
-                        
-                        # Data scadenza modificabile (FONDAMENTALE per i CALLABLE: qui inserisci la data di Call!)
+                        # Data scadenza modificabile (FONDAMENTALE per i CALLABLE)
                         new_date = c_p2.date_input("Data Scadenza / Call", value=d['sc'])
+                        # Struttura Cumulativa
+                        is_cum = c_p3.checkbox("Cedola Cumulativa?", value=feats['is_cumulative'], help="Spunta se paga tutto alla fine")
                         
-                        # Struttura Cumulativa (per Zero Coupon o bond che pagano alla fine)
-                        is_cum = c_p3.checkbox("Cedola Cumulativa?", value=feats['is_cumulative'], help="Spunta se il bond paga tutti gli interessi solo alla fine.")
-                        
-                        # Creo una copia dei dati per i calcoli (così non tocco l'originale del DB)
+                        # Override dati
                         bond_calc = d.copy()
-                        bond_calc['pr'] = new_price
-                        bond_calc['sc'] = new_date
+                        bond_calc['pr'] = new_price; bond_calc['sc'] = new_date
                         feats['is_cumulative'] = is_cum
 
                     # 3. CALCOLO RENDIMENTO REALE (XIRR NETTO)
-                    # Usa la nuova funzione matematica che gestisce tasse differite e flussi cumulativi
                     df_flussi, spesa_tot, feats = calcola_flussi_reali(bond_calc, bond_calc['pr'], 100.0)
                     rendimento_netto_xirr = xirr(df_flussi)
                     
-                    # Calcolo Lordo Semplice (Yield to Maturity classico per confronto)
+                    # Calcolo Lordo Semplice
                     try: 
                         anni_res = (bond_calc['sc'] - date.today()).days / 365.25
-                        if anni_res > 0:
-                            rend_lordo = ((bond_calc['ced'] + (100 - bond_calc['pr']) / anni_res) / bond_calc['pr']) * 100
-                        else: rend_lordo = 0
+                        rend_lordo = ((bond_calc['ced'] + (100 - bond_calc['pr']) / anni_res) / bond_calc['pr']) * 100 if anni_res > 0 else 0
                     except: rend_lordo = 0
-                    
-                    # 4. VISUALIZZAZIONE DATI (HEADER & BADGE)
+
+                    # 4. VISUALIZZAZIONE HEADER & KPI
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
-                    
-                    # Aggiungo etichette se troviamo caratteristiche speciali
                     if feats['is_callable']: risk_msg += " | 📞 CALLABLE"
                     if feats['is_cumulative']: risk_msg += " | ⚠️ CUMULATIVE"
-                    if feats['is_zero_coupon']: risk_msg += " | 🌑 ZERO COUPON"
 
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px;">
@@ -1336,62 +1322,47 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 5. KPI NUMERICI
-                    st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4 = st.columns(4)
-                    
                     c1.metric("Prezzo", f"{bond_calc['pr']} {valuta_bond}")
-                    # Il rendimento netto ora è calcolato con XIRR (preciso)
-                    c2.metric("Rend. NETTO (XIRR)", f"{rendimento_netto_xirr:.2f}%", help="Rendimento reale annuo netto calcolato sui flussi di cassa esatti (TIR).")
-                    c3.metric("Rend. Lordo (YTM)", f"{rend_lordo:.2f}%")
+                    c2.metric("Rend. NETTO (XIRR)", f"{rendimento_netto_xirr:.2f}%", help="Rendimento reale annuo netto calcolato sui flussi di cassa esatti.")
+                    c3.metric("Rend. LORDO (YTM)", f"{rend_lordo:.2f}%")
                     c4.metric("Duration", f"{(bond_calc['sc']-date.today()).days/365:.1f}y")
 
-                    # Avvisi intelligenti all'utente
                     if feats['is_callable']:
-                        st.warning("⚠️ **Bond CALLABLE:** Il rendimento è calcolato alla data indicata sopra. Se vuoi calcolare lo 'Yield to Call' (rimborso anticipato), cambia la data nel pannello 'Parametri Avanzati' in alto.")
+                        st.warning("⚠️ **Bond CALLABLE:** Il rendimento è calcolato alla data indicata. Se vuoi calcolare lo 'Yield to Call', cambia la data nel pannello 'Parametri Avanzati'.")
                     if feats['is_cumulative']:
-                        st.info("ℹ️ **Bond CUMULATIVE:** Interessi spostati tutti a scadenza (effetto interesse composto gestito).")
-
-                    # 6. SIMULATORE BUDGET (Logica Inversa Corretta)
-                    st.divider(); st.subheader("💰 Simulatore Budget")
+                        st.info("ℹ️ **Bond CUMULATIVE:** Interessi spostati tutti a scadenza.")
                     
+                    # 5. SIMULATORE BUDGET
+                    st.divider(); st.subheader("💰 Simulatore Budget")
                     col_set1, col_set2, col_set3 = st.columns(3)
-                    with col_set1:
-                        liste_valute = ["EUR", "USD", "GBP", "CHF", "TRY", "BRL"]
-                        valuta_user = st.selectbox("La tua Valuta", liste_valute, index=0)
-                    with col_set2:
-                        budget_user = st.number_input(f"Budget Totale ({valuta_user})", value=10000.0, step=1000.0)
-                    with col_set3:
-                        commissioni_input = st.number_input("Commissioni", value=5.0)
+                    with col_set1: liste_valute = ["EUR", "USD", "GBP", "CHF", "TRY", "BRL"]; valuta_user = st.selectbox("La tua Valuta", liste_valute, index=0)
+                    with col_set2: budget_user = st.number_input(f"Budget Totale ({valuta_user})", value=10000.0, step=1000.0)
+                    with col_set3: commissioni_input = st.number_input("Commissioni", value=5.0)
 
                     tasso_spot = get_tasso_cambio_live(valuta_user, valuta_bond)
-                    
-                    # Calcolo Inverso: Quanto nominale compro col budget?
-                    # Costo di 100 nominale in valuta USER (usando spesa_tot che è in valuta bond)
                     costo_100_in_user = spesa_tot / tasso_spot
-                    
-                    # Nominale teorico acquistabile
                     nominale_teorico = ((budget_user - commissioni_input) / costo_100_in_user) * 100
-                    
-                    # Arrotondamento al lotto (default 1000 se non specificato)
                     lotto = d['taglio'] if d['taglio'] > 0 else 1000.0
                     nominale_effettivo = int(nominale_teorico / lotto) * lotto
                     if nominale_effettivo == 0: nominale_effettivo = 0
                     
                     if nominale_effettivo > 0:
-                        # Rigenero i flussi reali sul nominale effettivo
+                        # Ricalcolo flussi su nominale effettivo
                         df_sim, spesa_reale_bond, _ = calcola_flussi_reali(bond_calc, bond_calc['pr'], nominale_effettivo)
                         
-                        # Converto tutto in valuta USER per lo scontrino
                         spesa_reale_user = (spesa_reale_bond / tasso_spot) + commissioni_input
                         
-                        # Somma incassi futuri (convertiti al tasso attuale)
-                        incassi_futuri_bond = df_sim[df_sim['Importo'] > 0]['Importo'].sum()
-                        incassi_futuri_user = incassi_futuri_bond / tasso_spot
+                        # Conversione flussi futuri
+                        df_sim['Importo_User'] = df_sim.apply(
+                            lambda x: -spesa_reale_user if x['Tipo'] == 'ACQUISTO' else (x['Importo'] / tasso_spot), 
+                            axis=1
+                        )
                         
+                        incassi_futuri_user = df_sim[df_sim['Importo_User'] > 0]['Importo_User'].sum()
                         netto_user = incassi_futuri_user - spesa_reale_user
                         
-                        # VISUALIZZAZIONE SCONTRINO
+                        # SCONTRINO
                         st.write("")
                         c_res1, c_res2 = st.columns(2)
                         with c_res1:
@@ -1400,111 +1371,43 @@ def main_app():
                             colore = "#00CC96" if netto_user > 0 else "#FF4B4B"
                             st.markdown(f"""<div class="receipt-box" style="border-left: 4px solid {colore};"><div style="color:#aaa;">Guadagno Netto Previsto</div><div style="font-size:18px; font-weight:bold; color:{colore};">{netto_user:+,.2f} {valuta_user}</div></div>""", unsafe_allow_html=True)
                         
-                        with st.expander("📅 Vedi Flussi di Cassa Dettagliati"):
-                            # Mostriamo i flussi originali (valuta bond) e convertiti
-                            df_sim['Importo_User'] = df_sim['Importo'] / tasso_spot
-                            st.dataframe(df_sim[['Data', 'Tipo', 'Importo', 'Importo_User']].style.format({'Importo': '{:+.2f}', 'Importo_User': '{:+.2f}'}), use_container_width=True)
+                        # --- 6. GRAFICO RECUPERO CAPITALE (RIPRISTINATO) ---
+                        st.subheader("🗓️ Recupero Capitale")
+                        df_sim['Cumulativo'] = df_sim['Importo_User'].cumsum()
+                        
+                        # Calcolo data pareggio (approssimata)
+                        df_neg = df_sim[df_sim['Cumulativo'] < 0]
+                        df_pos = df_sim[df_sim['Cumulativo'] >= 0]
+                        
+                        fig = go.Figure()
+                        # Linea rossa (sotto zero) e verde (sopra zero)
+                        fig.add_trace(go.Scatter(x=df_sim['Data'], y=df_sim['Cumulativo'], mode='lines+markers', line=dict(color='#00CC96', width=3), name='Flusso Netto'))
+                        fig.add_hline(y=0, line_color='white', line_dash="dash")
+                        
+                        fig.update_layout(
+                            template="plotly_dark", 
+                            height=350, 
+                            margin=dict(l=20,r=20,t=30,b=20),
+                            title="Andamento Saldo (Break-even)",
+                            yaxis_title=f"Saldo ({valuta_user})"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # --- 7. CEDOLARIO DETTAGLIATO (RIPRISTINATO) ---
+                        with st.expander("📅 Vedi Cedolario Dettagliato", expanded=True):
+                            # Styling condizionale
+                            def color_val(val):
+                                color = '#00CC96' if val >= 0 else '#FF4B4B'
+                                return f'color: {color}; font-weight: bold;'
+                                
+                            st.dataframe(
+                                df_sim[['Data', 'Tipo', 'Importo_User']].style
+                                .format({'Importo_User': f'{{:+.2f}} {valuta_user}'})
+                                .map(color_val, subset=['Importo_User']),
+                                use_container_width=True
+                            )
                     else:
-                        st.warning(f"⚠️ Budget insufficiente. Il taglio minimo è {lotto:,.0f} {valuta_bond}.")
-
-    # --- SMART ANALYSIS (GRAFICO MARCO + ZOOM + LIVE EXCHANGE) ---
-    elif st.session_state.page == "SmartAnalysis":
-        st.title("🧠 Smart Analysis & Confronto")
-        st.caption("Verifica se il tuo bond è un affare rispetto al mercato.")
-        
-        with st.spinner("Analisi mercato in corso..."):
-            df_m = carica_tutto_mercato()
-        
-        if df_m.empty: st.warning("⚠️ Database vuoto. Aggiorna i dati."); st.stop()
-
-        c_s, _ = st.columns([1, 2])
-        isin_s = c_s.text_input("Inserisci ISIN", placeholder="IT...").strip().upper()
-        
-        if isin_s:
-            target_bond = df_m[df_m['ISIN'] == isin_s]
-            if not target_bond.empty:
-                b = target_bond.iloc[0]
-                ytm_target = b['YTM_Grezzo']
-                try: anni_target = (pd.to_datetime(b['Scadenza']).date() - date.today()).days / 365.25
-                except: anni_target = 0
-                
-                # --- 1. KPI VELOCI ---
-                st.divider()
-                k1, k2, k3 = st.columns(3)
-                k1.metric("Tuo Bond (Lordo)", f"{ytm_target:.2f}%")
-                
-                # Filtriamo il mercato (Via gli errori e i bond > 50 anni)
-                df_viz = df_m[
-                    (df_m['ISIN'] != isin_s) & 
-                    (df_m['YTM_Grezzo'] > -1) & (df_m['YTM_Grezzo'] < 15) &
-                    (df_m['Anni'] > 0) & (df_m['Anni'] <= 50)
-                ].copy()
-                
-                avg_cat = df_viz[df_viz['Tipo'] == b['Tipo']]['YTM_Grezzo'].mean()
-                delta = ytm_target - avg_cat
-                k2.metric(f"Media {b['Tipo']}", f"{avg_cat:.2f}%")
-                k3.metric("Posizione", "Sopra Media" if delta>0 else "Sotto Media", f"{delta:.2f}%")
-
-                # --- 2. GRAFICO SCATTER (ZOOM + COLORI) ---
-                st.subheader("📍 La Mappa del Tesoro")
-                
-                fig = go.Figure()
-                
-                # Zoom intelligente su Marco
-                max_x = min(max(10, anni_target * 2), 50)
-                max_y = max(ytm_target + 3, 8)
-                
-                palette = {
-                    "Governativo": "rgba(34, 139, 34, 0.7)", "Bancario": "rgba(30, 144, 255, 0.7)",
-                    "Corporate": "rgba(255, 140, 0, 0.7)", "Speciali": "rgba(138, 43, 226, 0.7)",
-                    "Altro": "rgba(102, 51, 153, 0.6)" # VIOLA SCURO VISIBILE
-                }
-                
-                # Disegno categorie
-                for tipo in df_viz['Tipo'].unique():
-                    sub = df_viz[df_viz['Tipo'] == tipo]
-                    col = palette.get(tipo, palette["Altro"])
-                    fig.add_trace(go.Scatter(
-                        x=sub['Anni'], y=sub['YTM_Grezzo'], mode='markers',
-                        marker=dict(color=col, size=6), name=str(tipo),
-                        text=sub['Descrizione'],
-                        hovertemplate="<b>%{text}</b><br>Tipo: "+str(tipo)+"<br>Scadenza: %{x:.1f}y<br>YTM: %{y:.2f}%<extra></extra>"
-                    ))
-                
-                # IL TUO BOND (Diamante Rosso)
-                fig.add_trace(go.Scatter(
-                    x=[anni_target], y=[ytm_target], mode='markers',
-                    marker=dict(color='red', size=16, symbol='diamond', line=dict(color='black', width=2)),
-                    name="👉 IL TUO BOND", hovertemplate="<b>TU SEI QUI</b><br>YTM: %{y:.2f}%<extra></extra>"
-                ))
-                
-                fig.update_layout(
-                    template="plotly_white", height=500,
-                    xaxis=dict(title="Scadenza (Anni)", range=[0, max_x]),
-                    yaxis=dict(title="Rendimento Lordo (%)", range=[0, max_y]),
-                    legend=dict(orientation="h", y=-0.2), margin=dict(t=30, b=80)
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # --- 3. TABELLA ALTERNATIVE (FIX) ---
-                st.subheader("🔄 Alternative Migliori")
-                alt = df_viz[
-                    (df_viz['Anni'].between(anni_target-1.5, anni_target+1.5)) &
-                    (df_viz['YTM_Grezzo'] > ytm_target + 0.15) &
-                    (df_viz['Prezzo'].between(60, 115))
-                ].sort_values('YTM_Grezzo', ascending=False).head(10)
-                
-                if not alt.empty:
-                    alt['Guadagno Extra'] = alt['YTM_Grezzo'] - ytm_target
-                    st.dataframe(
-                        alt[['Descrizione', 'Tipo', 'Prezzo', 'Scadenza', 'YTM_Grezzo', 'Guadagno Extra', 'ISIN']]
-                        .rename(columns={'YTM_Grezzo': 'Rendimento Lordo'}).style.format({
-                            'Prezzo': '{:.2f}', 'Rendimento Lordo': '{:.2f}%', 'Guadagno Extra': '+{:.2f}%'
-                        }), use_container_width=True, hide_index=True
-                    )
-                else: st.success("✅ Il tuo bond è già tra i migliori per questa scadenza!")
-
-            else: st.error("❌ ISIN non trovato.")
+                        st.warning(f"⚠️ Budget insufficiente. Minimo {lotto:,.0f} {valuta_bond}.")
 
     # --- SCREENER (VERSIONE "TRASPARENZA TOTALE" + SEMAFORO RISCHIO) ---
     elif st.session_state.page == "Screener":
