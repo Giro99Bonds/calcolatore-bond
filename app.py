@@ -1166,7 +1166,7 @@ def main_app():
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     simbolo = "€" if valuta_bond == "EUR" else valuta_bond
                     
-                    c1.metric("Prezzo", f"{d['pr']} {simbolo}", help="Prezzo di mercato attuale.")
+                    c1.metric("Prezzo", f"{d['pr']}", help="Prezzo di mercato attuale.")
                     c2.metric("Rend. NETTO", f"{rendimento_netto:.2f}%", help="Rendimento reale annuo calcolato sui flussi netti (XIRR).")
                     c3.metric("Rend. LORDO", f"{risk['ytm']:.2f}%", help="Yield to Maturity Lordo.")
                     c4.metric("Cedola", f"{d['ced']}%", help="Interesse periodico pagato.")
