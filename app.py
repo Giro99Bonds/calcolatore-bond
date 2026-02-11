@@ -190,7 +190,48 @@ def get_last_update_time():
         latest_file = max(files, key=os.path.getmtime)
         return datetime.fromtimestamp(os.path.getmtime(latest_file))
     except: return None
+# --- NUOVE FUNZIONI DI INTELLIGENZA BOND ---
+def detect_bond_features(desc, isin):
+    """
+    Rileva automaticamente: Cumulative, Zero Coupon, Callable, Tassazione.
+    Sostituisce le vecchie logiche sparse.
+    """
+    desc = str(desc).upper()
+    features = {
+        'is_cumulative': False,     # Cedola pagata solo a scadenza
+        'is_zero_coupon': False,    # Nessuna cedola
+        'is_callable': False,       # Emittente può rimborsare prima
+        'tax_rate': 26.0            # Default Corporate/Bank
+    }
+    
+    # 1. Rilevamento Struttura (Parole Chiave)
+    if "CUMUL" in desc or "ZC" in desc or "ZERO" in desc or "STRIP" in desc:
+        features['is_cumulative'] = True
+        if "ZERO" in desc or "ZC" in desc or "STRIP" in desc:
+            features['is_zero_coupon'] = True
+            
+    if "CALL" in desc or "CALLABLE" in desc:
+        features['is_callable'] = True
 
+    # 2. Rilevamento Tassazione Agevolata (White List 12.5%)
+    whitelist_tax = [
+        "BTP", "BOT", "CCT", "BUND", "OAT", "TREASURY", "USA ", 
+        "BEI", "EU ", "WORLD BANK", "EIB", "ROMANIA", "UNGHERIA", "TURCHIA"
+    ]
+    if any(x in desc for x in whitelist_tax):
+        features['tax_rate'] = 12.5
+        
+    return features
+    
+def detect_valuta(desc, isin):
+    """Rileva la valuta dalla descrizione"""
+    desc = str(desc).upper()
+    if "USA" in desc or "TREASURY" in desc or "DOLLAR" in desc: return "USD"
+    if "TURCHIA" in desc or "TRY" in desc or "LIRA" in desc: return "TRY"
+    if "BRASILE" in desc or "BRL" in desc or "REAL" in desc: return "BRL"
+    if "ROMANIA" in desc or "RON" in desc: return "RON"
+    if "GBP" in desc or "UK" in desc: return "GBP"
+    return "EUR" # Default
 def check_connection_status():
     try:
         requests.get("https://www.google.com", timeout=3)
@@ -243,42 +284,6 @@ def processa_riga(row, info):
 # FUNZIONE MANCANTE: INTELLIGENZA BOND
 # ==============================================================================
 
-def detect_bond_features(desc, isin):
-    """
-    Analizza la descrizione per capire la struttura del bond.
-    Rileva: Cumulative, Zero Coupon, Callable, Tassazione.
-    """
-    desc = str(desc).upper()
-    features = {
-        'is_cumulative': False,     # Cedola pagata solo a scadenza
-        'is_zero_coupon': False,    # Nessuna cedola
-        'is_callable': False,       # Emittente può rimborsare prima
-        'is_floating': False,       # Tasso variabile
-        'tax_rate': 26.0            # Default (Corporate/Bank)
-    }
-    
-    # 1. Rilevamento Struttura (Parole Chiave)
-    if "CUMUL" in desc or "ZC" in desc or "ZERO" in desc or "STRIP" in desc:
-        features['is_cumulative'] = True
-        if "ZERO" in desc or "ZC" in desc or "STRIP" in desc:
-            features['is_zero_coupon'] = True
-            
-    if "CALL" in desc or "CALLABLE" in desc:
-        features['is_callable'] = True
-        
-    if "TV" in desc or "VAR" in desc or "EURIBOR" in desc:
-        features['is_floating'] = True
-
-    # 2. Rilevamento Tassazione Agevolata (White List 12.5%)
-    # Se il nome contiene questi termini, la tassa scende al 12.5%
-    whitelist_tax = [
-        "BTP", "BOT", "CCT", "BUND", "OAT", "TREASURY", "USA ", 
-        "BEI", "EU ", "WORLD BANK", "EIB", "ROMANIA", "UNGHERIA", "TURCHIA"
-    ]
-    if any(x in desc for x in whitelist_tax):
-        features['tax_rate'] = 12.5
-        
-    return features
 
 def detect_valuta(desc, isin):
     """Rileva la valuta dalla descrizione"""
@@ -316,7 +321,98 @@ def identikit_bond(dati):
 # ==============================================================================
 # 5. RISK ENGINE E SCORECARD (VERSIONE INDISTRUTTIBILE)
 # ==============================================================================
+# --- INIZIO NUOVO BLOCCO (COPIA DA QUI) ---
 
+def detect_bond_features(desc, isin):
+    """Rileva automaticamente se il bond è CUMULATIVE, CALLABLE o ZERO COUPON."""
+    desc = str(desc).upper()
+    features = {
+        'is_cumulative': False, 'is_zero_coupon': False, 
+        'is_callable': False, 'tax_rate': 26.0
+    }
+    # 1. Rilevamento Struttura
+    if "CUMUL" in desc or "ZC" in desc or "ZERO" in desc or "STRIP" in desc:
+        features['is_cumulative'] = True
+        if "ZERO" in desc or "ZC" in desc: features['is_zero_coupon'] = True
+    if "CALL" in desc or "CALLABLE" in desc:
+        features['is_callable'] = True
+    
+    # 2. Tassazione Agevolata (12.5%)
+    whitelist = ["BTP", "BOT", "CCT", "BUND", "OAT", "TREASURY", "USA ", "BEI", "EU ", "WORLD BANK", "EIB", "ROMANIA", "UNGHERIA", "TURCHIA"]
+    if any(x in desc for x in whitelist): features['tax_rate'] = 12.5
+    
+    return features
+
+def calcola_flussi_reali(dati, prezzo_acquisto, nominale=100.0):
+    """
+    Calcola i flussi reali spostando gli interessi a scadenza se CUMULATIVE.
+    Questo corregge il rendimento dei bond Barclays/Zero Coupon/Unicredit Callable.
+    """
+    feats = detect_bond_features(dati['desc'], dati.get('isin', ''))
+    tax = feats['tax_rate']
+    flussi = []
+    
+    today = date.today()
+    settle = today + timedelta(days=2) # Data valuta
+    
+    # 1. Rateo (Se non è ZC)
+    rateo_netto = 0.0
+    rateo_lordo_perc = 0.0
+    if not feats['is_zero_coupon'] and dati['freq'] > 0:
+        data_prec = dati['sc']
+        while data_prec > today: data_prec -= timedelta(days=int(365/dati['freq']))
+        giorni = (today - data_prec).days
+        rateo_lordo_perc = (dati['ced']) * (giorni/365.0)
+        rateo_netto = (rateo_lordo_perc * nominale / 100) * (1 - tax/100)
+    
+    spesa = (prezzo_acquisto * nominale / 100) + rateo_netto
+    flussi.append({'Data': settle, 'Importo': -spesa, 'Tipo': 'ACQUISTO'})
+    
+    # 2. Cedole Future
+    interessi_finali = 0.0
+    if dati['freq'] > 0 and not feats['is_zero_coupon']:
+        if feats['is_cumulative']:
+            # CUMULATIVE: Nessun pagamento ora. Si accumula tutto alla fine.
+            anni_residui = (dati['sc'] - settle).days / 365.25
+            interessi_finali = (dati['ced'] * nominale / 100) * anni_residui
+            # Aggiungo il rateo già maturato
+            interessi_finali += (rateo_lordo_perc * nominale / 100)
+        else:
+            # STANDARD: Cedole periodiche
+            cn = (dati['ced'] * nominale / 100) / dati['freq'] * (1 - tax/100)
+            curr = dati['sc']
+            while curr > settle:
+                flussi.append({'Data': curr, 'Importo': cn, 'Tipo': 'CEDOLA'})
+                curr -= timedelta(days=int(365/dati['freq']))
+    
+    # 3. Rimborso (Gestione Tasse Capital Gain)
+    gain = max(0, nominale - (prezzo_acquisto * nominale / 100))
+    tax_gain = gain * (tax/100)
+    rimborso_netto = nominale - tax_gain
+    
+    if feats['is_cumulative']:
+        rimborso_netto += interessi_finali * (1 - tax/100)
+        
+    flussi.append({'Data': dati['sc'], 'Importo': rimborso_netto, 'Tipo': 'RIMBORSO'})
+    
+    # Ordino
+    df = pd.DataFrame(flussi).groupby('Data', as_index=False).sum().sort_values('Data')
+    df['Tipo'] = df.apply(lambda x: 'ACQUISTO' if x['Importo'] < 0 else 'FLUSSO', axis=1)
+    return df, spesa, feats
+
+def xirr(df_flussi):
+    """Calcola il rendimento netto reale (TIR)."""
+    try:
+        dates = df_flussi['Data'].tolist(); amounts = df_flussi['Importo'].tolist()
+        if not amounts or amounts[0] >= 0: return 0.0
+        def xnpv(rate, amounts, dates):
+            if rate <= -1.0: return float('inf')
+            d0 = dates[0]
+            return sum([a / ((1 + rate) ** ((d - d0).days / 365.0)) for a, d in zip(amounts, dates)])
+        return newton(lambda r: xnpv(r, amounts, dates), 0.05) * 100
+    except: return 0.0
+
+# --- FINE NUOVO BLOCCO ---
 def calcola_ytm_preciso(prezzo, cedola_pct, scadenza, freq, face_value=100):
     """Calcolo iterativo preciso (XIRR style)"""
     try:
@@ -576,35 +672,101 @@ def calcola_rateo(dati):
         return max(0.0, (dati['ced'] / dati['freq']) * ((today_dt - data_ced).days / days_ced))
     except: return 0.0
 
-def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
-    flussi = []; rateo_pct = calcola_rateo(dati)
-    costo_titolo = (nominale * prezzo_acquisto) / 100
-    costo_rateo_netto = (nominale * rateo_pct) / 100 * (1 - tax_rate/100)
-    spesa_totale = costo_titolo + costo_rateo_netto + commissioni
-    flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto"})
+# --- NUOVO MOTORE DI CALCOLO FLUSSI (XIRR COMPLIANT) ---
+def calcola_flussi_reali(dati, prezzo_acquisto, nominale=100.0):
+    """
+    Genera i flussi di cassa ESATTI per il calcolo XIRR.
+    Gestisce: Rateo, Tassazione differita sul Capital Gain, Cedole Cumulative.
+    """
+    feats = detect_bond_features(dati['desc'], dati.get('isin', ''))
+    tax = feats['tax_rate']
+    flussi = []
     
-    totale_cedole_nette = 0
-    if dati['freq'] > 0:
-        cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
-        curr = dati['sc']
-        while curr > date.today():
-            if curr != dati['sc']: 
-                flussi.append({"Data": curr, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola"})
-                totale_cedole_nette += cedola_netta
-            curr -= timedelta(days=int(365 / dati['freq']))
-            
-    flussi.sort(key=lambda x: x['Data'])
-    gain = max(0, 100 - prezzo_acquisto)
-    tassa_gain = (gain / 100) * nominale * (tax_rate/100)
-    rimborso_netto = nominale - tassa_gain
-    ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
-    flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA", "Importo": rimborso_netto + ultima_ced, "Dettagli": "Rimborso"})
+    # Date
+    today = date.today()
+    settlement = today + timedelta(days=2) # Data valuta T+2
     
-    incasso_totale = totale_cedole_nette + rimborso_netto + ultima_ced
-    totale_cedole_nette += ultima_ced
-    plusvalenza = (gain/100)*nominale - tassa_gain
+    # --- 1. FLUSSO USCITA (ACQUISTO) ---
+    rateo_netto = 0.0
+    rateo_lordo_perc = 0.0
+    
+    # Se il bond ha cedola e non è ZC puro, calcoliamo il rateo che paghiamo oggi
+    if not feats['is_zero_coupon'] and dati['freq'] > 0:
+        data_prec = dati['sc']
+        # Torniamo indietro per trovare l'inizio godimento cedola attuale
+        while data_prec > today: 
+            data_prec -= timedelta(days=int(365/dati['freq']))
+        
+        giorni_maturati = (today - data_prec).days
+        rateo_lordo_perc = (dati['ced']) * (giorni_maturati / 365.0)
+        # Il rateo si paga al netto
+        rateo_netto = (rateo_lordo_perc * nominale / 100) * (1 - tax/100)
 
-    return pd.DataFrame(flussi), spesa_totale, incasso_totale, costo_rateo_netto, totale_cedole_nette, plusvalenza
+    spesa_totale = (prezzo_acquisto * nominale / 100) + rateo_netto
+    flussi.append({'Data': settlement, 'Importo': -spesa_totale, 'Tipo': 'ACQUISTO'})
+    
+    # --- 2. FLUSSI ENTRATA (CEDOLE) ---
+    interessi_finali_cumulati = 0.0
+    
+    if dati['freq'] > 0 and not feats['is_zero_coupon']:
+        if feats['is_cumulative']:
+            # CUMULATIVE: Nessun pagamento intermedio. Tutto alla fine.
+            anni_residui = (dati['sc'] - settlement).days / 365.25
+            interessi_finali_cumulati = (dati['ced'] * nominale / 100) * anni_residui
+            # Aggiungiamo il rateo che abbiamo anticipato oggi
+            interessi_finali_cumulati += (rateo_lordo_perc * nominale / 100)
+        else:
+            # STANDARD: Cedole periodiche
+            cn = (dati['ced'] * nominale / 100) / dati['freq'] * (1 - tax/100)
+            curr = dati['sc']
+            while curr > settlement:
+                flussi.append({'Data': curr, 'Importo': cn, 'Tipo': 'CEDOLA'})
+                curr -= timedelta(days=int(365/dati['freq']))
+    
+    # --- 3. FLUSSO RIMBORSO (CAPITALE + TAX GAIN DIFFERITA) ---
+    rimborso_lordo = nominale # Assumiamo rimborso a 100
+    
+    # Calcolo Capital Gain (Prezzo Fiscale = Prezzo Secco Acquisto)
+    gain = max(0, rimborso_lordo - (prezzo_acquisto * nominale / 100))
+    tax_gain = gain * (tax/100)
+    
+    rimborso_netto = rimborso_lordo - tax_gain
+    
+    # Se è Cumulative, aggiungo la "maxi cedola" finale tassata
+    if feats['is_cumulative']:
+        interessi_netti = interessi_finali_cumulati * (1 - tax/100)
+        rimborso_netto += interessi_netti
+
+    # Aggiungo il rimborso alla data di scadenza
+    found = False
+    for f in flussi:
+        if f['Data'] == dati['sc']:
+            f['Importo'] += rimborso_netto
+            f['Tipo'] += "+RIMBORSO"
+            found = True
+            break
+            
+    if not found:
+        flussi.append({'Data': dati['sc'], 'Importo': rimborso_netto, 'Tipo': 'RIMBORSO'})
+    
+    # Ordino per data e creo DataFrame
+    df = pd.DataFrame(flussi).sort_values('Data')
+    return df, spesa_totale, feats
+
+def xirr(df_flussi):
+    """Calcola il rendimento reale (TIR) dai flussi"""
+    try:
+        dates = df_flussi['Data'].tolist()
+        amounts = df_flussi['Importo'].tolist()
+        if not amounts or amounts[0] >= 0: return 0.0
+        
+        def xnpv(rate, amounts, dates):
+            if rate <= -1.0: return float('inf')
+            d0 = dates[0]
+            return sum([a / ((1 + rate) ** ((d - d0).days / 365.0)) for a, d in zip(amounts, dates)])
+            
+        return newton(lambda r: xnpv(r, amounts, dates), 0.05) * 100
+    except: return 0.0
 
 # ==============================================================================
 # 🆕 GESTIONE VALUTE LIVE
@@ -1106,260 +1268,144 @@ def main_app():
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
-                    # --- A. MOTORE MATEMATICO (PRECISO) ---
-                    # Recuperiamo i dati di base
-                    tax_rate = determina_tasse(d['fonte'], d['desc'])
-                    valuta_bond = detect_valuta(d['desc'], d['isin'])
-                    
-                    # Calcolo Metriche Rischio (YTM Lordo) usando la funzione robusta (no crash)
-                    risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
-                    
-                    # Calcolo Rendimento NETTO Reale (XIRR su base 100) per i KPI
-                    # Usiamo i flussi generati per calcolare il vero rendimento netto
-                    df_base, _, _, _, _, _ = genera_flussi_dettagliati(d, 100.0, tax_rate, 0, d['pr'])
-                    
-                    # Funzione XIRR locale (per non dipendere da librerie esterne complesse)
-                    def xirr_calc(flow_df):
-                        try:
-                            dates = flow_df['Data'].tolist(); amounts = flow_df['Importo'].tolist()
-                            if not amounts or amounts[0] >= 0: return 0.0
-                            def xnpv(rate, amounts, dates):
-                                if rate <= -1.0: return float('inf')
-                                d0 = dates[0]
-                                return sum([a / ((1 + rate) ** ((d - d0).days / 365.0)) for a, d in zip(amounts, dates)])
-                            return newton(lambda r: xnpv(r, amounts, dates), 0.05) * 100
-                        except: return 0.0
 
-                    rendimento_netto = xirr_calc(df_base)
+                    # 1. AUTO-DETECTION INTELLIGENTE
+                    # Capisce da solo se è Cumulative, Callable o ZC analizzando la descrizione
+                    feats = detect_bond_features(d['desc'], d.get('isin', ''))
+                    valuta_bond = detect_valuta(d['desc'], d.get('isin', ''))
                     
-                    # Qualità Bond (Score)
-                    qual = analizza_bond_quality_dettagliata(d, risk, tax_rate, st.session_state.patrimonio)
+                    # 2. PANNELLO PARAMETRI AVANZATI (Per Override Manuale)
+                    # Qui l'utente può correggere il tiro se il bond è Callable o il prezzo è cambiato
+                    with st.expander("⚙️ Parametri Avanzati & Struttura (Clicca per modificare)", expanded=False):
+                        c_p1, c_p2, c_p3 = st.columns(3)
+                        
+                        # Prezzo modificabile
+                        new_price = c_p1.number_input("Prezzo Acquisto", value=d['pr'], step=0.1, format="%.2f")
+                        
+                        # Data scadenza modificabile (FONDAMENTALE per i CALLABLE: qui inserisci la data di Call!)
+                        new_date = c_p2.date_input("Data Scadenza / Call", value=d['sc'])
+                        
+                        # Struttura Cumulativa (per Zero Coupon o bond che pagano alla fine)
+                        is_cum = c_p3.checkbox("Cedola Cumulativa?", value=feats['is_cumulative'], help="Spunta se il bond paga tutti gli interessi solo alla fine.")
+                        
+                        # Creo una copia dei dati per i calcoli (così non tocco l'originale del DB)
+                        bond_calc = d.copy()
+                        bond_calc['pr'] = new_price
+                        bond_calc['sc'] = new_date
+                        feats['is_cumulative'] = is_cum
 
-                    # --- B. INTERFACCIA VISUALE (HEADER & KPI) ---
+                    # 3. CALCOLO RENDIMENTO REALE (XIRR NETTO)
+                    # Usa la nuova funzione matematica che gestisce tasse differite e flussi cumulativi
+                    df_flussi, spesa_tot, feats = calcola_flussi_reali(bond_calc, bond_calc['pr'], 100.0)
+                    rendimento_netto_xirr = xirr(df_flussi)
+                    
+                    # Calcolo Lordo Semplice (Yield to Maturity classico per confronto)
+                    try: 
+                        anni_res = (bond_calc['sc'] - date.today()).days / 365.25
+                        if anni_res > 0:
+                            rend_lordo = ((bond_calc['ced'] + (100 - bond_calc['pr']) / anni_res) / bond_calc['pr']) * 100
+                        else: rend_lordo = 0
+                    except: rend_lordo = 0
+                    
+                    # 4. VISUALIZZAZIONE DATI (HEADER & BADGE)
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
                     
-                    # HEADER BOND (Box Gradiente - UX Gold)
+                    # Aggiungo etichette se troviamo caratteristiche speciali
+                    if feats['is_callable']: risk_msg += " | 📞 CALLABLE"
+                    if feats['is_cumulative']: risk_msg += " | ⚠️ CUMULATIVE"
+                    if feats['is_zero_coupon']: risk_msg += " | 🌑 ZERO COUPON"
+
                     st.markdown(f"""
-                    <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                            <div style="flex-grow: 1;">
-                                <div style="color:#b0b3c5; font-size:13px; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">{chi}</div>
-                                <div style="color:white; font-size:22px; font-weight:bold; margin-bottom:6px; line-height:1.2;">{d['desc']}</div>
+                    <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <div>
+                                <div style="color:#b0b3c5; font-size:13px;">{chi}</div>
+                                <div style="color:white; font-size:22px; font-weight:bold;">{d['desc']}</div>
                                 <div style="color:#00CC96; font-size:13px;">{tipo} <span style="color:#555;">|</span> {risk_msg}</div>
                             </div>
-                            <div style="text-align:right; min-width: 90px; margin-left: 10px;">
-                                <h2 style="color:#00CC96; margin:0; font-size:28px;">{d['ced']}%</h2>
+                            <div style="text-align:right;">
+                                <h2 style="color:#00CC96; margin:0;">{d['ced']}%</h2>
                                 <div style="color:#b0b3c5; font-size:12px;">Cedola</div>
                             </div>
                         </div>
-                        <hr style="border-color:rgba(255,255,255,0.1); margin:15px 0;">
+                        <hr style="border-color:rgba(255,255,255,0.1); margin:10px 0;">
                         <div style="display:flex; justify-content:space-between; color:#e0e0e0; font-size:14px;">
-                            <div>📅 Scadenza: <b style="color:white;">{d['sc'].strftime('%d/%m/%Y')}</b></div>
-                            <div>⏳ Manca: <b style="color:white;">{tempo}</b></div>
-                            <div>🧾 Prezzo: <b style="color:white;">{d['pr']} {valuta_bond}</b></div>
+                            <div>📅 Scadenza/Call: <b>{bond_calc['sc'].strftime('%d/%m/%Y')}</b></div>
+                            <div>🧾 Prezzo: <b>{bond_calc['pr']} {valuta_bond}</b></div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # DATI CHIAVE (Con Info Box Help - UX Gold)
+                    # 5. KPI NUMERICI
                     st.subheader("📊 Dati Chiave")
-                    c1, c2, c3, c4, c5, c6 = st.columns(6)
-                    simbolo = "€" if valuta_bond == "EUR" else valuta_bond
+                    c1, c2, c3, c4 = st.columns(4)
                     
-                    c1.metric("Prezzo", f"{d['pr']}", help="Prezzo di mercato attuale.")
-                    c2.metric("Rend. NETTO", f"{rendimento_netto:.2f}%", help="Rendimento reale annuo calcolato sui flussi netti (XIRR).")
-                    c3.metric("Rend. LORDO", f"{risk['ytm']:.2f}%", help="Yield to Maturity Lordo.")
-                    c4.metric("Cedola", f"{d['ced']}%", help="Interesse periodico pagato.")
-                    c5.metric("Valuta", valuta_bond, help="Valuta di denominazione.")
-                    c6.metric("Duration", f"{risk['mod_dur']:.2f}", help="Sensibilità ai tassi.")
+                    c1.metric("Prezzo", f"{bond_calc['pr']} {valuta_bond}")
+                    # Il rendimento netto ora è calcolato con XIRR (preciso)
+                    c2.metric("Rend. NETTO (XIRR)", f"{rendimento_netto_xirr:.2f}%", help="Rendimento reale annuo netto calcolato sui flussi di cassa esatti (TIR).")
+                    c3.metric("Rend. Lordo (YTM)", f"{rend_lordo:.2f}%")
+                    c4.metric("Duration", f"{(bond_calc['sc']-date.today()).days/365:.1f}y")
 
-                    st.divider()
-                    
-                    # === 💰 SIMULATORE & STRESS TEST (UX Gold + Matematica Fixata) ===
-                    st.subheader("💰 Simulatore & Stress Test")
+                    # Avvisi intelligenti all'utente
+                    if feats['is_callable']:
+                        st.warning("⚠️ **Bond CALLABLE:** Il rendimento è calcolato alla data indicata sopra. Se vuoi calcolare lo 'Yield to Call' (rimborso anticipato), cambia la data nel pannello 'Parametri Avanzati' in alto.")
+                    if feats['is_cumulative']:
+                        st.info("ℹ️ **Bond CUMULATIVE:** Interessi spostati tutti a scadenza (effetto interesse composto gestito).")
+
+                    # 6. SIMULATORE BUDGET (Logica Inversa Corretta)
+                    st.divider(); st.subheader("💰 Simulatore Budget")
                     
                     col_set1, col_set2, col_set3 = st.columns(3)
                     with col_set1:
-                        liste_valute = ["EUR", "USD", "GBP", "CHF", "TRY", "BRL", "RON", "JPY", "CAD", "AUD"]
-                        valuta_user = st.selectbox("La tua Valuta (Conto)", liste_valute, index=0)
+                        liste_valute = ["EUR", "USD", "GBP", "CHF", "TRY", "BRL"]
+                        valuta_user = st.selectbox("La tua Valuta", liste_valute, index=0)
                     with col_set2:
-                        # Qui usiamo il BUDGET (fix matematico) per non avere errori di calcolo, ma la UX è uguale
-                        budget_user = st.number_input(f"Budget Totale ({valuta_user})", value=10000.0, step=1000.0, help="Quanto vuoi investire in totale (incluse commissioni).")
+                        budget_user = st.number_input(f"Budget Totale ({valuta_user})", value=10000.0, step=1000.0)
                     with col_set3:
-                        commissioni_input = st.number_input("Commissioni Banca", value=5.0, help="Costi fissi dell'operazione.")
+                        commissioni_input = st.number_input("Commissioni", value=5.0)
 
-                    # Tasso Cambio Live
                     tasso_spot = get_tasso_cambio_live(valuta_user, valuta_bond)
                     
-                    # CONFIGURAZIONE SLIDER ADATTIVA (UX Gold)
-                    scenario_fx = 0
-                    if valuta_user != valuta_bond:
-                        # Logica avvisi rischio
-                        if valuta_bond in ["TRY", "ARS", "RUB"]:
-                            slider_step = 5; slider_min = -80; slider_max = 20
-                            risk_txt = "ALTISSIMO. Crollo probabile > 30%."
-                            suggested_test = "-40% o -50%"
-                        elif valuta_bond in ["BRL", "ZAR", "MXN", "RON"]:
-                            slider_step = 2; slider_min = -50; slider_max = 20
-                            risk_txt = "ALTO. Oscillazioni forti."
-                            suggested_test = "-20% o -25%"
-                        else: 
-                            slider_step = 1; slider_min = -30; slider_max = 20
-                            risk_txt = "MEDIO. Valute solide."
-                            suggested_test = "-10% o -15%"
-
-                        st.caption(f"📡 Tasso LIVE: 1 {valuta_user} = {tasso_spot:.4f} {valuta_bond}")
-                        st.divider()
-                        
-                        # Box Guida Dinamico
-                        c_ux1, c_ux2 = st.columns([2, 1])
-                        with c_ux1:
-                            st.info(f"**💡 Rischio {valuta_bond}**: {risk_txt}\n👉 **Consiglio:** Imposta lo slider a **{suggested_test}** per stress test.")
-                        
-                        # Slider Adattivo
-                        scenario_fx = st.slider(f"📉 Simula Variazione {valuta_bond} a scadenza", min_value=slider_min, max_value=slider_max, value=0, step=slider_step, format="%d%%")
-                        
-                        if scenario_fx < 0: st.warning(f"⚠️ STRESS TEST: Simuli che il **{valuta_bond} perda il {abs(scenario_fx)}%**.")
-                        elif scenario_fx > 0: st.success(f"📈 SCENARIO OTTIMISTA: Simuli apprezzamento.")
+                    # Calcolo Inverso: Quanto nominale compro col budget?
+                    # Costo di 100 nominale in valuta USER (usando spesa_tot che è in valuta bond)
+                    costo_100_in_user = spesa_tot / tasso_spot
                     
-                    # --- CALCOLI FINANZIARI PRECISI (Dietro le quinte) ---
-                    # 1. Calcolo rateo unitario bond
-                    rateo_unitario_bond = calcola_rateo(d) # In % su 100
-                    prezzo_telquel_bond = d['pr'] + rateo_unitario_bond # Prezzo + Rateo (in valuta bond)
+                    # Nominale teorico acquistabile
+                    nominale_teorico = ((budget_user - commissioni_input) / costo_100_in_user) * 100
                     
-                    # 2. Costo di 100 nominale in Valuta User
-                    costo_100_nominale_user = (prezzo_telquel_bond / tasso_spot) 
-                    
-                    # 3. Calcolo Nominale Acquistabile col Budget
-                    nominale_teorico = ((budget_user - commissioni_input) / costo_100_nominale_user) * 100
-                    
-                    # Arrotondamento al lotto minimo
-                    lotto_min = d['taglio'] if d['taglio'] > 0 else 1000.0
-                    nominale_effettivo = int(nominale_teorico / lotto_min) * lotto_min
-                    if nominale_effettivo == 0 and budget_user > 0: nominale_effettivo = lotto_min # Almeno un lotto se budget c'è
+                    # Arrotondamento al lotto (default 1000 se non specificato)
+                    lotto = d['taglio'] if d['taglio'] > 0 else 1000.0
+                    nominale_effettivo = int(nominale_teorico / lotto) * lotto
+                    if nominale_effettivo == 0: nominale_effettivo = 0
                     
                     if nominale_effettivo > 0:
-                        # 4. Generazione Flussi Reali con Nominale Calcolato
-                        df_flussi, spesa_loc, incasso_loc, rateo_loc, tot_ced_loc, _ = genera_flussi_dettagliati(
-                            d, nominale_effettivo, tax_rate, 0, d['pr']
-                        )
+                        # Rigenero i flussi reali sul nominale effettivo
+                        df_sim, spesa_reale_bond, _ = calcola_flussi_reali(bond_calc, bond_calc['pr'], nominale_effettivo)
                         
-                        # 5. Conversioni e Somme
-                        rate_rientro = tasso_spot * (1 - (scenario_fx/100)) if valuta_user != valuta_bond else 1.0
-                        if rate_rientro <= 0.001: rate_rientro = 0.001
+                        # Converto tutto in valuta USER per lo scontrino
+                        spesa_reale_user = (spesa_reale_bond / tasso_spot) + commissioni_input
                         
-                        # Uscite (Oggi - Tasso Spot Attuale)
-                        costo_titolo_user = ((nominale_effettivo * d['pr'] / 100) / tasso_spot)
-                        rateo_user = (rateo_loc / tasso_spot)
-                        spesa_reale_user = costo_titolo_user + rateo_user + commissioni_input
+                        # Somma incassi futuri (convertiti al tasso attuale)
+                        incassi_futuri_bond = df_sim[df_sim['Importo'] > 0]['Importo'].sum()
+                        incassi_futuri_user = incassi_futuri_bond / tasso_spot
                         
-                        # Entrate (Futuro - Tasso Stressato)
-                        df_flussi['Importo_User'] = df_flussi.apply(
-                            lambda x: (x['Importo'] / tasso_spot) if x['Tipo'] == 'USCITA' else (x['Importo'] / rate_rientro), axis=1
-                        )
+                        netto_user = incassi_futuri_user - spesa_reale_user
                         
-                        incasso_reale_user = df_flussi[df_flussi['Tipo'] != 'USCITA']['Importo_User'].sum()
-                        cedole_tot_user = tot_ced_loc / rate_rientro
-                        rimborso_user = nominale_effettivo / rate_rientro 
-                        guadagno_netto_user = incasso_reale_user - spesa_reale_user
-                        
-                        # ROI e Annualizzato
-                        roi_pct_totale = (guadagno_netto_user / spesa_reale_user) * 100
-                        giorni_residui = (d['sc'] - date.today()).days
-                        anni_residui = max(giorni_residui / 365.25, 0.1)
-                        if spesa_reale_user > 0 and incasso_reale_user > 0:
-                            roi_annuo = ((incasso_reale_user / spesa_reale_user) ** (1 / anni_residui) - 1) * 100
-                        else: roi_annuo = -100
-
-                        # --- SCONTRINO (STILE HTML PREMIUM - UX Gold) ---
+                        # VISUALIZZAZIONE SCONTRINO
                         st.write("")
-                        st.markdown(f"### 🧾 Analisi Flussi (Budget: {budget_user:,.0f} {valuta_user})")
-                        col_usc, col_entr = st.columns(2)
+                        c_res1, c_res2 = st.columns(2)
+                        with c_res1:
+                            st.markdown(f"""<div class="receipt-box"><div style="color:#aaa;">Nominale da Comprare</div><div style="font-size:18px; font-weight:bold;">{nominale_effettivo:,.0f} {valuta_bond}</div><div style="font-size:12px; color:#aaa;">Spesa Totale: -{spesa_reale_user:,.2f} {valuta_user}</div></div>""", unsafe_allow_html=True)
+                        with c_res2:
+                            colore = "#00CC96" if netto_user > 0 else "#FF4B4B"
+                            st.markdown(f"""<div class="receipt-box" style="border-left: 4px solid {colore};"><div style="color:#aaa;">Guadagno Netto Previsto</div><div style="font-size:18px; font-weight:bold; color:{colore};">{netto_user:+,.2f} {valuta_user}</div></div>""", unsafe_allow_html=True)
                         
-                        with col_usc:
-                            st.markdown(f"""
-                            <div class="receipt-box" style="border-left: 4px solid #FF4B4B; background-color: rgba(255, 75, 75, 0.05); padding: 15px; border-radius: 8px;">
-                                <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px; font-size:14px;">📉 USCITE (Oggi)</div>
-                                <div class="receipt-row" style="color:#aaa; font-size:12px; margin-bottom:5px;">Nominale: {nominale_effettivo:,.0f} {valuta_bond}</div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Costo Titoli:</span> <span>{costo_titolo_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Rateo Interessi:</span> <span>{rateo_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Commissioni:</span> <span>{commissioni_input:,.2f} {valuta_user}</span></div>
-                                <hr style="margin: 10px 0; border-color: #444;">
-                                <div class="receipt-total" style="color: #FF4B4B; font-size:16px; font-weight:bold; display:flex; justify-content:space-between;">
-                                    <span>TOTALE ADDEBITO:</span> <span>-{spesa_reale_user:,.2f} {valuta_user}</span>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-
-                        with col_entr:
-                            color_res = "#00CC96" if guadagno_netto_user > 0 else "#FF4B4B"
-                            tasso_futuro_lbl = f"{rate_rientro:.2f}" if valuta_user != valuta_bond else "Invariato"
-                            
-                            st.markdown(f"""
-                            <div class="receipt-box" style="border-left: 4px solid {color_res}; background-color: rgba(0, 204, 150, 0.05); padding: 15px; border-radius: 8px;">
-                                <div style="font-weight:bold; color:{color_res}; margin-bottom:10px; font-size:14px;">📈 ENTRATE (Futuro - Tasso {tasso_futuro_lbl})</div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Cedole Nette:</span> <span>+{cedole_tot_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Rimborso Capitale:</span> <span>+{rimborso_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row" style="color:#888; font-size:12px; display:flex; justify-content:space-between;"><span>(Effetto Cambio: {scenario_fx}%)</span> <span></span></div>
-                                <hr style="margin: 10px 0; border-color: #444;">
-                                <div class="receipt-total" style="color: {color_res}; font-size:16px; font-weight:bold; display:flex; justify-content:space-between;">
-                                    <span>TOTALE INCASSO:</span> <span>+{incasso_reale_user:,.2f} {valuta_user}</span>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-
-                        # VERDETTO FINALE
-                        st.divider()
-                        if guadagno_netto_user > 0:
-                            st.success(f"✅ **GUADAGNO NETTO:** +{guadagno_netto_user:,.2f} {valuta_user}\nRendimento Totale: +{roi_pct_totale:.2f}% | **Rendimento Annuo: +{roi_annuo:.2f}%**")
-                        else:
-                            st.error(f"❌ **PERDITA STIMATA:** {guadagno_netto_user:,.2f} {valuta_user}\nRendimento Totale: {roi_pct_totale:.2f}% | **Rendimento Annuo: {roi_annuo:.2f}%**")
-
-                        # --- GRAFICO BREAKEVEN (UX Gold - Stella e Linee) ---
-                        st.subheader("🗓️ Recupero Capitale nel Tempo")
-                        df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
-                        
-                        df_neg = df_flussi[df_flussi['Cumulativo'] < 0].copy()
-                        df_pos = df_flussi[df_flussi['Cumulativo'] >= 0].copy()
-                        breakeven_date = None
-                        
-                        if not df_neg.empty and not df_pos.empty:
-                            last_neg = df_neg.iloc[-1]; first_pos = df_pos.iloc[0]
-                            y1, y2 = last_neg['Cumulativo'], first_pos['Cumulativo']
-                            x1, x2 = last_neg['Data'].toordinal(), first_pos['Data'].toordinal()
-                            if y2 != y1:
-                                x_zero = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
-                                breakeven_date = date.fromordinal(int(x_zero))
-                                row_zero = pd.DataFrame({'Data': [breakeven_date], 'Cumulativo': [0]})
-                                df_neg = pd.concat([df_neg, row_zero], ignore_index=True)
-                                df_pos = pd.concat([row_zero, df_pos], ignore_index=True)
-
-                        if breakeven_date:
-                            days_to_be = (breakeven_date - date.today()).days
-                            st.markdown(f"""<div style="background-color: #e6fffa; padding: 10px; border-radius: 8px; border-left: 5px solid #00CC96; color: #1e2130; margin-bottom:10px;">✅ <b>Pareggio:</b> {breakeven_date.strftime('%d/%m/%Y')} (tra {days_to_be} giorni).</div>""", unsafe_allow_html=True)
-
-                        fig = go.Figure()
-                        if not df_neg.empty: fig.add_trace(go.Scatter(x=df_neg['Data'], y=df_neg['Cumulativo'], mode='lines', line=dict(color='#FF4B4B', width=3), name='Sotto Zero'))
-                        if not df_pos.empty: fig.add_trace(go.Scatter(x=df_pos['Data'], y=df_pos['Cumulativo'], mode='lines', line=dict(color='#00CC96', width=3), name='Profitto'))
-                        if breakeven_date: fig.add_trace(go.Scatter(x=[breakeven_date], y=[0], mode='markers', marker=dict(color='yellow', size=12, symbol='star'), name='Pareggio'))
-
-                        fig.add_hline(y=0, line_color='white', line_dash="dash", line_width=1)
-                        fig.update_layout(template="plotly_dark", height=350, margin=dict(l=20,r=20,t=30,b=20), hovermode="x unified", showlegend=False)
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # --- CEDOLARIO DETTAGLIATO (UX Gold - Tabella Colorata) ---
-                        st.subheader("📅 Cedolario Dettagliato")
-                        def style_cedola(v): return f'color: {"#00CC96" if v >= 0 else "#FF4B4B"}; font-weight: bold;'
-                        st.dataframe(
-                            df_flussi[['Data', 'Tipo', 'Importo', 'Importo_User', 'Dettagli']]
-                            .style.format({'Importo': f'{{:+,.2f}} {valuta_bond}', 'Importo_User': f'{{:+,.2f}} {valuta_user}'})
-                            .map(style_cedola, subset=['Importo', 'Importo_User']),
-                            use_container_width=True
-                        )
+                        with st.expander("📅 Vedi Flussi di Cassa Dettagliati"):
+                            # Mostriamo i flussi originali (valuta bond) e convertiti
+                            df_sim['Importo_User'] = df_sim['Importo'] / tasso_spot
+                            st.dataframe(df_sim[['Data', 'Tipo', 'Importo', 'Importo_User']].style.format({'Importo': '{:+.2f}', 'Importo_User': '{:+.2f}'}), use_container_width=True)
                     else:
-                        st.warning(f"⚠️ Budget insufficiente. Il taglio minimo è {lotto_min:,.0f} {valuta_bond} (Costo: {costo_100_nominale_user*lotto_min/100:.2f} {valuta_user}).")
-
-                else: st.error("❌ Nessun risultato trovato.")
+                        st.warning(f"⚠️ Budget insufficiente. Il taglio minimo è {lotto:,.0f} {valuta_bond}.")
 
     # --- SMART ANALYSIS (GRAFICO MARCO + ZOOM + LIVE EXCHANGE) ---
     elif st.session_state.page == "SmartAnalysis":
