@@ -1166,7 +1166,113 @@ def login():
                 st.query_params["session"] = token
                 st.rerun()
             else: st.error("Errore Credenziali")
+# ==============================================================================
+# 🧠 SMART ANALYSIS UI (DA INCOLLARE PRIMA DI MAIN_APP)
+# ==============================================================================
 
+def smart_analysis_ui():
+    st.title("🧠 Smart Analysis & Confronto")
+    st.caption("Verifica se il tuo bond è un affare rispetto al mercato (Scatter Plot).")
+    
+    # Caricamento dati
+    with st.spinner("Analisi mercato in corso..."):
+        df_m = carica_tutto_mercato()
+    
+    if df_m.empty: 
+        st.warning("⚠️ Database vuoto. Aggiorna i dati.")
+        return
+
+    c_s, _ = st.columns([1, 2])
+    isin_s = c_s.text_input("Inserisci ISIN da confrontare", placeholder="IT...").strip().upper()
+    
+    if isin_s:
+        target_bond = df_m[df_m['ISIN'] == isin_s]
+        if not target_bond.empty:
+            b = target_bond.iloc[0]
+            ytm_target = b['YTM_Grezzo']
+            try: anni_target = (pd.to_datetime(b['Scadenza']).date() - date.today()).days / 365.25
+            except: anni_target = 0
+            
+            # 1. KPI VELOCI
+            st.divider()
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Tuo Bond (Lordo)", f"{ytm_target:.2f}%")
+            
+            # Filtro per grafico (Tolgo outlier)
+            df_viz = df_m[
+                (df_m['ISIN'] != isin_s) & 
+                (df_m['YTM_Grezzo'] > -1) & (df_m['YTM_Grezzo'] < 15) &
+                (df_m['Anni'] > 0) & (df_m['Anni'] <= 50)
+            ].copy()
+            
+            avg_cat = df_viz[df_viz['Tipo'] == b['Tipo']]['YTM_Grezzo'].mean()
+            delta = ytm_target - avg_cat
+            k2.metric(f"Media {b['Tipo']}", f"{avg_cat:.2f}%")
+            k3.metric("Posizione", "Sopra Media" if delta>0 else "Sotto Media", f"{delta:.2f}%")
+
+            # 2. GRAFICO SCATTER PLOT
+            st.subheader("📍 La Mappa del Tesoro")
+            
+            fig = go.Figure()
+            
+            # Limiti assi intelligenti
+            max_x = min(max(10, anni_target * 2), 50)
+            max_y = max(ytm_target + 3, 8)
+            
+            palette = {
+                "Governativo": "rgba(34, 139, 34, 0.7)", 
+                "Bancario": "rgba(30, 144, 255, 0.7)",
+                "Corporate": "rgba(255, 140, 0, 0.7)", 
+                "Speciali": "rgba(138, 43, 226, 0.7)",
+                "Altro": "rgba(102, 51, 153, 0.6)" 
+            }
+            
+            # Disegno categorie
+            for tipo in df_viz['Tipo'].unique():
+                sub = df_viz[df_viz['Tipo'] == tipo]
+                col = palette.get(tipo, palette["Altro"])
+                fig.add_trace(go.Scatter(
+                    x=sub['Anni'], y=sub['YTM_Grezzo'], mode='markers',
+                    marker=dict(color=col, size=6), name=str(tipo),
+                    text=sub['Descrizione'],
+                    hovertemplate="<b>%{text}</b><br>Tipo: "+str(tipo)+"<br>Scadenza: %{x:.1f}y<br>YTM: %{y:.2f}%<extra></extra>"
+                ))
+            
+            # IL TUO BOND (Diamante Rosso)
+            fig.add_trace(go.Scatter(
+                x=[anni_target], y=[ytm_target], mode='markers',
+                marker=dict(color='red', size=16, symbol='diamond', line=dict(color='black', width=2)),
+                name="👉 IL TUO BOND", hovertemplate="<b>TU SEI QUI</b><br>YTM: %{y:.2f}%<extra></extra>"
+            ))
+            
+            fig.update_layout(
+                template="plotly_white", height=500,
+                xaxis=dict(title="Scadenza (Anni)", range=[0, max_x]),
+                yaxis=dict(title="Rendimento Lordo (%)", range=[0, max_y]),
+                legend=dict(orientation="h", y=-0.2), margin=dict(t=30, b=80)
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # 3. TABELLA ALTERNATIVE MIGLIORI
+            st.subheader("🔄 Alternative Migliori")
+            alt = df_viz[
+                (df_viz['Anni'].between(anni_target-1.5, anni_target+1.5)) &
+                (df_viz['YTM_Grezzo'] > ytm_target + 0.15) &
+                (df_viz['Prezzo'].between(60, 115))
+            ].sort_values('YTM_Grezzo', ascending=False).head(10)
+            
+            if not alt.empty:
+                alt['Guadagno Extra'] = alt['YTM_Grezzo'] - ytm_target
+                st.dataframe(
+                    alt[['Descrizione', 'Tipo', 'Prezzo', 'Scadenza', 'YTM_Grezzo', 'Guadagno Extra', 'ISIN']]
+                    .rename(columns={'YTM_Grezzo': 'Rendimento Lordo'}).style.format({
+                        'Prezzo': '{:.2f}', 'Rendimento Lordo': '{:.2f}%', 'Guadagno Extra': '+{:.2f}%'
+                    }), use_container_width=True, hide_index=True
+                )
+            else: st.success("✅ Il tuo bond è già tra i migliori per questa scadenza!")
+
+        else: st.error("❌ ISIN non trovato.")
+            
 def main_app():
     with st.sidebar:
         st.title("🏛️ BOND TERMINAL")
@@ -1591,6 +1697,7 @@ def main_app():
         else:
             st.info("Nessun bond trovato. Prova ad allargare i parametri.")
 
+    elif st.session_state.page == "SmartAnalysis": smart_analysis_ui()
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
     elif st.session_state.page == "Alerts": alert_manager_ui()
