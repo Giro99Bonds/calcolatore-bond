@@ -1239,15 +1239,16 @@ def main_app():
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
-                    # --- A. MOTORE MATEMATICO (PRECISO) ---
-                    tax_rate = determina_tasse(d['fonte'], d['desc'])
+                    # --- A. MOTORE MATEMATICO (CORE) ---
+                    feats = detect_bond_features(d['desc'], d.get('isin', ''))
+                    tax_rate = feats['tax_rate']
                     valuta_bond = detect_valuta(d['desc'], d['isin'])
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
                     
-                    # Usiamo la nuova funzione che restituisce 7 valori
-                    df_base, _, _, _, _, _, _ = genera_flussi_dettagliati(d, 100.0, tax_rate, 0, d['pr'])
+                    # Generazione Flussi Base (Base 100 per metriche)
+                    df_base, _, _, _, _, _, _ = genera_flussi_dettagliati_v2(d, 100.0, tax_rate, 0, d['pr'])
                     
-                    # XIRR Locale
+                    # Calcolo XIRR
                     def xirr_calc(flow_df):
                         try:
                             dates = flow_df['Data'].tolist(); amounts = flow_df['Importo'].tolist()
@@ -1262,9 +1263,10 @@ def main_app():
                     rendimento_netto = xirr_calc(df_base)
                     qual = analizza_bond_quality_dettagliata(d, risk, tax_rate, st.session_state.patrimonio)
 
-                    # --- B. INTERFACCIA VISUALE ---
+                    # --- B. HEADER & DATI CHIAVE (INFROBOX REINSERITI) ---
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
                     
+                    # Header Card
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, #1e2130 0%, #2a2d4a 100%); padding: 20px; border-radius: 12px; border-left: 6px solid #00CC96; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
@@ -1287,20 +1289,21 @@ def main_app():
                     </div>
                     """, unsafe_allow_html=True)
                     
+                    # Metriche Dettagliate
                     st.subheader("📊 Dati Chiave")
                     c1, c2, c3, c4, c5, c6 = st.columns(6)
                     simbolo = "€" if valuta_bond == "EUR" else valuta_bond
                     
-                    c1.metric("Prezzo", f"{d['pr']} {simbolo}")
-                    c2.metric("Rend. NETTO", f"{rendimento_netto:.2f}%")
-                    c3.metric("Rend. LORDO", f"{risk['ytm']:.2f}%")
-                    c4.metric("Cedola", f"{d['ced']}%")
-                    c5.metric("Valuta", valuta_bond)
-                    c6.metric("Duration", f"{risk['mod_dur']:.2f}")
+                    c1.metric("Prezzo", f"{d['pr']} {simbolo}", help="Prezzo attuale di mercato.")
+                    c2.metric("Rend. NETTO", f"{rendimento_netto:.2f}%", help="Rendimento reale annuo (XIRR) al netto delle tasse.")
+                    c3.metric("Rend. LORDO", f"{risk['ytm']:.2f}%", help="Yield to Maturity lordo.")
+                    c4.metric("Cedola", f"{d['ced']}%", help="Tasso cedolare annuale lordo.")
+                    c5.metric("Valuta", valuta_bond, help="Valuta in cui è denominato il titolo.")
+                    c6.metric("Duration", f"{risk['mod_dur']:.2f}", help="Sensibilità del prezzo ai tassi (Modified Duration).")
 
                     st.divider()
                     
-                    # === 💰 SIMULATORE ===
+                    # === 💰 SIMULATORE BUDGET ===
                     st.subheader("💰 Simulatore & Stress Test")
                     col_set1, col_set2, col_set3 = st.columns(3)
                     with col_set1:
@@ -1319,7 +1322,7 @@ def main_app():
                         st.caption(f"📡 Tasso LIVE: 1 {valuta_user} = {tasso_spot:.4f} {valuta_bond}")
                         st.divider()
                         c_ux1, c_ux2 = st.columns([2, 1])
-                        with c_ux1: st.info(f"**Rischio Cambio Attivo**")
+                        with c_ux1: st.info(f"**Rischio Cambio Attivo**: Il rendimento dipenderà dal cambio futuro.")
                         with c_ux2: scenario_fx = st.slider(f"📉 Simula Cambio a scadenza", -50, 50, 0, 1, format="%d%%")
                     
                     # 1. Calcoli Preliminari (Rateo % su 100)
@@ -1334,8 +1337,8 @@ def main_app():
                     if nominale_effettivo == 0 and budget_user > 0: nominale_effettivo = lotto_min
                     
                     if nominale_effettivo > 0:
-                        # 3. Generazione Flussi (Qui prendiamo tutti i 7 valori)
-                        df_flussi, spesa_loc, incasso_loc, rateo_loc, tot_ced_loc, _, rimborso_netto_loc = genera_flussi_dettagliati(
+                        # 3. Generazione Flussi Reali
+                        df_flussi, spesa_loc, incasso_loc, rateo_loc, tot_ced_loc, _, rimborso_netto_loc = genera_flussi_dettagliati_v2(
                             d, nominale_effettivo, tax_rate, 0, d['pr']
                         )
                         
@@ -1355,11 +1358,9 @@ def main_app():
                         
                         incasso_reale_user = df_flussi[df_flussi['Tipo'] != 'USCITA']['Importo_User'].sum()
                         cedole_tot_user = tot_ced_loc / rate_rientro
-                        # CORREZIONE: Qui usiamo il rimborso NETTO (non il nominale lordo) per lo scontrino
                         rimborso_user = rimborso_netto_loc / rate_rientro 
                         
                         guadagno_netto_user = incasso_reale_user - spesa_reale_user
-                        roi_pct_totale = (guadagno_netto_user / spesa_reale_user) * 100
                         
                         days_res = (d['sc'] - date.today()).days
                         anni_res = max(days_res/365.25, 0.1)
@@ -1367,9 +1368,8 @@ def main_app():
                             roi_annuo = ((incasso_reale_user / spesa_reale_user) ** (1/anni_res) - 1) * 100
                         else: roi_annuo = -100
 
-                        # --- SCONTRINO (Corretto: Ora i parziali sommano il totale) ---
+                        # --- SCONTRINO VISUALE ---
                         st.write("")
-                        st.markdown(f"### 🧾 Analisi Flussi (Budget: {budget_user:,.0f} {valuta_user})")
                         col_usc, col_entr = st.columns(2)
                         
                         with col_usc:
@@ -1406,21 +1406,22 @@ def main_app():
 
                         st.divider()
                         if guadagno_netto_user > 0:
-                            st.success(f"✅ **GUADAGNO NETTO:** +{guadagno_netto_user:,.2f} {valuta_user} (+{roi_pct_totale:.2f}%) | **Rendimento Annuo: +{roi_annuo:.2f}%**")
+                            # MODIFICA: Rimossa la % accanto al guadagno netto, lasciato solo Rendimento Annuo
+                            st.success(f"✅ **GUADAGNO NETTO:** +{guadagno_netto_user:,.2f} {valuta_user} | **Rendimento Annuo: +{roi_annuo:.2f}%**")
                         else:
-                            st.error(f"❌ **PERDITA STIMATA:** {guadagno_netto_user:,.2f} {valuta_user} ({roi_pct_totale:.2f}%) | **Rendimento Annuo: {roi_annuo:.2f}%**")
+                            st.error(f"❌ **PERDITA STIMATA:** {guadagno_netto_user:,.2f} {valuta_user} | **Rendimento Annuo: {roi_annuo:.2f}%**")
 
                         # Grafici e Tabelle
                         st.subheader("🗓️ Recupero Capitale")
-                        df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
-                        df_neg = df_flussi[df_flussi['Cumulativo'] < 0]
-                        df_pos = df_flussi[df_flussi['Cumulativo'] >= 0]
+                        
+                        # Fix Grafico: Raggruppiamo per data per avere una linea continua
+                        df_chart = df_flussi.groupby('Data', as_index=False)['Importo_User'].sum()
+                        df_chart['Cumulativo'] = df_chart['Importo_User'].cumsum()
                         
                         fig = go.Figure()
-                        if not df_neg.empty: fig.add_trace(go.Scatter(x=df_neg['Data'], y=df_neg['Cumulativo'], mode='lines', line=dict(color='#FF4B4B', width=3), name='Sotto Zero'))
-                        if not df_pos.empty: fig.add_trace(go.Scatter(x=df_pos['Data'], y=df_pos['Cumulativo'], mode='lines', line=dict(color='#00CC96', width=3), name='Profitto'))
+                        fig.add_trace(go.Scatter(x=df_chart['Data'], y=df_chart['Cumulativo'], mode='lines+markers', line=dict(color='#00CC96', width=3)))
                         fig.add_hline(y=0, line_color='white', line_dash="dash")
-                        fig.update_layout(template="plotly_dark", height=350, margin=dict(l=20,r=20,t=30,b=20), showlegend=False)
+                        fig.update_layout(template="plotly_dark", height=350, margin=dict(l=10,r=10,t=30,b=10), showlegend=False)
                         st.plotly_chart(fig, use_container_width=True)
                         
                         with st.expander("📅 Cedolario Dettagliato (Clicca per aprire)", expanded=False):
@@ -1432,9 +1433,7 @@ def main_app():
                                 use_container_width=True
                             )
                     else:
-                        st.warning(f"⚠️ Budget insufficiente. Minimo {lotto_min:,.0f} {valuta_bond}.")
-                
-                else: st.error("❌ Nessun risultato trovato.")
+                        st.warning(f"⚠️ Budget insufficiente. Il taglio minimo è {lotto_min:,.0f} {valuta_bond} (Costo: {costo_100_nominale_user*lotto_min/100:.2f} {valuta_user}).")
     # --- SCREENER AVANZATO (FILTRI VALUTA + CONVERSIONE PREZZI) ---
 # --- SCREENER (LOGICA DIRETTA: DAL TUO PORTAFOGLIO AL MERCATO) ---
     elif st.session_state.page == "Screener":
