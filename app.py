@@ -11,12 +11,12 @@ import plotly.express as px
 import os
 from scipy.optimize import newton
 import hashlib
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # Aggiunto per evitare errori grafici
 import json
 import yfinance as yf 
 
 # ==============================================================================
-# 1. CONFIGURAZIONE PAGINA E STILI CSS (ORIGINALE ESTESO)
+# 1. CONFIGURAZIONE PAGINA E STILI CSS
 # ==============================================================================
 
 st.set_page_config(
@@ -114,7 +114,7 @@ def init_session_state():
 init_session_state()
 
 # ==============================================================================
-# 3. MAPPA FONTI (ESTESA - 29 DATASETS)
+# 3. MAPPA FONTI
 # ==============================================================================
 
 SOURCES_MAP = {
@@ -174,7 +174,7 @@ MACRO_CATEGORIES = {
 }
 
 # ==============================================================================
-# 4. FUNZIONI UTILI & DATABASE (COMPLETO)
+# 4. FUNZIONI UTILI & DATABASE
 # ==============================================================================
 
 def valida_isin(isin):
@@ -203,9 +203,6 @@ def pulisci_taglio(valore):
         except: return 1000.0
     try: return float(s.replace('.', '').replace(',', '.'))
     except: return 1000.0
-
-def get_inflazione_ufficiale():
-    return 2.0, "https://www.istat.it/it/archivio/prezzi+al+consumo"
 
 def processa_riga(row, info):
     try:
@@ -265,10 +262,6 @@ def identikit_bond(dati):
     mesi = (diff.days % 365) // 30
     tempo = f"{anni} Anni e {mesi} Mesi"
     return chi, tipo, tempo, risk_msg
-
-# ==============================================================================
-# 5. RISK ENGINE E SCORECARD
-# ==============================================================================
 
 # ==============================================================================
 # 5. RISK ENGINE E SCORECARD (VERSIONE INDISTRUTTIBILE)
@@ -387,53 +380,6 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
     flags = []
     if score < 50: flags.append(("red", "Score Basso"))
     
-    return {"score": max(0, min(100, score)), "breakdown": breakdown, "ytm_netto": ytm_net, "flags": flags}
-
-def calcola_metriche_rischio(prezzo, cedola_pct, scadenza, freq):
-    if prezzo <= 0: return None
-    ytm = calcola_ytm_preciso(prezzo, cedola_pct, scadenza, freq)
-    if ytm is None: return None
-    cedola = cedola_pct / 100
-    anni = (scadenza - date.today()).days / 365.25
-    mod_dur = anni / (1 + ytm)
-    return {"ytm": ytm * 100, "mod_dur": mod_dur}
-
-def determina_tasse(nome, desc):
-    keys = ["BTP", "BOT", "BUND", "OAT", "USA", "TREASURY", "BEI", "EU", "ROMANIA", "UNGHERIA", "TURCHIA"]
-    if any(k in nome.upper() or k in desc.upper() for k in keys): return 12.5
-    return 26.0
-
-def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
-    breakdown = []
-    score = 100
-    peso_bond = (dati['taglio'] / patrimonio) * 100
-    if peso_bond > 20: punti = -30; msg = f"Rischio alto: pesa il {peso_bond:.1f}%"; colore = "score-bad"
-    elif peso_bond > 10: punti = -10; msg = f"Taglio impegnativo: pesa il {peso_bond:.1f}%"; colore = "score-neutral"
-    else: punti = 0; msg = f"Taglio sostenibile: pesa il {peso_bond:.1f}%"; colore = "score-good"
-    score += punti
-    breakdown.append({"cat": "🏗️ Sostenibilità", "val": f"{dati['taglio']/1000:.0f}k €", "msg": msg, "pts": punti, "col": colore})
-
-    if dati['pr'] > 110: puntos = -15; msg="Molto sopra la pari"; col="score-bad"
-    elif dati['pr'] > 102: puntos = -5; msg="Sopra la pari"; col="score-neutral"
-    elif dati['pr'] < 95: puntos = +5; msg="Sotto la pari"; col="score-good"
-    else: puntos=0; msg="Prezzo Fair"; col="score-good"
-    score += puntos
-    breakdown.append({"cat": "🏷️ Prezzo", "val": f"{dati['pr']:.2f}", "msg": msg, "pts": puntos, "col": col})
-
-    ytm_net = risk['ytm'] * (1 - tax / 100) if risk else 0
-    if ytm_net < 1.5: puntos=-20; msg="Rendimento basso"; col="score-bad"
-    elif ytm_net > 3.0: puntos=+15; msg="Ottimo rendimento"; col="score-good"
-    else: puntos=0; msg="Rendimento medio"; col="score-neutral"
-    score += puntos
-    breakdown.append({"cat": "📈 Rendimento", "val": f"{ytm_net:.2f}%", "msg": msg, "pts": puntos, "col": col})
-
-    if tax < 20: puntos=+5; msg="Tassazione agevolata"; col="score-good"
-    else: puntos=-5; msg="Tassazione piena"; col="score-neutral"
-    score += puntos
-    breakdown.append({"cat": "🏛️ Tassazione", "val": f"{tax}%", "msg": msg, "pts": puntos, "col": col})
-
-    flags = []
-    if score < 50: flags.append(("red", "Score Basso"))
     return {"score": max(0, min(100, score)), "breakdown": breakdown, "ytm_netto": ytm_net, "flags": flags}
 
 # ==============================================================================
@@ -609,8 +555,9 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
     plusvalenza = (gain/100)*nominale - tassa_gain
 
     return pd.DataFrame(flussi), spesa_totale, incasso_totale, costo_rateo_netto, totale_cedole_nette, plusvalenza
+
 # ==============================================================================
-# 🆕 GESTIONE VALUTE LIVE (NUOVO SISTEMA)
+# 🆕 GESTIONE VALUTE LIVE
 # ==============================================================================
 
 def detect_valuta(desc, isin):
@@ -641,119 +588,15 @@ def get_tasso_cambio_live(da, a):
     # Fallback se Yahoo non va
     fallback = {"EURUSD": 1.05, "EURTRY": 36.00, "EURBRL": 6.10, "EURGBP": 0.85, "EURRON": 4.97}
     return fallback.get(f"{da}{a}", 1.0)
+
 # -----------------------------------------------------------------------------
-# 🆕 FUNZIONALITÀ RETAIL AVANZATE (FULL CODE)
+# 🆕 FUNZIONALITÀ RETAIL AVANZATE
 # -----------------------------------------------------------------------------
 
-# 1. BOND SCREENER INTELLIGENTE
+# 1. BOND SCREENER INTELLIGENTE (FUNZIONE VECCHIA - RIMPIAZZATA DALLA PAGINA PRINCIPALE)
+# Lasciamo vuota per compatibilità se serve, ma la logica è nel main
 def bond_screener_ui():
-    """Interfaccia Bond Screener con filtri avanzati"""
-    st.title("🎯 Bond Screener Intelligente")
-    st.caption("Trova i bond perfetti per te con filtri combinati")
-    
-    # Carica mercato
-    with st.spinner("Caricamento database..."):
-        df_market = carica_dati_mercato()
-        if df_market.empty:
-            st.error("❌ Database vuoto. Aggiorna dalla sidebar.")
-            return
-        
-    st.divider()
-    
-    # === FILTRI ===
-    st.subheader("🔧 I Tuoi Filtri")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**📊 Rendimento**")
-        ytm_min = st.number_input("YTM Minimo %", value=0.0, step=0.5)
-        ytm_max = st.number_input("YTM Massimo %", value=15.0, step=0.5)
-        
-    with col2:
-        st.markdown("**⏰ Scadenza**")
-        anni_min = st.number_input("Scadenza Min (anni)", value=0.0, step=0.5)
-        anni_max = st.number_input("Scadenza Max (anni)", value=30.0, step=1.0)
-        
-    with col3:
-        st.markdown("**💰 Prezzo**")
-        prezzo_min = st.number_input("Prezzo Min", value=50.0, step=5.0)
-        prezzo_max = st.number_input("Prezzo Max", value=150.0, step=5.0)
-
-    # Filtri categoria
-    col4, col5 = st.columns(2)
-
-    with col4:
-        categorie_sel = st.multiselect(
-            "🏷️ Categorie",
-            options=df_market['Categoria'].unique().tolist(),
-            default=df_market['Categoria'].unique().tolist()
-        )
-    with col5:
-        ordinamento = st.selectbox(
-            "📊 Ordina per",
-            ["YTM_Grezzo (Decrescente)", "YTM_Grezzo (Crescente)", 
-             "Prezzo (Decrescente)", "Prezzo (Crescente)",
-             "Scadenza (Più vicina)", "Scadenza (Più lontana)"]
-        )
-
-    # === APPLICAZIONE FILTRI ===
-    if st.button("🔍 Cerca Bond", type="primary"):
-        filtered = df_market[
-            (df_market['YTM_Grezzo'] >= ytm_min) &
-            (df_market['YTM_Grezzo'] <= ytm_max) &
-            (df_market['Anni'] >= anni_min) &
-            (df_market['Anni'] <= anni_max) &
-            (df_market['Prezzo'] >= prezzo_min) &
-            (df_market['Prezzo'] <= prezzo_max) &
-            (df_market['Categoria'].isin(categorie_sel))
-        ]
-        
-        # Ordinamento
-        if "Decrescente" in ordinamento:
-            filtered = filtered.sort_values(ordinamento.split()[0], ascending=False)
-        elif "Crescente" in ordinamento:
-            filtered = filtered.sort_values(ordinamento.split()[0], ascending=True)
-        elif "vicina" in ordinamento:
-            filtered = filtered.sort_values('Anni', ascending=True)
-        else:
-            filtered = filtered.sort_values('Anni', ascending=False)
-            
-        # === RISULTATI ===
-        if filtered.empty:
-            st.warning("⚠️ Nessun bond trovato. Rilassa i filtri.")
-        else:
-            st.success(f"✅ Trovati **{len(filtered)}** bond!")
-            
-            # Mostra risultati
-            st.dataframe(
-                filtered[['ISIN', 'Desc', 'Prezzo', 'YTM_Grezzo', 'Anni', 'Categoria']].head(50).style.format({
-                    'Prezzo': '{:.2f}€',
-                    'YTM_Grezzo': '{:.2f}%',
-                    'Anni': '{:.1f}'
-                }),
-                use_container_width=True
-            )
-            
-            # Export CSV
-            csv = filtered.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "💾 Scarica Risultati (CSV)",
-                csv,
-                f"bond_screener_{date.today()}.csv",
-                "text/csv"
-            )
-            
-            # Grafico distribuzione
-            fig = px.scatter(
-                filtered.head(100), 
-                x='Anni', 
-                y='YTM_Grezzo',
-                color='Categoria',
-                size='Prezzo',
-                hover_data=['ISIN', 'Desc'],
-                title="📊 Distribuzione Risultati"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    pass 
 
 # 2. DASHBOARD MERCATO
 def dashboard_mercato_ui():
@@ -1173,11 +1016,7 @@ def main_app():
             st.query_params.clear()
             st.rerun()
 
-    # --- ROUTING PAGINE ---
-# --- SCANNER (CODICE COMPLETO E CORRETTO) ---
-# --- SCANNER (GRAFICA ORIGINALE + VALUTA LIVE + CEDOLARIO COLORATO) ---
-# --- SCANNER (GRAFICA PREMIUM + VALUTA LIVE + INFOBOX) ---
-# --- SCANNER (VERSIONE MASTER: UX GOLD + MATEMATICA REALE XIRR) ---
+    # --- SCANNER (VERSIONE MASTER: UX GOLD + MATEMATICA REALE XIRR) ---
     if st.session_state.page == "Scanner":
         st.title("🔎 Scanner Obbligazionario Pro")
         st.caption("Analisi professionale: Flussi reali, fiscalità italiana e stress test valutario.")
@@ -1471,142 +1310,254 @@ def main_app():
                         st.warning(f"⚠️ Budget insufficiente. Il taglio minimo è {lotto_min:,.0f} {valuta_bond} (Costo: {costo_100_nominale_user*lotto_min/100:.2f} {valuta_user}).")
 
                 else: st.error("❌ Nessun risultato trovato.")
-    # --- SCREENER AVANZATO (FILTRI VALUTA + CONVERSIONE PREZZI) ---
-# --- SCREENER (LOGICA DIRETTA: DAL TUO PORTAFOGLIO AL MERCATO) ---
-    elif st.session_state.page == "Screener":
-        st.title("⚡ Screener & Ranking")
-        st.caption("Trova i migliori rendimenti in base alla tua valuta di partenza.")
+
+    # --- SMART ANALYSIS (GRAFICO MARCO + ZOOM + LIVE EXCHANGE) ---
+    elif st.session_state.page == "SmartAnalysis":
+        st.title("🧠 Smart Analysis & Confronto")
+        st.caption("Verifica se il tuo bond è un affare rispetto al mercato.")
         
-        # 1. Caricamento Dati
+        with st.spinner("Analisi mercato in corso..."):
+            df_m = carica_tutto_mercato()
+        
+        if df_m.empty: st.warning("⚠️ Database vuoto. Aggiorna i dati."); st.stop()
+
+        c_s, _ = st.columns([1, 2])
+        isin_s = c_s.text_input("Inserisci ISIN", placeholder="IT...").strip().upper()
+        
+        if isin_s:
+            target_bond = df_m[df_m['ISIN'] == isin_s]
+            if not target_bond.empty:
+                b = target_bond.iloc[0]
+                ytm_target = b['YTM_Grezzo']
+                try: anni_target = (pd.to_datetime(b['Scadenza']).date() - date.today()).days / 365.25
+                except: anni_target = 0
+                
+                # --- 1. KPI VELOCI ---
+                st.divider()
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Tuo Bond (Lordo)", f"{ytm_target:.2f}%")
+                
+                # Filtriamo il mercato (Via gli errori e i bond > 50 anni)
+                df_viz = df_m[
+                    (df_m['ISIN'] != isin_s) & 
+                    (df_m['YTM_Grezzo'] > -1) & (df_m['YTM_Grezzo'] < 15) &
+                    (df_m['Anni'] > 0) & (df_m['Anni'] <= 50)
+                ].copy()
+                
+                avg_cat = df_viz[df_viz['Tipo'] == b['Tipo']]['YTM_Grezzo'].mean()
+                delta = ytm_target - avg_cat
+                k2.metric(f"Media {b['Tipo']}", f"{avg_cat:.2f}%")
+                k3.metric("Posizione", "Sopra Media" if delta>0 else "Sotto Media", f"{delta:.2f}%")
+
+                # --- 2. GRAFICO SCATTER (ZOOM + COLORI) ---
+                st.subheader("📍 La Mappa del Tesoro")
+                
+                fig = go.Figure()
+                
+                # Zoom intelligente su Marco
+                max_x = min(max(10, anni_target * 2), 50)
+                max_y = max(ytm_target + 3, 8)
+                
+                palette = {
+                    "Governativo": "rgba(34, 139, 34, 0.7)", "Bancario": "rgba(30, 144, 255, 0.7)",
+                    "Corporate": "rgba(255, 140, 0, 0.7)", "Speciali": "rgba(138, 43, 226, 0.7)",
+                    "Altro": "rgba(102, 51, 153, 0.6)" # VIOLA SCURO VISIBILE
+                }
+                
+                # Disegno categorie
+                for tipo in df_viz['Tipo'].unique():
+                    sub = df_viz[df_viz['Tipo'] == tipo]
+                    col = palette.get(tipo, palette["Altro"])
+                    fig.add_trace(go.Scatter(
+                        x=sub['Anni'], y=sub['YTM_Grezzo'], mode='markers',
+                        marker=dict(color=col, size=6), name=str(tipo),
+                        text=sub['Descrizione'],
+                        hovertemplate="<b>%{text}</b><br>Tipo: "+str(tipo)+"<br>Scadenza: %{x:.1f}y<br>YTM: %{y:.2f}%<extra></extra>"
+                    ))
+                
+                # IL TUO BOND (Diamante Rosso)
+                fig.add_trace(go.Scatter(
+                    x=[anni_target], y=[ytm_target], mode='markers',
+                    marker=dict(color='red', size=16, symbol='diamond', line=dict(color='black', width=2)),
+                    name="👉 IL TUO BOND", hovertemplate="<b>TU SEI QUI</b><br>YTM: %{y:.2f}%<extra></extra>"
+                ))
+                
+                fig.update_layout(
+                    template="plotly_white", height=500,
+                    xaxis=dict(title="Scadenza (Anni)", range=[0, max_x]),
+                    yaxis=dict(title="Rendimento Lordo (%)", range=[0, max_y]),
+                    legend=dict(orientation="h", y=-0.2), margin=dict(t=30, b=80)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # --- 3. TABELLA ALTERNATIVE (FIX) ---
+                st.subheader("🔄 Alternative Migliori")
+                alt = df_viz[
+                    (df_viz['Anni'].between(anni_target-1.5, anni_target+1.5)) &
+                    (df_viz['YTM_Grezzo'] > ytm_target + 0.15) &
+                    (df_viz['Prezzo'].between(60, 115))
+                ].sort_values('YTM_Grezzo', ascending=False).head(10)
+                
+                if not alt.empty:
+                    alt['Guadagno Extra'] = alt['YTM_Grezzo'] - ytm_target
+                    st.dataframe(
+                        alt[['Descrizione', 'Tipo', 'Prezzo', 'Scadenza', 'YTM_Grezzo', 'Guadagno Extra', 'ISIN']]
+                        .rename(columns={'YTM_Grezzo': 'Rendimento Lordo'}).style.format({
+                            'Prezzo': '{:.2f}', 'Rendimento Lordo': '{:.2f}%', 'Guadagno Extra': '+{:.2f}%'
+                        }), use_container_width=True, hide_index=True
+                    )
+                else: st.success("✅ Il tuo bond è già tra i migliori per questa scadenza!")
+
+            else: st.error("❌ ISIN non trovato.")
+
+    # --- SCREENER (VERSIONE "TRASPARENZA TOTALE" + SEMAFORO RISCHIO) ---
+    elif st.session_state.page == "Screener":
+        st.title("⚡ Screener & Ranking (Semaforo Rischio)")
+        st.caption("Classifica basata sul rendimento puro, con avvisi di rischio chiari.")
+        
+        # 1. Caricamento
         df = carica_tutto_mercato()
         if df.empty:
-            st.warning("⚠️ Database vuoto. Clicca 'Aggiorna Dati'.")
-            st.stop()
+            st.warning("⚠️ Database vuoto. Clicca 'Aggiorna Dati'."); st.stop()
 
         # 2. Arricchimento
         if 'Valuta' not in df.columns:
             df['Valuta'] = df.apply(lambda x: detect_valuta(x['Descrizione'], x['ISIN']), axis=1)
 
         # =====================================================================
-        # 🎛️ CONFIGURAZIONE (DENTRO IL FORM PER NON RICARICARE SEMPRE)
+        # 🎛️ CONFIGURAZIONE RICERCA
         # =====================================================================
         
-        with st.expander("🛠️ IMPOSTA LA RICERCA", expanded=True):
-            
-            with st.form(key="ranking_form"):
+        with st.expander("🛠️ CONFIGURA LA TUA CLASSIFICA", expanded=True):
+            with st.form(key="ranking_risk_form"):
                 
-                # --- SEZIONE 1: CHI SEI E COSA VUOI ---
-                st.markdown("##### 1️⃣ Il Tuo Profilo")
-                c_val, c_scope = st.columns(2)
+                # RIGA 1: CHI SEI E DOVE GUARDI
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    valuta_wallet = st.selectbox("1. Valuta del tuo Conto", ["EUR", "USD"], index=0)
                 
-                with c_val:
-                    # TUA VALUTA
-                    valuta_wallet = st.selectbox("La valuta del tuo portafoglio", ["EUR", "USD"], index=0)
-                
-                with c_scope:
-                    # PERIMETRO (La modifica richiesta)
-                    perimetro = st.radio(
-                        "Quali obbligazioni vuoi vedere in classifica?",
-                        [f"🔒 Solo titoli in {valuta_wallet} (Nessun rischio cambio)", 
-                         "🌍 Tutto il Mercato Globale (Max rendimento, ma rischio cambio)"],
-                        index=0
+                with c2:
+                    scope = st.radio(
+                        "2. Perimetro di Ricerca",
+                        ["🇪🇺 Solo Mercato Locale (Es. Solo EUR)", 
+                         "🌍 Tutto il Mondo (Classifica Globale)"],
+                        horizontal=True
                     )
 
                 st.divider()
 
-                # --- SEZIONE 2: I PARAMETRI DEL BOND ---
-                st.markdown("##### 2️⃣ I Parametri del Bond")
+                # RIGA 2: FILTRI (NON CENSURA, SOLO LIMITI)
                 f1, f2, f3 = st.columns(3)
-                
                 with f1:
                     min_y = st.number_input("Rendimento Minimo (%)", value=3.0, step=0.5)
                 with f2:
-                    max_anni = st.number_input("Scadenza Massima (Anni)", value=10, step=1)
+                    max_anni = st.number_input("Scadenza Massima (Anni)", value=15, step=1)
                 with f3:
-                    # Questo filtro agisce sul prezzo CONVERTITO nella tua valuta
-                    max_pz = st.number_input(f"Prezzo Massimo ({valuta_wallet})", value=105.0, step=1.0)
+                    # Filtro sul PREZZO REALE
+                    max_pz = st.number_input(f"Prezzo Max ({valuta_wallet})", value=110.0, step=1.0)
 
-                # Categoria
+                # RIGA 3: Categoria
                 cats = ["🌐 TUTTE LE CATEGORIE"] + list(MACRO_CATEGORIES.keys())
-                filtro_cat = st.selectbox("Filtra Categoria Emittente", cats, index=0)
+                filtro_cat = st.selectbox("Categoria Emittente", cats, index=0)
                 
                 st.write("") 
-                
-                # BOTTONE
-                submitted = st.form_submit_button("🚀 GENERA CLASSIFICA", type="primary", use_container_width=True)
+                submitted = st.form_submit_button("🚀 MOSTRA CLASSIFICA COMPLETA", type="primary", use_container_width=True)
 
         # =====================================================================
-        # ⚙️ MOTORE DI RANKING (SCATTA SOLO COL BOTTONE O AL PRIMO AVVIO)
+        # ⚙️ MOTORE DI RANKING (RISCHIO CALCOLATO)
         # =====================================================================
         
-        # Logica di filtraggio iniziale (Valuta)
-        if "Solo titoli" in perimetro:
-            # Mostro solo la roba sicura nella mia valuta
+        # 1. Filtro Universo
+        if "Solo Mercato Locale" in scope:
             df_work = df[df['Valuta'] == valuta_wallet].copy()
         else:
-            # Mostro tutto
             df_work = df.copy()
 
-        # Logica Categoria
+        # 2. Filtro Categoria
         if filtro_cat != "🌐 TUTTE LE CATEGORIE":
             if "GOVERNATIVI" in filtro_cat: df_work = df_work[df_work['Tipo'] == 'Governativo']
             elif "BANCARI" in filtro_cat: df_work = df_work[df_work['Tipo'] == 'Bancario']
             elif "CORPORATE" in filtro_cat: df_work = df_work[df_work['Tipo'] == 'Corporate']
             elif "SPECIALI" in filtro_cat: df_work = df_work[df_work['Tipo'].isin(['Altro', 'Speciali'])]
 
-        # Filtri Preliminari
+        # 3. Filtri Numerici
         df_work = df_work[
             (df_work['YTM_Grezzo'] >= min_y) &
             (df_work['Anni'] <= max_anni)
         ]
 
-        # ⚙️ CALCOLO CONVERSIONI PER IL RANKING
+        # 4. CALCOLO: CONVERSIONE + ETICHETTATURA RISCHIO
         if not df_work.empty:
-            # Recupero tassi live solo per le valute diverse dalla mia
+            # Cache tassi
             tassi_live = {}
-            unique_currencies = df_work['Valuta'].unique()
-            for v in unique_currencies:
+            for v in df_work['Valuta'].unique():
                 if v != valuta_wallet:
                     tassi_live[v] = get_tasso_cambio_live(valuta_wallet, v)
 
-            def engine_ranking(row):
-                curr_bond = row['Valuta']
+            def engine_risk_ranking(row):
+                curr = row['Valuta']
+                yield_lordo = row['YTM_Grezzo']
                 
-                # 1. PREZZO REALE (Quanto mi esce dal conto oggi)
-                if curr_bond == valuta_wallet:
+                # A. Conversione Prezzo (Per sapere quanto pago)
+                if curr == valuta_wallet:
                     pz_reale = row['Prezzo']
                     tasso = 1.0
                 else:
-                    tasso = tassi_live.get(curr_bond, 1.0)
+                    tasso = tassi_live.get(curr, 1.0)
                     pz_reale = row['Prezzo'] / tasso if tasso > 0 else 0
                 
-                # 2. STATUS RISCHIO
-                risk_label = "✅ Sicuro" if curr_bond == valuta_wallet else "⚠️ Rischio FX"
+                # B. INTELLIGENZA SUL RISCHIO (Etichette)
+                risk_tags = []
                 
-                return pd.Series([pz_reale, risk_label])
+                # Rischio 1: Valuta
+                if curr != valuta_wallet:
+                    risk_tags.append("⚠️ Cambio")
+                
+                # Rischio 2: Rendimento "Sospetto" (Credit Risk)
+                if yield_lordo > 15.0:
+                    risk_tags.append("☠️ DEFAULT?")
+                elif yield_lordo > 9.0:
+                    risk_tags.append("🔴 VERY HIGH RISK")
+                elif yield_lordo > 5.5:
+                    risk_tags.append("🟠 High Yield")
+                else:
+                    if not risk_tags: risk_tags.append("🟢 Investment Grade") # Se non ha altri rischi
+                
+                full_status = " + ".join(risk_tags)
+                
+                return pd.Series([pz_reale, full_status])
 
-            df_work[['Prezzo_Wallet', 'Risk_Status']] = df_work.apply(engine_ranking, axis=1)
+            df_work[['Prezzo_Wallet', 'Risk_Analysis']] = df_work.apply(engine_risk_ranking, axis=1)
             
-            # FILTRO SUL PREZZO CONVERTITO (Ora che so quanto costa in Euro)
+            # 5. Filtro sul Prezzo Convertito
             df_work = df_work[df_work['Prezzo_Wallet'] <= max_pz]
             
-            # ORDINAMENTO
-            # Ordiniamo per rendimento decrescente
+            # 6. ORDINAMENTO (Puro Rendimento)
             df_work = df_work.sort_values(by='YTM_Grezzo', ascending=False)
 
             # =================================================================
-            # 🏆 VISUALIZZAZIONE CLASSIFICA
+            # 🏆 CLASSIFICA (SENZA FILTRI NASCOSTI)
             # =================================================================
             st.divider()
+            st.subheader(f"🏆 Classifica per Rendimento ({len(df_work)} Bond)")
             
-            if "Solo titoli" in perimetro:
-                st.subheader(f"🏆 Top {len(df_work)} Bond in {valuta_wallet}")
-            else:
-                st.subheader(f"🌍 Classifica Globale ({len(df_work)} Bond)")
-                st.info(f"💡 **Nota:** I prezzi sono stati convertiti in **{valuta_wallet}**. Il rendimento visualizzato è quello offerto dal bond nella sua valuta originale.")
+            # Legenda Dinamica
+            st.info("""
+            **Guida alla lettura:**
+            * **☠️ DEFAULT? / 🔴 VERY HIGH RISK:** Il bond rende tantissimo (>9%) perché l'emittente è in crisi o ristrutturazione (es. Astaldi). Rischio capitale altissimo.
+            * **⚠️ Cambio:** Il rendimento è in valuta estera. Se la valuta crolla, il rendimento reale scende.
+            * **🟢 Investment Grade:** Rendimenti standard di mercato, emittenti solidi.
+            """)
 
-            cols = ['Descrizione', 'Valuta', 'Prezzo_Wallet', 'YTM_Grezzo', 'Scadenza', 'Risk_Status', 'ISIN']
+            cols = ['Descrizione', 'Valuta', 'Risk_Analysis', 'Prezzo_Wallet', 'YTM_Grezzo', 'Scadenza', 'ISIN']
             
+            # Funzione colore semplice per evitare crash matplotlib
+            def color_risk(val):
+                if "☠️" in val or "🔴" in val: return 'color: #ff0000; font-weight: bold;' # Rosso Acceso
+                if "🟠" in val: return 'color: #ff8c00; font-weight: bold;' # Arancione
+                if "⚠️" in val: return 'color: #d4af37; font-weight: bold;' # Oro scuro
+                return 'color: #00cc96;' # Verde
+
             st.dataframe(
                 df_work[cols].style
                 .format({
@@ -1614,30 +1565,23 @@ def main_app():
                     'YTM_Grezzo': '{:.2f}%',
                     'Scadenza': '{:%d/%m/%Y}'
                 })
-                .background_gradient(subset=['YTM_Grezzo'], cmap='Greens')
-                .map(lambda x: 'color: #ff4b4b; font-weight: bold;' if 'FX' in x else 'color: #00CC96;', subset=['Risk_Status']),
+                .map(color_risk, subset=['Risk_Analysis']), # Applichiamo colori alle etichette
                 use_container_width=True,
-                height=600,
+                height=700,
                 column_config={
-                    "Descrizione": st.column_config.TextColumn("Nome Bond", width="medium"),
-                    "Prezzo_Wallet": st.column_config.NumberColumn(
-                        f"Prezzo ({valuta_wallet})", 
-                        help=f"Costo reale addebitato sul tuo conto {valuta_wallet}."
-                    ),
-                    "YTM_Grezzo": st.column_config.NumberColumn(
-                        "Rendimento Annuo",
-                        help="Rendimento nominale annuo."
-                    ),
-                    "Risk_Status": st.column_config.TextColumn("Rischio", width="small"),
+                    "Descrizione": st.column_config.TextColumn("Nome Titolo", width="medium"),
+                    "Prezzo_Wallet": st.column_config.NumberColumn(f"Prezzo ({valuta_wallet})", help="Costo reale per te."),
+                    "YTM_Grezzo": st.column_config.NumberColumn("Rendimento Annuo", help="Yield Lordo Nominale."),
+                    "Risk_Analysis": st.column_config.TextColumn("⚠️ ANALISI RISCHIO", width="medium"),
                     "Valuta": st.column_config.TextColumn("Divisa", width="small")
                 }
             )
             
-            # AZIONE
+            # Analisi Singola
             st.write("")
             c1, c2 = st.columns([3, 1])
             with c1:
-                isin_pick = st.text_input("Inserisci ISIN per simulazione dettagliata", placeholder="Es. IT000...").strip().upper()
+                isin_pick = st.text_input("Analizza un ISIN specifico", placeholder="Es. XS...").strip().upper()
             with c2:
                 st.write("")
                 if st.button("Vai allo Scanner ➡️", type="primary"):
@@ -1646,7 +1590,8 @@ def main_app():
                         st.session_state.page = "Scanner"
                         st.rerun()
         else:
-            st.info("Nessun bond trovato. Prova ad allargare i filtri e premi 'GENERA CLASSIFICA'.")
+            st.info("Nessun bond trovato. Prova ad allargare i parametri.")
+
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
     elif st.session_state.page == "Alerts": alert_manager_ui()
