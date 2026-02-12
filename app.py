@@ -823,105 +823,122 @@ def get_tasso_cambio_live(da, a):
 # 1. BOND SCREENER INTELLIGENTE (CON FILTRO ANTI-TRY)
 # 1. BOND SCREENER INTELLIGENTE (CON YTM CONVERTITO / HEDGED)
 def bond_screener_ui():
-    """Screener con calcolo del Rendimento Sintetico (Hedged Yield)"""
+    """
+    Screener Avanzato con Tassi Modificabili dall'Utente.
+    """
     st.title("🎯 Bond Screener & Ranking Reale")
-    st.caption("Classifica basata sul rendimento convertito nella tua valuta (al netto del rischio cambio stimato).")
+    st.caption("Classifica basata sul rendimento reale convertito nella tua valuta (Hedged Yield).")
     
-    # --- A. DATI TASSI CENTRALI (PER STIMA COPERTURA/SVALUTAZIONE) ---
-    # Tassi di riferimento approssimativi delle banche centrali (aggiornabili)
-    RISK_FREE_RATES = {
-        "EUR": 3.25, "USD": 5.50, "GBP": 5.25, "CHF": 1.75,
-        "TRY": 50.0, "BRL": 11.25, "ZAR": 8.25, "MXN": 11.00,
-        "RON": 7.00, "HUF": 10.00, "JPY": 0.10
+    # --- A. DATI TASSI CENTRALI (DEFAULT MA MODIFICABILI) ---
+    # Questi sono i valori di partenza.
+    DEFAULT_RATES = {
+        "EUR": 3.00, "USD": 5.25, "GBP": 5.00, "CHF": 1.25,
+        "TRY": 50.0, "BRL": 10.75, "ZAR": 8.25, "MXN": 11.00,
+        "RON": 6.00, "HUF": 6.50, "JPY": 0.10, "AUD": 4.35 
     }
     
-    # Carica mercato
-    with st.spinner("Analisi Yield e Parità dei Tassi..."):
+    # Caricamento Dati
+    with st.spinner("Analisi differenziale tassi e valute..."):
         df_market = carica_dati_mercato()
         if df_market.empty:
             st.error("❌ Database vuoto. Aggiorna dalla sidebar.")
             return
         
-        # Riconoscimento Valuta
         if 'Valuta' not in df_market.columns:
             df_market['Valuta'] = df_market.apply(lambda x: detect_valuta(x.get('Desc', ''), x.get('ISIN', '')), axis=1)
 
     st.divider()
     
-    # === IMPOSTAZIONI ===
-    c_wal, c_scope = st.columns(2)
+    # === B. IMPOSTAZIONI UTENTE ===
+    c_wal, c_mode = st.columns(2)
     with c_wal:
-        valuta_wallet = st.selectbox("La tua Valuta Base", ["EUR", "USD"], index=0)
-        tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
+        valuta_wallet = st.selectbox("💰 La tua Valuta Base", ["EUR", "USD"], index=0)
     
-    with c_scope:
-        scope = st.radio(
-            "Modalità Classifica", 
-            [f"🔒 Solo Titoli in {valuta_wallet}", 
-             "🌍 Globale (Converte Rendimento in {valuta_wallet})"],
-            index=0
+    with c_mode:
+        mode = st.radio(
+            "Modalità Visualizzazione", 
+            ["🔒 Solo Titoli Nostrani", "🌍 Globale (Hedged Yield)"],
+            index=1
         )
 
-    # === MOTORE DI CALCOLO ===
+    # === C. PANNELLO TASSI (NUOVA FUNZIONE) ===
+    # Qui diamo il potere all'utente di aggiornare i tassi se cambiano
+    RISK_FREE_RATES = DEFAULT_RATES.copy()
+    
+    if "Globale" in mode:
+        with st.expander("⚙️ Configurazione Tassi Banche Centrali (Clicca per aggiornare)", expanded=False):
+            st.caption("Questi tassi servono per calcolare il costo della copertura valutaria. Puoi modificarli se le Banche Centrali aggiornano i tassi.")
+            
+            cols = st.columns(4)
+            keys = list(DEFAULT_RATES.keys())
+            
+            for i, valuta in enumerate(keys):
+                # Distribuiamo i campi su 4 colonne
+                with cols[i % 4]:
+                    new_rate = st.number_input(
+                        f"Tasso {valuta} (%)", 
+                        value=DEFAULT_RATES[valuta], 
+                        step=0.25,
+                        format="%.2f"
+                    )
+                    RISK_FREE_RATES[valuta] = new_rate
+            
+            st.info(f"💡 Esempio: Se la Turchia (TRY) ha tassi al {RISK_FREE_RATES['TRY']}% e l'Europa (EUR) al {RISK_FREE_RATES['EUR']}%, il sistema penalizzerà i bond turchi del {RISK_FREE_RATES['TRY'] - RISK_FREE_RATES['EUR']:.2f}% per compensare il rischio cambio.")
+
+    # Recuperiamo il tasso base della tua valuta (aggiornato dall'input sopra)
+    tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
+
+    # === D. MOTORE DI CALCOLO ===
     df_work = df_market.copy()
     
-    # 1. Recupero Tassi Cambio (Per convertire il Prezzo)
+    # 1. Conversione PREZZO (Spot)
     valute_presenti = df_work['Valuta'].unique()
-    tassi_cambio = {}
+    tassi_cambio_spot = {}
     for v in valute_presenti:
-        if v == valuta_wallet: tassi_cambio[v] = 1.0
-        else: tassi_cambio[v] = get_tasso_cambio_live(valuta_wallet, v)
+        if v == valuta_wallet: tassi_cambio_spot[v] = 1.0
+        else: tassi_cambio_spot[v] = get_tasso_cambio_live(valuta_wallet, v)
     
-    df_work['FX_Rate'] = df_work['Valuta'].map(tassi_cambio).fillna(1.0)
-    
-    # 2. Calcolo PREZZO Convertito
-    df_work['Prezzo_Wallet'] = df_work.apply(
-        lambda x: x['Prezzo'] / x['FX_Rate'] if x['FX_Rate'] > 0 else x['Prezzo'], axis=1
-    )
+    df_work['FX_Rate'] = df_work['Valuta'].map(tassi_cambio_spot).fillna(1.0)
+    df_work['Prezzo_Wallet'] = df_work.apply(lambda x: x['Prezzo'] / x['FX_Rate'] if x['FX_Rate'] > 0 else x['Prezzo'], axis=1)
 
-    # 3. Calcolo RENDIMENTO CONVERTITO (Hedged Yield)
-    # Formula: YTM_Wallet = YTM_Locale - (Tasso_Locale - Tasso_Wallet)
-    def calcola_ytm_convertito(row):
+    # 2. Conversione RENDIMENTO (Interest Rate Parity Dinamica)
+    def converti_rendimento(row):
         valuta_bond = row['Valuta']
-        if valuta_bond == valuta_wallet:
-            return row['YTM_Grezzo']
+        ytm_locale = row['YTM_Grezzo']
         
-        # Tasso privo di rischio della valuta del bond
-        rf_bond = RISK_FREE_RATES.get(valuta_bond, 5.0) # 5.0 default per emergenti sconosciuti
+        if valuta_bond == valuta_wallet: return ytm_locale
         
-        # Differenziale tassi (Costo teorico della copertura / svalutazione attesa)
-        diff_tassi = rf_bond - tasso_base_wallet
+        # Usiamo il tasso risk free aggiornato dall'utente
+        tasso_locale = RISK_FREE_RATES.get(valuta_bond, 5.0) 
+        costo_copertura = tasso_locale - tasso_base_wallet
         
-        # YTM Rettificato
-        return row['YTM_Grezzo'] - diff_tassi
+        return ytm_locale - costo_copertura
 
-    df_work['YTM_Converted'] = df_work.apply(calcola_ytm_convertito, axis=1)
+    df_work['YTM_Converted'] = df_work.apply(converti_rendimento, axis=1)
 
     # Filtro Scope
-    if "Solo Titoli" in scope:
+    if "Solo Titoli" in mode:
         df_work = df_work[df_work['Valuta'] == valuta_wallet]
 
     st.divider()
 
-    # === FILTRI ===
+    # === E. FILTRI RICERCA ===
     st.subheader("🔧 Filtri")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown(f"**📊 Rendimento Stimato ({valuta_wallet})**")
-        # Ora filtriamo sul rendimento GIÀ convertito!
-        ytm_min = st.number_input("Min %", value=2.0, step=0.5)
+        st.markdown(f"**📊 Rendimento Reale in {valuta_wallet}**")
+        ytm_min = st.number_input("Min %", value=0.0, step=0.5) 
         ytm_max = st.number_input("Max %", value=15.0, step=0.5)
     with c2:
-        anni_min = st.number_input("Min Anni", 0.0)
-        anni_max = st.number_input("Max Anni", 30.0)
+        anni_min = st.number_input("Anni Min", 0.0)
+        anni_max = st.number_input("Anni Max", 50.0, value=30.0)
     with c3:
-        p_max = st.number_input(f"Prezzo Max ({valuta_wallet})", 120.0)
+        p_max = st.number_input(f"Prezzo Max ({valuta_wallet})", 130.0)
 
-    # === RISULTATI ===
+    # === F. RISULTATI ===
     st.write("")
-    if st.button("🚀 Calcola Ranking", type="primary", use_container_width=True):
+    if st.button("🚀 Genera Classifica", type="primary", use_container_width=True):
         
-        # Filtri
         filtered = df_work[
             (df_work['YTM_Converted'] >= ytm_min) &
             (df_work['YTM_Converted'] <= ytm_max) &
@@ -930,39 +947,32 @@ def bond_screener_ui():
             (df_work['Prezzo_Wallet'] <= p_max)
         ]
         
-        # Ordinamento: Usiamo YTM_Converted!
         filtered = filtered.sort_values('YTM_Converted', ascending=False)
         
         if filtered.empty:
-            st.warning("Nessun bond trovato.")
+            st.warning(f"Nessun bond trovato con i criteri selezionati.")
         else:
-            st.success(f"✅ Classifica generata su {len(filtered)} titoli.")
+            st.success(f"✅ Classifica calcolata su {len(filtered)} titoli.")
             
-            if "Globale" in scope:
-                st.info(f"""
-                💡 **Come leggo i dati?**
-                Il sistema applica la **Parità dei Tassi**: penalizza le valute ad alta inflazione (es. TRY) e premia quelle stabili.
-                * Un bond TRY al 30% diventa negativo perché l'inflazione turca è ~50%.
-                * Un bond USD al 5% diventa ~3% in EUR (costo copertura cambio).
-                """)
-
             st.dataframe(
                 filtered[['Desc', 'Valuta', 'Prezzo_Wallet', 'YTM_Grezzo', 'YTM_Converted', 'Anni']].head(100).style
                 .format({
                     'Prezzo_Wallet': f'{{:.2f}} {valuta_wallet}',
                     'YTM_Grezzo': '{:.2f}%',
-                    'YTM_Converted': '{:.2f}%', # Questo è il numero che volevi!
+                    'YTM_Converted': '{:.2f}%',
                     'Anni': '{:.1f}'
                 })
                 .background_gradient(subset=['YTM_Converted'], cmap='RdYlGn'),
                 use_container_width=True,
                 height=600,
                 column_config={
+                    "Desc": st.column_config.TextColumn("Nome Bond", width="medium"),
                     "YTM_Converted": st.column_config.NumberColumn(
-                        f"Rend. {valuta_wallet} (Stima)", 
-                        help="Rendimento stimato convertito nella tua valuta, sottraendo il differenziale tassi (costo copertura)."
+                        f"Rend. {valuta_wallet}", 
+                        help=f"Rendimento netto stimato convertendo i flussi in {valuta_wallet}."
                     ),
-                    "YTM_Grezzo": st.column_config.NumberColumn("Rend. Locale", help="Rendimento nella valuta originale"),
+                    "YTM_Grezzo": st.column_config.NumberColumn("Rend. Locale"),
+                    "Prezzo_Wallet": f"Prezzo ({valuta_wallet})"
                 }
             )
 # 2. DASHBOARD MERCATO
