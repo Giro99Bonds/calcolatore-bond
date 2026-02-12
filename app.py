@@ -1628,7 +1628,6 @@ def main_app():
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
-                    if d:
                     # --- A. MOTORE MATEMATICO PROFESSIONALE (ICMA T+2) ---
                     tax_rate = determina_tasse(d['fonte'], d['desc'])
                     valuta_bond = detect_valuta(d['desc'], d['isin'])
