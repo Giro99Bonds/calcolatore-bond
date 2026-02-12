@@ -1663,7 +1663,7 @@ def main_app():
                             scenario_fx = st.slider(f"📉 Variazione {valuta_bond}", -50, 50, 0, format="%d%%")
 
                     # --- CALCOLI ---
-                    rateo_unitario = calcola_rateo_esatto(d, get_settlement_date())
+                    rateo_unitario = calcola_rateo(d, get_settlement_date())
                     prezzo_telquel = d['pr'] + rateo_unitario 
                     costo_100_user = (prezzo_telquel / tasso_spot)
                     
