@@ -499,30 +499,89 @@ def carica_tutto_mercato():
     """Versione ottimizzata per dashboard e analisi"""
     return carica_dati_mercato().rename(columns={'Categoria': 'Tipo', 'Desc': 'Descrizione'})
 
-def trova_alternative_migliori(bond_target, df_mercato, categoria_obbligatoria=None):
+def trova_alternative_migliori(bond_target, df_mercato):
+    """
+    VERSIONE 'AGGRESSIVA': Cerca alternative con maglie più larghe
+    per evitare di dire sempre 'Nessuna alternativa'.
+    """
     if df_mercato.empty: return pd.DataFrame()
+    
+    # Dati Target
     anni_target = (bond_target['sc'] - date.today()).days / 365.25
     tax_target = determina_tasse(bond_target['fonte'], bond_target['desc'])
+    
+    # Calcoliamo YTM Netto del bond che stiamo guardando
     ytm_netto_target = calcola_rendimento_grezzo(bond_target['pr'], bond_target['ced'], bond_target['sc']) * (1 - tax_target/100)
     
-    if not categoria_obbligatoria:
-        categoria_obbligatoria = bond_target.get('Categoria', 'Governativo' if tax_target==12.5 else 'Corporate')
-
+    # Identifichiamo il rischio del target (ISIN e Fonte)
+    isin_target = bond_target.get('isin', '')
+    rischio_target = categorizza_rischio(isin_target, bond_target['fonte'], bond_target['desc'])
+    
     alternative = []
+    
     for _, row in df_mercato.iterrows():
-        if categoria_obbligatoria == "Governativo" and row['Categoria'] != "Governativo": continue
-        if not (anni_target - 2 <= row['Anni'] <= anni_target + 2): continue
-        if row['Prezzo'] > 108: continue 
+        # Escludi se stesso
+        if row['ISIN'] == isin_target: continue
+
+        # 1. FILTRO DURATA (ALLARGATO a +/- 3 anni)
+        # Se il tuo bond scade tra 5 anni, guardiamo bond da 2 a 8 anni.
+        if not (anni_target - 3.0 <= row['Anni'] <= anni_target + 3.0): continue
+        
+        # 2. FILTRO PREZZO (ALZATO a 120)
+        # Molti bond buoni hanno cedole alte e costano 115. Non escludiamoli.
+        if row['Prezzo'] > 120: continue
+        
+        # Calcoli Alternativa
+        rischio_alt = categorizza_rischio(row['ISIN'], row['Fonte'], row['Desc'])
         tax_alt = determina_tasse(row['Fonte'], row['Desc'])
         ytm_netto_alt = row['YTM_Grezzo'] * (1 - tax_alt/100)
+        
+        # Calcolo Extra Rendimento (Differenza tra alternativa e tuo bond)
         extra = ytm_netto_alt - ytm_netto_target
         
-        if extra > 0.15: 
+        tipo_switch = ""
+        
+        # --- LOGICHE DI SELEZIONE (PIÙ GENEROSE) ---
+        
+        # CASO A: "Gemello Migliore" (Stesso Rischio o Minore, Rendimento Maggiore)
+        # Basta che renda anche solo lo 0.01% in più per essere mostrato
+        if rischio_alt <= rischio_target and extra > 0.01:
+            tipo_switch = "✅ Gemello (+Safe)"
+        
+        # CASO B: "Boost Rendimento" (Rischio leggermente superiore)
+        # Accettiamo rischio +1 (es. da Germania a Italia, o da Italia a Corporate IG) 
+        # se il guadagno è almeno +0.30%
+        elif rischio_alt == rischio_target + 1 and extra > 0.30:
+            tipo_switch = "⚠️ Boost (Rischio+)"
+            
+        # CASO C: "Rifugio" (Rischio Minore, anche se rende un filo meno)
+        # Se posso passare da un Corporate a un BTP perdendo solo lo 0.2%, è un buon affare.
+        elif rischio_alt < rischio_target and extra > -0.20:
+            tipo_switch = "🛡️ Rifugio (Safe)"
+
+        # CASO D: "Durata Minore" (Stesso rendimento ma scade prima)
+        # Se scade 1 anno prima e rende uguale, è meglio.
+        elif row['Anni'] < anni_target - 1 and extra > -0.10:
+             tipo_switch = "⏳ Scade Prima"
+
+        if tipo_switch:
+            # Creiamo il link cliccabile per Google
             link_isin = f"https://www.google.com/search?q={row['ISIN']}+bond"
-            row['Tipologia'] = "✅ Miglior Rendimento"; row['YTM_Netto'] = ytm_netto_alt; row['Extra'] = extra; row['Link'] = link_isin
-            alternative.append(row)
+            
+            # Aggiungiamo alla lista
+            row_dict = row.to_dict()
+            row_dict['Tipologia'] = tipo_switch
+            row_dict['YTM_Netto'] = ytm_netto_alt
+            row_dict['Extra'] = extra
+            row_dict['Link'] = link_isin
+            alternative.append(row_dict)
+            
     df_alt = pd.DataFrame(alternative)
-    if not df_alt.empty: return df_alt.sort_values('Extra', ascending=False).head(5)
+    
+    if not df_alt.empty:
+        # Ordiniamo per Extra Rendimento decrescente e prendiamo i primi 10 (non solo 5)
+        return df_alt.sort_values('Extra', ascending=False).head(10)
+        
     return pd.DataFrame()
 
 def aggiorna_db():
