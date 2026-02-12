@@ -672,7 +672,7 @@ def get_settlement_date():
             added += 1
     return d
 
-def calcola_rateo_esatto(dati, data_valuta):
+def calcola_rateo(dati, data_valuta):
     """
     Calcola il rateo maturato con metodo ACT/ACT ICMA (Standard SimpleTools).
     """
@@ -798,11 +798,10 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
     flussi = []
     
     # 1. DATA VALUTA (Regolamento)
-    # I soldi escono dal conto in questa data, non oggi.
     settlement = get_settlement_date()
     
     # 2. FLUSSO DI ACQUISTO (USCITA)
-    # Il rateo si paga calcolato al giorno del regolamento (giorni extra vs oggi)
+    # Qui chiamiamo la funzione con il nome CORRETTO 'calcola_rateo'
     rateo_pct = calcola_rateo(dati, settlement) 
     costo_titolo = (nominale * prezzo_acquisto) / 100 
     costo_rateo_netto = (nominale * rateo_pct) / 100 * (1 - tax_rate/100)
@@ -820,15 +819,12 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
     if dati['freq'] > 0:
         cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
         
-        # Algoritmo per trovare le date future corrette
         curr = dati['sc']
-        # Ciclo finché la data cedola è successiva al regolamento
         while curr > settlement:
-            if curr != dati['sc']: # L'ultima la accorpiamo al rimborso per pulizia
+            if curr != dati['sc']: 
                 flussi.append({"Data": curr, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola"})
                 totale_cedole_nette += cedola_netta
             
-            # Decremento Mesi Preciso
             mesi_step = 12 // int(dati['freq'])
             new_year = curr.year
             new_month = curr.month - mesi_step
@@ -844,17 +840,13 @@ def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acqu
 
     flussi.sort(key=lambda x: x['Data'])
     
-    # 4. RIMBORSO (CAPITALE + ULTIMA CEDOLA)
+    # 4. RIMBORSO
     rimborso_lordo = nominale
-    
-    # Tassazione Capital Gain (se Prezzo < 100)
     gain_prezzo = max(0, 100 - prezzo_acquisto)
     plusvalenza_lorda = (gain_prezzo / 100) * nominale
     tassa_gain = plusvalenza_lorda * (tax_rate / 100)
-    
     rimborso_netto = rimborso_lordo - tassa_gain
     
-    # Ultima cedola
     ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
     
     flussi.append({
