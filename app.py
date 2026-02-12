@@ -1742,34 +1742,29 @@ def main_app():
 
                         # --- GRAFICO BREAK-EVEN AVANZATO ---
                         # --- GRAFICO BREAK-EVEN (CON STELLA DI PAREGGIO) ---
+                        # --- GRAFICO BREAK-EVEN AVANZATO (FIXATO) ---
                         st.subheader("🗓️ Recupero Capitale (Break-Even)")
                         df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
                         colors = ['#FF4B4B' if val < 0 else '#00CC96' for val in df_flussi['Cumulativo']]
                         
-                        # Trova la data esatta del primo saldo positivo
+                        # Trova il primo punto positivo per la linea verticale
                         first_pos = df_flussi[df_flussi['Cumulativo'] >= 0]
-                        be_date = first_pos.iloc[0]['Data'] if not first_positive.empty else None
-                        
+                        # CORREZIONE QUI: usiamo first_pos, non first_positive
+                        be_date = first_pos.iloc[0]['Data'] if not first_pos.empty else None
+
                         fig = go.Figure()
                         
-                        # 1. Linea Guida (Trend)
-                        fig.add_trace(go.Scatter(
-                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], 
-                            mode='lines', 
-                            line=dict(color='#666', width=1, dash='dot'), 
-                            name='Percorso'
-                        ))
+                        # 1. Linea Guida
+                        fig.add_trace(go.Scatter(x=df_flussi['Data'], y=df_flussi['Cumulativo'], mode='lines', line=dict(color='#666', width=1, dash='dot'), name='Percorso'))
                         
-                        # 2. Marker Flussi (Pallini Vuoti)
+                        # 2. Marker Vuoti
                         fig.add_trace(go.Scatter(
-                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], 
-                            mode='markers', 
+                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], mode='markers', 
                             marker=dict(symbol='circle-open', size=10, color=colors, line=dict(width=3)),
-                            text=df_flussi['Dettagli'], 
-                            hovertemplate="<b>%{text}</b><br>Saldo: %{y:,.2f}"
+                            text=df_flussi['Dettagli'], hovertemplate="<b>%{text}</b><br>Saldo: %{y:,.2f}"
                         ))
                         
-                        # 3. INDICATORE BREAK-EVEN (Stella Dorata sull'asse X)
+                        # 3. Indicatore Stella su Break-Even
                         if be_date:
                             fig.add_trace(go.Scatter(
                                 x=[be_date], y=[0],
@@ -1778,26 +1773,13 @@ def main_app():
                                 text=['★ PAREGGIO'],
                                 textposition="top center",
                                 textfont=dict(color="#FFD700", size=11, weight="bold"),
-                                marker=dict(
-                                    symbol='star', 
-                                    size=18, 
-                                    color='#FFD700', 
-                                    line=dict(width=1, color='white')
-                                ),
+                                marker=dict(symbol='star', size=18, color='#FFD700', line=dict(width=1, color='white')),
                                 hoverinfo='text',
                                 hovertext=f"BREAK-EVEN POINT<br>Data stimata: {be_date.strftime('%d/%m/%Y')}"
                             ))
 
-                        # Linea Bianca Asse X
-                        fig.add_hline(y=0, line_color='white', line_width=1, layer="below")
-                        
-                        fig.update_layout(
-                            template="plotly_dark", 
-                            height=350, 
-                            showlegend=False, 
-                            margin=dict(l=20,r=20,t=40,b=20), 
-                            yaxis_title="Saldo Cumulativo"
-                        )
+                        fig.add_hline(y=0, line_color='white', line_width=1)
+                        fig.update_layout(template="plotly_dark", height=350, showlegend=False, margin=dict(l=20,r=20,t=40,b=20), yaxis_title="Saldo Cumulativo")
                         st.plotly_chart(fig, use_container_width=True)
 
                         # CEDOLARIO (SEMPRE VISIBILE, SENZA EXPANDER)
