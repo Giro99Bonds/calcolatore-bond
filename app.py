@@ -658,13 +658,73 @@ def cerca_db(isin, cat_macro):
     return None, None
 
 def calcola_rateo(dati):
+    """
+    Calcola il rateo maturato con metodo ACT/ACT (Giorni Esatti).
+    Gestisce correttamente anni bisestili e periodi irregolari.
+    """
     try:
-        today_dt = date.today(); days_ced = 365 / dati['freq'] if dati['freq'] > 0 else 0
-        if days_ced == 0: return 0.0
-        data_ced = dati['sc']
-        while data_ced > today_dt: data_ced -= timedelta(days=int(days_ced))
-        return max(0.0, (dati['ced'] / dati['freq']) * ((today_dt - data_ced).days / days_ced))
-    except: return 0.0
+        if dati['freq'] == 0: return 0.0 # Zero Coupon non ha rateo cedolare
+        
+        today = date.today()
+        scadenza = dati['sc']
+        
+        # Se il bond è già scaduto o scade oggi
+        if today >= scadenza: return 0.0
+        
+        # 1. Trova le date esatte di godimento (precedente e successiva)
+        # Partiamo dalla scadenza e torniamo indietro finché non "scavalchiamo" oggi
+        next_coupon = scadenza
+        prev_coupon = scadenza
+        
+        # Calcolo mesi da sottrarre per ogni periodo (es. 6 mesi per semestrale)
+        mesi_step = 12 // int(dati['freq'])
+        
+        # Loop per trovare la finestra temporale corretta
+        # Esempio: Oggi 2024. Scadenza 2040. Torno indietro fino al 2024.
+        while next_coupon > today:
+            prev_coupon = next_coupon # Salvo la data futura come "ultima valida"
+            
+            # Sottraggo i mesi in modo preciso
+            new_year = prev_coupon.year
+            new_month = prev_coupon.month - mesi_step
+            
+            while new_month <= 0:
+                new_month += 12
+                new_year -= 1
+            
+            # Gestione fine mese (es. se cado sul 31 febbraio)
+            try:
+                next_coupon = date(new_year, new_month, scadenza.day)
+            except ValueError:
+                # Se il giorno non esiste (es. 30 Feb), prendiamo l'ultimo del mese
+                import calendar
+                last_day = calendar.monthrange(new_year, new_month)[1]
+                next_coupon = date(new_year, new_month, last_day)
+                
+            # Scambio: ora prev_coupon è quella futura, next_coupon è quella passata
+            # Al prossimo giro del while, se next_coupon è ancora > today, continuo a scendere.
+            # Quando il while finisce, ho next_coupon (passato) e prev_coupon (futuro) invertiti nel loop, sistemiamoli:
+            
+        # Riassegnazione corretta dopo l'uscita dal loop
+        data_inizio_periodo = next_coupon 
+        data_fine_periodo = prev_coupon 
+        
+        # 2. Calcolo Giorni Esatti (ACT/ACT)
+        giorni_trascorsi = (today - data_inizio_periodo).days
+        giorni_totali_periodo = (data_fine_periodo - data_inizio_periodo).days
+        
+        if giorni_totali_periodo <= 0: return 0.0
+        
+        # 3. Calcolo Importo Rateo
+        # Cedola annuale / frequenza = Cedola del periodo
+        cedola_periodo = dati['ced'] / dati['freq']
+        
+        rateo_percentuale = cedola_periodo * (giorni_trascorsi / giorni_totali_periodo)
+        
+        return max(0.0, rateo_percentuale)
+        
+    except Exception as e:
+        return 0.0
 
 def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
     """
@@ -1681,33 +1741,63 @@ def main_app():
                         else: st.error(f"❌ **PERDITA:** {guadagno_netto_user:,.2f} {valuta_user} (Tot: {roi_pct:.2f}% | **Annuo: {roi_annuo:.2f}%**)")
 
                         # --- GRAFICO BREAK-EVEN AVANZATO ---
+                        # --- GRAFICO BREAK-EVEN (CON STELLA DI PAREGGIO) ---
                         st.subheader("🗓️ Recupero Capitale (Break-Even)")
                         df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
                         colors = ['#FF4B4B' if val < 0 else '#00CC96' for val in df_flussi['Cumulativo']]
                         
-                        # Trova il primo punto positivo per la linea verticale
-                        first_positive = df_flussi[df_flussi['Cumulativo'] >= 0]
-                        be_date = first_positive.iloc[0]['Data'] if not first_positive.empty else None
-
+                        # Trova la data esatta del primo saldo positivo
+                        first_pos = df_flussi[df_flussi['Cumulativo'] >= 0]
+                        be_date = first_pos.iloc[0]['Data'] if not first_positive.empty else None
+                        
                         fig = go.Figure()
                         
-                        # 1. Linea Guida
-                        fig.add_trace(go.Scatter(x=df_flussi['Data'], y=df_flussi['Cumulativo'], mode='lines', line=dict(color='#666', width=1, dash='dot'), name='Percorso'))
-                        
-                        # 2. Marker Vuoti
+                        # 1. Linea Guida (Trend)
                         fig.add_trace(go.Scatter(
-                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], mode='markers', 
-                            marker=dict(symbol='circle-open', size=10, color=colors, line=dict(width=3)),
-                            text=df_flussi['Dettagli'], hovertemplate="<b>%{text}</b><br>Saldo: %{y:,.2f}"
+                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], 
+                            mode='lines', 
+                            line=dict(color='#666', width=1, dash='dot'), 
+                            name='Percorso'
                         ))
                         
-                        # 3. Linea Verticale Break-Even
+                        # 2. Marker Flussi (Pallini Vuoti)
+                        fig.add_trace(go.Scatter(
+                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], 
+                            mode='markers', 
+                            marker=dict(symbol='circle-open', size=10, color=colors, line=dict(width=3)),
+                            text=df_flussi['Dettagli'], 
+                            hovertemplate="<b>%{text}</b><br>Saldo: %{y:,.2f}"
+                        ))
+                        
+                        # 3. INDICATORE BREAK-EVEN (Stella Dorata sull'asse X)
                         if be_date:
-                            fig.add_vline(x=be_date, line_width=1, line_dash="dash", line_color="#FFD700")
-                            fig.add_annotation(x=be_date, y=0, text="BREAK-EVEN", showarrow=True, arrowhead=1, ax=0, ay=-40, font=dict(color="#FFD700"))
+                            fig.add_trace(go.Scatter(
+                                x=[be_date], y=[0],
+                                mode='markers+text',
+                                name='Break-Even',
+                                text=['★ PAREGGIO'],
+                                textposition="top center",
+                                textfont=dict(color="#FFD700", size=11, weight="bold"),
+                                marker=dict(
+                                    symbol='star', 
+                                    size=18, 
+                                    color='#FFD700', 
+                                    line=dict(width=1, color='white')
+                                ),
+                                hoverinfo='text',
+                                hovertext=f"BREAK-EVEN POINT<br>Data stimata: {be_date.strftime('%d/%m/%Y')}"
+                            ))
 
-                        fig.add_hline(y=0, line_color='white', line_width=1)
-                        fig.update_layout(template="plotly_dark", height=350, showlegend=False, margin=dict(l=20,r=20,t=30,b=20), yaxis_title="Saldo Cumulativo")
+                        # Linea Bianca Asse X
+                        fig.add_hline(y=0, line_color='white', line_width=1, layer="below")
+                        
+                        fig.update_layout(
+                            template="plotly_dark", 
+                            height=350, 
+                            showlegend=False, 
+                            margin=dict(l=20,r=20,t=40,b=20), 
+                            yaxis_title="Saldo Cumulativo"
+                        )
                         st.plotly_chart(fig, use_container_width=True)
 
                         # CEDOLARIO (SEMPRE VISIBILE, SENZA EXPANDER)
