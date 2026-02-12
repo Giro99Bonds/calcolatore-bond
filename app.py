@@ -657,78 +657,140 @@ def cerca_db(isin, cat_macro):
             except: continue
     return None, None
 
+# --- FUNZIONI UTILI (HELPER) ---
+
 def get_settlement_date():
     """
-    Calcola la data di regolamento T+2 (Standard Bancario).
-    Salta Sabato e Domenica.
+    Calcola la data di valuta T+2 (Standard Bancario).
+    Se oggi è Giovedì -> Lunedì. Se è Venerdì -> Martedì.
     """
     d = date.today()
     added = 0
     while added < 2:
         d += timedelta(days=1)
-        if d.weekday() < 5: # 0=Lun, 4=Ven, 5=Sab, 6=Dom
+        if d.weekday() < 5: # 0-4 sono Lun-Ven (Giorni Lavorativi)
             added += 1
     return d
 
-def calcola_rateo(dati, data_rif=None):
+def calcola_rateo_esatto(dati, data_valuta):
     """
-    Calcola il rateo preciso (ACT/ACT) alla data di regolamento.
-    Riflette lo standard ICMA usato dalle banche.
+    Calcola il rateo maturato con metodo ACT/ACT ICMA (Standard SimpleTools).
     """
     try:
-        if dati['freq'] == 0: return 0.0 # Zero Coupon
+        if dati['freq'] == 0: return 0.0
         
-        # Se non specifico la data, uso T+2 (Standard)
-        if data_rif is None:
-            data_rif = get_settlement_date()
-            
         scadenza = dati['sc']
-        # Se scade prima del regolamento, rateo è 0
-        if data_rif >= scadenza: return 0.0
+        if data_valuta >= scadenza: return 0.0
         
-        # 1. Trova Data Cedola Precedente e Successiva
-        # Torniamo indietro dalla scadenza per allinearci perfettamente al ciclo cedolare
-        next_coupon = scadenza
-        prev_coupon = scadenza
+        # 1. Trova le date esatte del periodo cedolare corrente
+        # Torniamo indietro dalla scadenza
+        next_c = scadenza
+        prev_c = scadenza
+        months = 12 // int(dati['freq'])
         
-        # Calcolo mesi da sottrarre (es. 6 per semestrale)
-        mesi_step = 12 // int(dati['freq'])
-        
-        # Algoritmo di "Walking Back" per trovare il periodo corrente
-        while next_coupon > data_rif:
-            prev_coupon = next_coupon
+        # "Walk back" fino a trovare la finestra temporale che include la data_valuta
+        while next_c > data_valuta:
+            prev_c = next_c
             # Sottrazione precisa dei mesi
-            new_year = prev_coupon.year
-            new_month = prev_coupon.month - mesi_step
-            while new_month <= 0:
-                new_month += 12
-                new_year -= 1
+            y, m = prev_c.year, prev_c.month - months
+            while m <= 0: m += 12; y -= 1
             
-            # Gestione fine mese (es. se scade il 31 e andiamo a Febbraio)
-            try:
-                next_coupon = date(new_year, new_month, scadenza.day)
-            except ValueError:
+            # Gestione fine mese (es. 30 Febbraio)
+            try: next_c = date(y, m, scadenza.day)
+            except: 
                 import calendar
-                last_day = calendar.monthrange(new_year, new_month)[1]
-                next_coupon = date(new_year, new_month, last_day)
+                next_c = date(y, m, calendar.monthrange(y, m)[1])
         
-        # Riordino logico: prev_coupon era quella futura nel loop, ora le sistemiamo
-        data_inizio_periodo = next_coupon
-        data_fine_periodo = prev_coupon
+        # Riordiniamo: prev_c era il futuro nel loop, next_c il passato
+        start_date = next_c
+        end_date = prev_c
         
-        # 2. Calcolo Giorni Esatti (ACT/ACT)
-        giorni_trascorsi = (data_rif - data_inizio_periodo).days
-        giorni_totali_periodo = (data_fine_periodo - data_inizio_periodo).days
+        # 2. Calcolo Giorni (ACT/ACT)
+        days_passed = (data_valuta - start_date).days
+        days_total = (end_date - start_date).days
         
-        if giorni_totali_periodo <= 0: return 0.0
+        if days_total == 0: return 0.0
         
-        # 3. Calcolo Importo Rateo
+        # 3. Rateo Lordo Percentuale
         cedola_periodo = dati['ced'] / dati['freq']
-        rateo = cedola_periodo * (giorni_trascorsi / giorni_totali_periodo)
+        rateo = cedola_periodo * (days_passed / days_total)
         
         return max(0.0, rateo)
-        
     except: return 0.0
+def genera_flussi_reali(dati, nominale, tax_rate, commissioni, prezzo_mercato):
+    """
+    Genera i flussi di cassa esatti per il calcolo del rendimento (XIRR).
+    Replica la logica di SimpleToolsForInvestors.
+    """
+    flussi = []
+    
+    # A. DATA DI REGOLAMENTO (T+2)
+    valuta = get_settlement_date()
+    
+    # B. CALCOLO SPESA INIZIALE (USCITA)
+    rateo_pct_lordo = calcola_rateo_esatto(dati, valuta)
+    rateo_pct_netto = rateo_pct_lordo * (1 - tax_rate/100) # Tassazione immediata sul rateo
+    
+    costo_secco = (nominale * prezzo_mercato) / 100
+    costo_rateo = (nominale * rateo_pct_netto) / 100
+    uscita_totale = costo_secco + costo_rateo + commissioni
+    
+    flussi.append({
+        "Data": valuta,
+        "Tipo": "USCITA",
+        "Importo": -uscita_totale,
+        "Dettagli": f"Acquisto (Valuta {valuta.strftime('%d/%m')})"
+    })
+    
+    # C. CALCOLO CEDOLE FUTURE (ENTRATE)
+    tot_cedole = 0
+    if dati['freq'] > 0:
+        cedola_netta = (nominale * (dati['ced']/100) / dati['freq']) * (1 - tax_rate/100)
+        
+        # Algoritmo date future
+        curr = dati['sc']
+        months = 12 // int(dati['freq'])
+        
+        while curr > valuta:
+            if curr != dati['sc']: # L'ultima va col rimborso
+                flussi.append({"Data": curr, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola"})
+                tot_cedole += cedola_netta
+            
+            # Decremento Mesi
+            y, m = curr.year, curr.month - months
+            while m <= 0: m += 12; y -= 1
+            try: curr = date(y, m, dati['sc'].day)
+            except: 
+                import calendar
+                curr = date(y, m, calendar.monthrange(y, m)[1])
+                
+    flussi.sort(key=lambda x: x['Data'])
+    
+    # D. RIMBORSO E CAPITAL GAIN (ENTRATA FINALE)
+    rimborso = nominale
+    
+    # Calcolo Tasse su Capital Gain (Se l'hai pagato meno di 100, paghi tasse sulla differenza)
+    # Nota: SimpleTools assume rimborso a 100.
+    gain_imponibile = max(0, 100 - prezzo_mercato) 
+    tassa_gain = (gain_imponibile / 100 * nominale) * (tax_rate/100)
+    
+    rimborso_netto = rimborso - tassa_gain
+    
+    # Ultima cedola
+    ultima_ced = (nominale * (dati['ced']/100) / dati['freq']) * (1 - tax_rate/100) if dati['freq'] > 0 else 0
+    
+    flussi.append({
+        "Data": dati['sc'],
+        "Tipo": "ENTRATA", 
+        "Importo": rimborso_netto + ultima_ced,
+        "Dettagli": "Rimborso + Ultima"
+    })
+    
+    tot_cedole += ultima_ced
+    tot_incasso = tot_cedole + rimborso_netto
+    
+    # Ritorniamo tutto per le statistiche
+    return pd.DataFrame(flussi), uscita_totale, tot_incasso, costo_rateo, tot_cedole
 def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
     """
     Genera il cedolario professionale basato su Data Valuta (T+2).
@@ -1574,38 +1636,38 @@ def main_app():
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
-                    # --- A. MOTORE MATEMATICO PROFESSIONALE (ICMA Standard) ---
+                    # --- MOTORE MATEMATICO (REPLICA SIMPLE TOOLS) ---
                     tax_rate = determina_tasse(d['fonte'], d['desc'])
                     valuta_bond = detect_valuta(d['desc'], d['isin'])
                     
-                    # 1. Calcolo Data Regolamento (T+2)
-                    # Fondamentale: il rendimento si calcola da quando paghi (tra 2 gg), non da oggi.
-                    settlement_date = get_settlement_date()
+                    # 1. Calcoli Preliminari
+                    settlement = get_settlement_date()
+                    rateo_per_visualizzazione = calcola_rateo_esatto(d, settlement)
                     
-                    # 2. Generazione Flussi Reali BASE 100 
-                    # Serve per calcolare il rendimento percentuale puro (XIRR) indipendentemente dal budget
-                    df_base, _, _, _, _, _ = genera_flussi_dettagliati(d, 100.0, tax_rate, 0, d['pr'])
+                    # 2. Calcolo Rendimento NETTO (XIRR) su Base 100
+                    # Usiamo base 100 e 0 commissioni per trovare il rendimento puro del titolo
+                    df_yield, _, _, _, _ = genera_flussi_reali(d, 100.0, tax_rate, 0, d['pr'])
                     
-                    # 3. Calcolo XIRR (TIR) - Il vero rendimento professionale
                     def xirr_calc(flow_df):
                         try:
                             dates = flow_df['Data'].tolist()
                             amounts = flow_df['Importo'].tolist()
                             if not amounts or amounts[0] >= 0: return 0.0
-                            
-                            def xnpv(rate, amounts, dates):
-                                if rate <= -1.0: return float('inf')
-                                d0 = dates[0] # Usiamo la data di regolamento (T+2) come t0
-                                return sum([a / ((1 + rate) ** ((d - d0).days / 365.0)) for a, d in zip(amounts, dates)])
-                            
+                            def xnpv(r, amts, dts):
+                                d0 = dts[0] # Data T+2
+                                return sum([a / ((1 + r)**((dt - d0).days / 365.0)) for a, dt in zip(amts, dts)])
                             return newton(lambda r: xnpv(r, amounts, dates), 0.05) * 100
                         except: return 0.0
 
-                    rendimento_netto = xirr_calc(df_base)
+                    rendimento_netto = xirr_calc(df_yield)
                     
-                    # Calcolo metriche di rischio classiche
-                    # Nota: calcola_metriche_rischio è una stima veloce, ma noi usiamo l'XIRR preciso calcolato sopra
+                    # 3. Metriche classiche (solo per visualizzazione)
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
+                    
+                    # --- FINE CALCOLI, INIZIO GRAFICA ---
+                    chi, tipo, tempo, risk_msg = identikit_bond(d)
+                    
+                
                     
                     # Analisi Quality Score
                     qual = analizza_bond_quality_dettagliata(d, risk, tax_rate, st.session_state.patrimonio)
