@@ -498,7 +498,33 @@ def carica_dati_mercato():
 def carica_tutto_mercato():
     """Versione ottimizzata per dashboard e analisi"""
     return carica_dati_mercato().rename(columns={'Categoria': 'Tipo', 'Desc': 'Descrizione'})
-
+def categorizza_rischio(isin, nome, desc):
+    """Calcola il livello di rischio (1=Basso, 4=Alto) basandosi su nome e ISIN"""
+    try:
+        nome = str(nome).upper()
+        desc = str(desc).upper()
+        isin = str(isin).upper()
+        
+        # Livello 1: Governativi Ultra Safe (Tripla A o quasi)
+        gov_safe = ["GERMANIA", "BUND", "FRANCIA", "OAT", "USA", "TREASURY", "BEI", "EU", "EUROPA"]
+        if any(k in nome or k in desc for k in gov_safe): return 1
+        
+        # Livello 2: Governativi Periferici / Bancari Senior
+        gov_mid = ["ITALIA", "BTP", "BOT", "CCT", "SPAGNA", "BONOS"]
+        if any(k in nome or k in desc for k in gov_mid): return 2
+        if "INTESA" in nome or "UNICREDIT" in nome: return 2
+        
+        # Livello 3: Corporate IG / XS Generici
+        # Se l'ISIN inizia con XS, spesso è Corporate o Sovranazionale, rischio medio-alto rispetto a BTP
+        if isin.startswith("XS"): return 3
+        
+        # Livello 4: High Risk / Subordinate / Emergenti
+        if "SUBORDINAT" in nome or "SUB" in desc: return 4
+        if "ROMANIA" in nome or "TURCHIA" in nome or "UNGHERIA" in nome: return 4
+        
+        return 3 # Default (Corporate Generico)
+    except:
+        return 3
 def trova_alternative_migliori(bond_target, df_mercato):
     """
     VERSIONE 'AGGRESSIVA': Cerca alternative con maglie più larghe
