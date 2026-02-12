@@ -821,177 +821,150 @@ def get_tasso_cambio_live(da, a):
 # 1. BOND SCREENER INTELLIGENTE
 # 1. BOND SCREENER INTELLIGENTE (MULTI-VALUTA)
 # 1. BOND SCREENER INTELLIGENTE (CON FILTRO ANTI-TRY)
+# 1. BOND SCREENER INTELLIGENTE (CON YTM CONVERTITO / HEDGED)
 def bond_screener_ui():
-    """Interfaccia Bond Screener con filtri avanzati, conversione valuta e filtro anti-volatilità"""
-    st.title("🎯 Bond Screener & Ranking")
-    st.caption("Confronta i rendimenti globali convertiti nella tua valuta.")
+    """Screener con calcolo del Rendimento Sintetico (Hedged Yield)"""
+    st.title("🎯 Bond Screener & Ranking Reale")
+    st.caption("Classifica basata sul rendimento convertito nella tua valuta (al netto del rischio cambio stimato).")
+    
+    # --- A. DATI TASSI CENTRALI (PER STIMA COPERTURA/SVALUTAZIONE) ---
+    # Tassi di riferimento approssimativi delle banche centrali (aggiornabili)
+    RISK_FREE_RATES = {
+        "EUR": 3.25, "USD": 5.50, "GBP": 5.25, "CHF": 1.75,
+        "TRY": 50.0, "BRL": 11.25, "ZAR": 8.25, "MXN": 11.00,
+        "RON": 7.00, "HUF": 10.00, "JPY": 0.10
+    }
     
     # Carica mercato
-    with st.spinner("Analisi Mercato e Valute..."):
+    with st.spinner("Analisi Yield e Parità dei Tassi..."):
         df_market = carica_dati_mercato()
         if df_market.empty:
             st.error("❌ Database vuoto. Aggiorna dalla sidebar.")
             return
         
-        # Assicuriamoci che ci sia la colonna Valuta
+        # Riconoscimento Valuta
         if 'Valuta' not in df_market.columns:
             df_market['Valuta'] = df_market.apply(lambda x: detect_valuta(x.get('Desc', ''), x.get('ISIN', '')), axis=1)
 
     st.divider()
     
-    # === STEP 1: IMPOSTAZIONI INVESTITORE ===
-    st.subheader("👤 Profilo Investitore")
+    # === IMPOSTAZIONI ===
     c_wal, c_scope = st.columns(2)
-    
     with c_wal:
         valuta_wallet = st.selectbox("La tua Valuta Base", ["EUR", "USD"], index=0)
+        tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
     
     with c_scope:
         scope = st.radio(
-            "Cosa vuoi cercare?", 
-            [f"🔒 Solo Titoli in {valuta_wallet} (No Rischio Cambio)", 
-             "🌍 Tutto il Mondo (Massimizza Rendimento)"],
+            "Modalità Classifica", 
+            [f"🔒 Solo Titoli in {valuta_wallet}", 
+             "🌍 Globale (Converte Rendimento in {valuta_wallet})"],
             index=0
         )
 
-    # === FILTRO ANTI-RUMORE (LA MODIFICA CHIESTA) ===
-    # Lista di valute ad alta inflazione che "sporcano" la classifica
-    VOLATILE_CURRENCIES = ["TRY", "RUB", "ARS", "BRL", "ZAR", "MXN", "INR", "RON", "HUF"]
-    
-    nascondi_junk = True
-    if "Tutto il Mondo" in scope:
-        st.write("")
-        # Checkbox attivo di default per proteggere l'utente
-        nascondi_junk = st.checkbox(
-            "🛡️ Nascondi Valute Volatili / Emerging Markets (Es. TRY, BRL, ZAR)", 
-            value=True,
-            help="Se disattivato, vedrai rendimenti altissimi (es. 30%) che però sono spesso erosi dalla svalutazione del cambio."
-        )
-
-    # === STEP 2: MOTORE DI CONVERSIONE E FILTRAGGIO ===
-    # Creiamo una copia di lavoro iniziale
+    # === MOTORE DI CALCOLO ===
     df_work = df_market.copy()
+    
+    # 1. Recupero Tassi Cambio (Per convertire il Prezzo)
+    valute_presenti = df_work['Valuta'].unique()
+    tassi_cambio = {}
+    for v in valute_presenti:
+        if v == valuta_wallet: tassi_cambio[v] = 1.0
+        else: tassi_cambio[v] = get_tasso_cambio_live(valuta_wallet, v)
+    
+    df_work['FX_Rate'] = df_work['Valuta'].map(tassi_cambio).fillna(1.0)
+    
+    # 2. Calcolo PREZZO Convertito
+    df_work['Prezzo_Wallet'] = df_work.apply(
+        lambda x: x['Prezzo'] / x['FX_Rate'] if x['FX_Rate'] > 0 else x['Prezzo'], axis=1
+    )
 
-    # APPLICAZIONE FILTRO ANTI-TRY
-    if nascondi_junk:
-        # Teniamo solo le valute "Forti" (Hard Currencies) o la valuta wallet
-        # Logica inversa: buttiamo via quelle nella blacklist se diverse dalla mia valuta
-        df_work = df_work[~df_work['Valuta'].isin(VOLATILE_CURRENCIES)]
+    # 3. Calcolo RENDIMENTO CONVERTITO (Hedged Yield)
+    # Formula: YTM_Wallet = YTM_Locale - (Tasso_Locale - Tasso_Wallet)
+    def calcola_ytm_convertito(row):
+        valuta_bond = row['Valuta']
+        if valuta_bond == valuta_wallet:
+            return row['YTM_Grezzo']
+        
+        # Tasso privo di rischio della valuta del bond
+        rf_bond = RISK_FREE_RATES.get(valuta_bond, 5.0) # 5.0 default per emergenti sconosciuti
+        
+        # Differenziale tassi (Costo teorico della copertura / svalutazione attesa)
+        diff_tassi = rf_bond - tasso_base_wallet
+        
+        # YTM Rettificato
+        return row['YTM_Grezzo'] - diff_tassi
 
-    # Filtro "Solo Valuta Wallet" (Sovrascrive tutto se selezionato)
+    df_work['YTM_Converted'] = df_work.apply(calcola_ytm_convertito, axis=1)
+
+    # Filtro Scope
     if "Solo Titoli" in scope:
-        df_work = df_work[df_work['Valuta'] == valuta_wallet].copy()
-        df_work['Prezzo_Wallet'] = df_work['Prezzo'] 
-        df_work['FX_Rate'] = 1.0
-    else:
-        # Scenario Globale (con o senza valute volatili in base alla checkbox)
-        valute_presenti = df_work['Valuta'].unique()
-        tassi_cambio = {}
-        for v in valute_presenti:
-            if v == valuta_wallet: tassi_cambio[v] = 1.0
-            else: tassi_cambio[v] = get_tasso_cambio_live(valuta_wallet, v)
-        
-        df_work['FX_Rate'] = df_work['Valuta'].map(tassi_cambio).fillna(1.0)
-        
-        # Calcolo Prezzo Convertito
-        df_work['Prezzo_Wallet'] = df_work.apply(
-            lambda x: x['Prezzo'] / x['FX_Rate'] if x['FX_Rate'] > 0 else x['Prezzo'], axis=1
-        )
+        df_work = df_work[df_work['Valuta'] == valuta_wallet]
 
     st.divider()
 
-    # === STEP 3: FILTRI PARAMETRICI ===
-    st.subheader("🔧 Filtri Ricerca")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**📊 Rendimento (YTM)**")
-        # Se ho nascosto le junk currencies, il rendimento max ha senso che sia più basso (es. 10-15%)
-        max_y_def = 15.0 if nascondi_junk else 50.0
-        ytm_min = st.number_input("YTM Min %", value=2.0, step=0.5)
-        ytm_max = st.number_input("YTM Max %", value=max_y_def, step=0.5)
-        
-    with col2:
-        st.markdown("**⏰ Scadenza (Anni)**")
-        anni_min = st.number_input("Min Anni", value=0.0, step=1.0)
-        anni_max = st.number_input("Max Anni", value=30.0, step=1.0)
-        
-    with col3:
-        st.markdown(f"**💰 Prezzo Max ({valuta_wallet})**")
-        prezzo_max = st.number_input(f"Max {valuta_wallet}", value=120.0, step=5.0)
+    # === FILTRI ===
+    st.subheader("🔧 Filtri")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(f"**📊 Rendimento Stimato ({valuta_wallet})**")
+        # Ora filtriamo sul rendimento GIÀ convertito!
+        ytm_min = st.number_input("Min %", value=2.0, step=0.5)
+        ytm_max = st.number_input("Max %", value=15.0, step=0.5)
+    with c2:
+        anni_min = st.number_input("Min Anni", 0.0)
+        anni_max = st.number_input("Max Anni", 30.0)
+    with c3:
+        p_max = st.number_input(f"Prezzo Max ({valuta_wallet})", 120.0)
 
-    col4, col5 = st.columns(2)
-    with col4:
-        # Gestione caso lista vuota
-        cats_av = sorted(df_work['Categoria'].unique().tolist()) if not df_work.empty else []
-        categorie_sel = st.multiselect("🏷️ Categorie Emittente", options=cats_av, default=cats_av)
-    
-    with col5:
-        ordinamento = st.selectbox(
-            "📊 Ordina Risultati per",
-            ["YTM_Grezzo (Decrescente)", 
-             f"Prezzo {valuta_wallet} (Crescente)",
-             "Scadenza (Più vicina)"]
-        )
-
-    # === STEP 4: AZIONE E RISULTATI ===
+    # === RISULTATI ===
     st.write("")
-    if st.button("🔍 Cerca Bond", type="primary", use_container_width=True):
+    if st.button("🚀 Calcola Ranking", type="primary", use_container_width=True):
         
-        if df_work.empty:
-            st.warning("⚠️ Nessun dato disponibile dopo il filtraggio.")
+        # Filtri
+        filtered = df_work[
+            (df_work['YTM_Converted'] >= ytm_min) &
+            (df_work['YTM_Converted'] <= ytm_max) &
+            (df_work['Anni'] >= anni_min) &
+            (df_work['Anni'] <= anni_max) &
+            (df_work['Prezzo_Wallet'] <= p_max)
+        ]
+        
+        # Ordinamento: Usiamo YTM_Converted!
+        filtered = filtered.sort_values('YTM_Converted', ascending=False)
+        
+        if filtered.empty:
+            st.warning("Nessun bond trovato.")
         else:
-            # Applicazione Filtri Numerici
-            filtered = df_work[
-                (df_work['YTM_Grezzo'] >= ytm_min) &
-                (df_work['YTM_Grezzo'] <= ytm_max) &
-                (df_work['Anni'] >= anni_min) &
-                (df_work['Anni'] <= anni_max) &
-                (df_work['Prezzo_Wallet'] <= prezzo_max) &
-                (df_work['Categoria'].isin(categorie_sel))
-            ]
+            st.success(f"✅ Classifica generata su {len(filtered)} titoli.")
             
-            # Ordinamento
-            if "YTM" in ordinamento:
-                filtered = filtered.sort_values('YTM_Grezzo', ascending=False)
-            elif "Prezzo" in ordinamento:
-                filtered = filtered.sort_values('Prezzo_Wallet', ascending=True)
-            else:
-                filtered = filtered.sort_values('Anni', ascending=True)
-                
-            # Visualizzazione
-            if filtered.empty:
-                st.warning("⚠️ Nessun titolo trovato. Prova ad alzare il prezzo massimo o cambiare filtri.")
-            else:
-                st.success(f"✅ Trovati **{len(filtered)}** titoli.")
-                
-                # Messaggio contestuale intelligente
-                if "Tutto il Mondo" in scope:
-                    if nascondi_junk:
-                        st.info("💡 **Filtro Attivo:** Stai vedendo bond globali 'Investment Grade' (USD, GBP, CHF, ecc). Le valute rischiose (TRY, RUB) sono state nascoste.")
-                    else:
-                        st.warning("⚠️ **Attenzione:** Stai vedendo ANCHE valute ad alta volatilità. I rendimenti > 15% sono quasi sempre in valute che si svalutano (es. TRY).")
+            if "Globale" in scope:
+                st.info(f"""
+                💡 **Come leggo i dati?**
+                Il sistema applica la **Parità dei Tassi**: penalizza le valute ad alta inflazione (es. TRY) e premia quelle stabili.
+                * Un bond TRY al 30% diventa negativo perché l'inflazione turca è ~50%.
+                * Un bond USD al 5% diventa ~3% in EUR (costo copertura cambio).
+                """)
 
-                # Tabella Risultati
-                st.dataframe(
-                    filtered[['ISIN', 'Desc', 'Valuta', 'Prezzo_Wallet', 'YTM_Grezzo', 'Anni', 'Categoria']].head(100).style
-                    .format({
-                        'Prezzo_Wallet': f'{{:.2f}} {valuta_wallet}',
-                        'YTM_Grezzo': '{:.2f}%',
-                        'Anni': '{:.1f}'
-                    })
-                    .background_gradient(subset=['YTM_Grezzo'], cmap='Greens'),
-                    use_container_width=True,
-                    height=500,
-                    column_config={
-                        "Prezzo_Wallet": st.column_config.NumberColumn(f"Tuo Prezzo", help=f"Prezzo convertito in {valuta_wallet}"),
-                        "YTM_Grezzo": st.column_config.NumberColumn("Rendimento Annuo", help="Nominale in valuta locale"),
-                        "Valuta": "Divisa"
-                    }
-                )
-                
-                csv = filtered.to_csv(index=False).encode('utf-8')
-                st.download_button("💾 Scarica CSV", csv, "bond_ranking.csv", "text/csv")
+            st.dataframe(
+                filtered[['Desc', 'Valuta', 'Prezzo_Wallet', 'YTM_Grezzo', 'YTM_Converted', 'Anni']].head(100).style
+                .format({
+                    'Prezzo_Wallet': f'{{:.2f}} {valuta_wallet}',
+                    'YTM_Grezzo': '{:.2f}%',
+                    'YTM_Converted': '{:.2f}%', # Questo è il numero che volevi!
+                    'Anni': '{:.1f}'
+                })
+                .background_gradient(subset=['YTM_Converted'], cmap='RdYlGn'),
+                use_container_width=True,
+                height=600,
+                column_config={
+                    "YTM_Converted": st.column_config.NumberColumn(
+                        f"Rend. {valuta_wallet} (Stima)", 
+                        help="Rendimento stimato convertito nella tua valuta, sottraendo il differenziale tassi (costo copertura)."
+                    ),
+                    "YTM_Grezzo": st.column_config.NumberColumn("Rend. Locale", help="Rendimento nella valuta originale"),
+                }
+            )
 # 2. DASHBOARD MERCATO
 def dashboard_mercato_ui():
     """Dashboard con vista mercato completa"""
