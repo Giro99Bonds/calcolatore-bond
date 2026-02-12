@@ -1716,14 +1716,10 @@ def main_app():
                             <div class="receipt-box" style="border-left: 4px solid #FF4B4B; background-color: rgba(255, 75, 75, 0.05); padding: 15px; border-radius: 8px;">
                                 <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px;">📉 USCITE (Oggi)</div>
                                 <div class="receipt-row" style="color:#aaa;">Prezzo: {d['pr']:.2f} | Nominale: {nominale_effettivo:,.0f}</div>
-                                <div class="receipt-row"><span>Costo Titoli:</span><span>{costo_titolo_user:,.2f} {valuta_user}</span></div>
                                 <div class="receipt-row">
-                                    <span title="Gli interessi già maturati dall'ultima cedola ad oggi. Li anticipi ora al venditore, ma li recupererai interamente alla prossima data di pagamento. Non sono soldi persi!" style="border-bottom: 1px dotted #aaa; cursor: help;">
-                                        Rateo Interessi:
-                                    </span>
+                                    <span>Rateo Interessi <span style="display:inline-block; width:14px; height:14px; background:#555; color:white; border-radius:50%; text-align:center; font-size:10px; line-height:14px; cursor:help; margin-left:2px;" title="Sono gli interessi già maturati dal vecchio proprietario fino a oggi. Tu li anticipi adesso (quindi è un'uscita), ma li recupererai interamente alla prossima data di stacco della cedola.">?</span>:</span>
                                     <span>{rateo_user:,.2f} {valuta_user}</span>
                                 </div>
-                                <div class="receipt-row"><span>Commissioni:</span><span>{commissioni_input:,.2f} {valuta_user}</span></div>
                                 <hr style="margin:10px 0; border-color:#444;">
                                 <div class="receipt-total" style="color:#FF4B4B;">TOTALE: -{spesa_reale_user:,.2f} {valuta_user}</div>
                             </div>""", unsafe_allow_html=True)
@@ -1779,7 +1775,7 @@ def main_app():
 
                         fig = go.Figure()
                         
-                        # 1. Linea Guida
+                        # 1. Linea Guida (Percorso)
                         fig.add_trace(go.Scatter(
                             x=df_flussi['Data'], y=df_flussi['Cumulativo'], 
                             mode='lines', 
@@ -1791,23 +1787,25 @@ def main_app():
                         fig.add_trace(go.Scatter(
                             x=df_flussi['Data'], y=df_flussi['Cumulativo'], 
                             mode='markers', 
-                            marker=dict(symbol='circle-open', size=10, color=colors, line=dict(width=3)),
+                            marker=dict(symbol='circle-open', size=9, color=colors, line=dict(width=2.5)),
                             text=df_flussi['Dettagli'], 
                             hovertemplate="<b>%{text}</b><br>Saldo: %{y:,.2f}<extra></extra>"
                         ))
                         
-                        # 3. Stella nel punto ESATTO di intersezione
+                        # 3. Stella nel punto ESATTO di intersezione (Asse X)
                         if be_date_exact:
                             fig.add_trace(go.Scatter(
                                 x=[be_date_exact], y=[0],
-                                mode='markers+text',
+                                mode='markers', # SOLO Marker, niente testo sovrapposto
                                 name='Break-Even',
-                                text=['★'],
-                                textposition="top center",
-                                textfont=dict(color="#FFD700", size=16),
-                                marker=dict(symbol='star', size=18, color='#FFD700', line=dict(width=1, color='white')),
+                                marker=dict(
+                                    symbol='star', 
+                                    size=18, 
+                                    color='#FFD700', # Oro
+                                    line=dict(width=1, color='white')
+                                ),
                                 hoverinfo='text',
-                                hovertext=f"BREAK-EVEN POINT<br>Giorno Esatto: {be_date_exact.strftime('%d/%m/%Y')}"
+                                hovertext=f"★ BREAK-EVEN POINT<br>Data stimata: {be_date_exact.strftime('%d/%m/%Y')}"
                             ))
 
                         # Asse X (Linea Bianca)
