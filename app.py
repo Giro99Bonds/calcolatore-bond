@@ -1628,35 +1628,45 @@ def main_app():
                 d = processa_riga(row, info) if row is not None else None
                 
                 if d:
-                    # --- MOTORE MATEMATICO (REPLICA SIMPLE TOOLS) ---
+                    if d:
+                    # --- A. MOTORE MATEMATICO PROFESSIONALE (ICMA T+2) ---
                     tax_rate = determina_tasse(d['fonte'], d['desc'])
                     valuta_bond = detect_valuta(d['desc'], d['isin'])
                     
-                    # 1. Calcoli Preliminari
+                    # 1. Calcolo Data Regolamento (T+2)
                     settlement = get_settlement_date()
-                    rateo_per_visualizzazione = calcola_rateo_esatto(d, settlement)
                     
-                    # 2. Calcolo Rendimento NETTO (XIRR) su Base 100
-                    # Usiamo base 100 e 0 commissioni per trovare il rendimento puro del titolo
-                    df_yield, _, _, _, _ = genera_flussi_reali(d, 100.0, tax_rate, 0, d['pr'])
+                    # 2. Calcolo Rateo per Visualizzazione
+                    # CORREZIONE: Qui usiamo il nome standard 'calcola_rateo'
+                    rateo_per_visualizzazione = calcola_rateo(d, settlement)
                     
+                    # 3. Generazione Flussi Reali BASE 100 per XIRR
+                    # CORREZIONE: Usiamo 'genera_flussi_dettagliati' che è il nome che abbiamo salvato
+                    df_base, _, _, _, _, _ = genera_flussi_dettagliati(d, 100.0, tax_rate, 0, d['pr'])
+                    
+                    # 4. Calcolo XIRR (TIR) - Rendimento Netto Reale
                     def xirr_calc(flow_df):
                         try:
                             dates = flow_df['Data'].tolist()
                             amounts = flow_df['Importo'].tolist()
                             if not amounts or amounts[0] >= 0: return 0.0
-                            def xnpv(r, amts, dts):
-                                d0 = dts[0] # Data T+2
-                                return sum([a / ((1 + r)**((dt - d0).days / 365.0)) for a, dt in zip(amts, dts)])
+                            
+                            def xnpv(rate, amounts, dates):
+                                if rate <= -1.0: return float('inf')
+                                d0 = dates[0] # Data T+2
+                                return sum([a / ((1 + rate) ** ((d - d0).days / 365.0)) for a, d in zip(amounts, dates)])
+                            
                             return newton(lambda r: xnpv(r, amounts, dates), 0.05) * 100
                         except: return 0.0
 
-                    rendimento_netto = xirr_calc(df_yield)
+                    rendimento_netto = xirr_calc(df_base)
                     
-                    # 3. Metriche classiche (solo per visualizzazione)
+                    # 5. Metriche di Rischio e Quality
                     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
-                    
-                    # --- FINE CALCOLI, INIZIO GRAFICA ---
+                    qual = analizza_bond_quality_dettagliata(d, risk, tax_rate, st.session_state.patrimonio)
+                    qual['ytm_netto'] = rendimento_netto 
+
+                    # --- B. INTERFACCIA VISUALE ---
                     chi, tipo, tempo, risk_msg = identikit_bond(d)
                     
                 
