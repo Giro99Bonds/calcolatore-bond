@@ -1716,10 +1716,9 @@ def main_app():
                             <div class="receipt-box" style="border-left: 4px solid #FF4B4B; background-color: rgba(255, 75, 75, 0.05); padding: 15px; border-radius: 8px;">
                                 <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px;">📉 USCITE (Oggi)</div>
                                 <div class="receipt-row" style="color:#aaa;">Prezzo: {d['pr']:.2f} | Nominale: {nominale_effettivo:,.0f}</div>
-                                <div class="receipt-row">
-                                    <span>Rateo Interessi <span style="display:inline-block; width:14px; height:14px; background:#555; color:white; border-radius:50%; text-align:center; font-size:10px; line-height:14px; cursor:help; margin-left:2px;" title="Sono gli interessi già maturati dal vecchio proprietario fino a oggi. Tu li anticipi adesso (quindi è un'uscita), ma li recupererai interamente alla prossima data di stacco della cedola.">?</span>:</span>
-                                    <span>{rateo_user:,.2f} {valuta_user}</span>
-                                </div>
+                                <div class="receipt-row"><span>Costo Titoli:</span><span>{costo_titolo_user:,.2f} {valuta_user}</span></div>
+                                <div class="receipt-row"><span>Rateo Interessi:</span><span>{rateo_user:,.2f} {valuta_user}</span></div>
+                                <div class="receipt-row"><span>Commissioni:</span><span>{commissioni_input:,.2f} {valuta_user}</span></div>
                                 <hr style="margin:10px 0; border-color:#444;">
                                 <div class="receipt-total" style="color:#FF4B4B;">TOTALE: -{spesa_reale_user:,.2f} {valuta_user}</div>
                             </div>""", unsafe_allow_html=True)
