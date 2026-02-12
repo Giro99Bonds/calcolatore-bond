@@ -1717,7 +1717,12 @@ def main_app():
                                 <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px;">📉 USCITE (Oggi)</div>
                                 <div class="receipt-row" style="color:#aaa;">Prezzo: {d['pr']:.2f} | Nominale: {nominale_effettivo:,.0f}</div>
                                 <div class="receipt-row"><span>Costo Titoli:</span><span>{costo_titolo_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row"><span>Rateo Interessi:</span><span>{rateo_user:,.2f} {valuta_user}</span></div>
+                                <div class="receipt-row">
+                                    <span style="border-bottom: 1px dotted #aaa; cursor: help;" title="Gli interessi maturati dall'ultima cedola ad oggi. Li anticipi ora al venditore, ma li recupererai interamente alla prossima data di pagamento. Non è un costo perso!">
+                                        Rateo Interessi ℹ️:
+                                    </span>
+                                    <span>{rateo_user:,.2f} {valuta_user}</span>
+                                </div>
                                 <div class="receipt-row"><span>Commissioni:</span><span>{commissioni_input:,.2f} {valuta_user}</span></div>
                                 <hr style="margin:10px 0; border-color:#444;">
                                 <div class="receipt-total" style="color:#FF4B4B;">TOTALE: -{spesa_reale_user:,.2f} {valuta_user}</div>
@@ -1743,43 +1748,65 @@ def main_app():
                         # --- GRAFICO BREAK-EVEN AVANZATO ---
                         # --- GRAFICO BREAK-EVEN (CON STELLA DI PAREGGIO) ---
                         # --- GRAFICO BREAK-EVEN AVANZATO (FIXATO) ---
+                       # --- GRAFICO RECUPERO CAPITALE (LOGICA PERFETTA) ---
                         st.subheader("🗓️ Recupero Capitale (Break-Even)")
+                        
+                        # 1. Calcoliamo il percorso cumulativo
                         df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
+                        
+                        # 2. Logica Colori: ROSSO se Cumulativo < 0, VERDE se Cumulativo >= 0
+                        # Il primo pallino sarà l'acquisto (es. -9.907), quindi ROSSO.
+                        # L'ultimo sarà il rimborso (es. +3.000), quindi VERDE.
                         colors = ['#FF4B4B' if val < 0 else '#00CC96' for val in df_flussi['Cumulativo']]
                         
-                        # Trova il primo punto positivo per la linea verticale
+                        # Trova data esatta intersezione asse X (Break-Even)
                         first_pos = df_flussi[df_flussi['Cumulativo'] >= 0]
-                        # CORREZIONE QUI: usiamo first_pos, non first_positive
                         be_date = first_pos.iloc[0]['Data'] if not first_pos.empty else None
 
                         fig = go.Figure()
                         
-                        # 1. Linea Guida
-                        fig.add_trace(go.Scatter(x=df_flussi['Data'], y=df_flussi['Cumulativo'], mode='lines', line=dict(color='#666', width=1, dash='dot'), name='Percorso'))
-                        
-                        # 2. Marker Vuoti
+                        # A. La Retta (Grigia tratteggiata per mostrare il percorso)
                         fig.add_trace(go.Scatter(
-                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], mode='markers', 
-                            marker=dict(symbol='circle-open', size=10, color=colors, line=dict(width=3)),
-                            text=df_flussi['Dettagli'], hovertemplate="<b>%{text}</b><br>Saldo: %{y:,.2f}"
+                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], 
+                            mode='lines', 
+                            line=dict(color='#888', width=1, dash='dot'), # Grigio neutro
+                            name='Trend'
                         ))
                         
-                        # 3. Indicatore Stella su Break-Even
+                        # B. I Pallini (Vuoti con bordo colorato in base al profitto)
+                        fig.add_trace(go.Scatter(
+                            x=df_flussi['Data'], y=df_flussi['Cumulativo'], 
+                            mode='markers', 
+                            marker=dict(
+                                symbol='circle-open', # Pallino vuoto dentro
+                                size=9, 
+                                color=colors,         # Rosso sotto zero, Verde sopra
+                                line=dict(width=2.5)  # Spessore del bordo
+                            ),
+                            text=df_flussi['Dettagli'], 
+                            hovertemplate="<b>%{text}</b><br>Saldo: %{y:,.2f} €<extra></extra>"
+                        ))
+                        
+                        # C. Stella Dorata al Break-Even (Opzionale ma consigliata)
                         if be_date:
                             fig.add_trace(go.Scatter(
                                 x=[be_date], y=[0],
-                                mode='markers+text',
-                                name='Break-Even',
-                                text=['★ PAREGGIO'],
-                                textposition="top center",
-                                textfont=dict(color="#FFD700", size=11, weight="bold"),
-                                marker=dict(symbol='star', size=18, color='#FFD700', line=dict(width=1, color='white')),
-                                hoverinfo='text',
-                                hovertext=f"BREAK-EVEN POINT<br>Data stimata: {be_date.strftime('%d/%m/%Y')}"
+                                mode='markers',
+                                marker=dict(symbol='star', size=14, color='#FFD700', line=dict(width=1, color='white')),
+                                hoverinfo='skip',
+                                name='Pareggio'
                             ))
 
-                        fig.add_hline(y=0, line_color='white', line_width=1)
-                        fig.update_layout(template="plotly_dark", height=350, showlegend=False, margin=dict(l=20,r=20,t=40,b=20), yaxis_title="Saldo Cumulativo")
+                        # D. Asse X (Linea dello Zero)
+                        fig.add_hline(y=0, line_color='white', line_width=1, layer="below")
+                        
+                        fig.update_layout(
+                            template="plotly_dark", 
+                            height=350, 
+                            showlegend=False, 
+                            margin=dict(l=20,r=20,t=30,b=20), 
+                            yaxis_title="Saldo Cumulativo (€)"
+                        )
                         st.plotly_chart(fig, use_container_width=True)
 
                         # CEDOLARIO (SEMPRE VISIBILE, SENZA EXPANDER)
