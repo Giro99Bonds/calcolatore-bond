@@ -134,7 +134,8 @@ SOURCES_MAP = {
     "GOV_PERIF": [
         {"nome": "SPAGNA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=spagna&yieldtype=G&timescale=DUR", "freq": 1},
         {"nome": "PORTOGALLO", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=portogallo&yieldtype=G&timescale=DUR", "freq": 1},
-        {"nome": "GRECIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=grecia&yieldtype=G&timescale=DUR", "freq": 1}
+        {"nome": "GRECIA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=grecia&yieldtype=G&timescale=DUR", "freq": 1},
+        {"nome": "ALTRI EUROPA", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=altri_europa&yieldtype=G&timescale=DUR", "freq": 1}
     ],
     "GOV_WORLD": [
         {"nome": "USA_TREASURY", "url": "https://www.simpletoolsforinvestors.eu/monitor_info.php?monitor=usa&yieldtype=G&timescale=DUR", "freq": 2},
@@ -1111,7 +1112,168 @@ def login():
                 st.query_params["session"] = token
                 st.rerun()
             else: st.error("Errore Credenziali")
+# ==============================================================================
+# 🧠 SMART ANALYSIS UI (FUNZIONE DI PAGINA COMPLETA)
+# ==============================================================================
+def smart_analysis_ui():
+    st.title("🧠 Smart Analysis & Fair Value")
+    st.caption("Mappa del mercato: visualizza il posizionamento e trova alternative migliori.")
+    
+    # 1. Caricamento Dati
+    with st.spinner("Analisi dell'intero mercato in corso..."):
+        df_market = carica_dati_mercato()
+    
+    if df_market.empty:
+        st.warning("⚠️ Database vuoto. Clicca su 'Aggiorna Database' nella barra laterale.")
+        return
 
+    # 2. Arricchimento Dati per il Grafico (Categorizzazione al volo)
+    def get_tipo_rapido(row):
+        s = (str(row['Fonte']) + " " + str(row['Desc'])).upper()
+        if any(x in s for x in ['BTP', 'BOT', 'ITALIA', 'GERMANIA', 'BUND', 'USA', 'TREASURY', 'SPAGNA']): return "Governativo"
+        if any(x in s for x in ['BANCA', 'INTESA', 'UNICREDIT', 'BANCARI', 'SUB', 'ASSICURAZIONI']): return "Bancario"
+        if any(x in s for x in ['CORP', 'ENI', 'ENEL', 'STELLANTIS', 'INDUSTRIA', 'AUTO']): return "Corporate"
+        return "Altro / High Yield"
+    
+    # Applica la categorizzazione
+    df_market['Tipo'] = df_market.apply(get_tipo_rapido, axis=1)
+
+    # 3. Gestione Input ISIN (Automatico dal grafico o Manuale)
+    if st.session_state.selected_isin_from_chart:
+        default_isin = st.session_state.selected_isin_from_chart
+        st.session_state.selected_isin_from_chart = None # Reset dopo l'uso per non bloccare l'input
+    else:
+        default_isin = ""
+
+    col_search, col_cat = st.columns([1, 3])
+    with col_search:
+        isin_smart = st.text_input("Analizza ISIN", value=default_isin, placeholder="IT...").strip().upper()
+    with col_cat:
+        # Filtro visivo per il grafico
+        cat_options = [""] + sorted(list(set(df_market['Tipo'].unique())))
+        cat_filter = st.selectbox("Filtra Grafico per Categoria", cat_options, format_func=lambda x: "Mostra Tutto" if x == "" else x)
+
+    # 4. Elaborazione e Visualizzazione
+    if isin_smart and valida_isin(isin_smart):
+        # Cerca il bond specifico
+        row, info = cerca_db(isin_smart, None) # Cerca ovunque
+        d_smart = processa_riga(row, info) if row is not None else None
+        
+        if d_smart:
+            d_smart['isin'] = isin_smart
+            # Calcoli live per il bond selezionato
+            ytm_s = calcola_rendimento_grezzo(d_smart['pr'], d_smart['ced'], d_smart['sc'])
+            dur_s = (d_smart['sc'] - date.today()).days / 365.25
+            tipo_s = get_tipo_rapido({'Fonte': d_smart['fonte'], 'Desc': d_smart['desc']})
+            
+            # --- SEZIONE A: GRAFICO "FAIR VALUE" (PALLINI VUOTI) ---
+            st.divider()
+            st.subheader("📊 Mappa del Mercato")
+            st.caption(f"Confronto con bond scadenza +/- 3 anni. Tu sei la stella rossa.")
+            
+            # Filtri Zoom Automatici (Focus sulla durata del bond)
+            mask_zoom = (df_market['Anni'] >= dur_s - 3) & (df_market['Anni'] <= dur_s + 3) & (df_market['YTM_Grezzo'] < ytm_s + 8)
+            if cat_filter: mask_zoom = mask_zoom & (df_market['Tipo'] == cat_filter)
+            
+            df_zoom = df_market[mask_zoom].copy()
+            
+            # Creazione Grafico Interattivo
+            fig = px.scatter(
+                df_zoom, 
+                x='Anni', 
+                y='YTM_Grezzo', 
+                color='Tipo', # Colora automaticamente in base alla categoria
+                # Configurazione Hover (Cosa vedi passando il mouse)
+                hover_data={
+                    'ISIN': True, 
+                    'Desc': True, 
+                    'Prezzo': ':.2f', 
+                    'YTM_Grezzo': ':.2f', 
+                    'Tipo': True,
+                    'Anni': False # Nascondi perché è già sull'asse X
+                },
+                labels={'Anni': 'Durata (Anni)', 'YTM_Grezzo': 'Rendimento Lordo (%)', 'Tipo': 'Categoria'},
+                # Mappa colori professionale
+                color_discrete_map={
+                    "Governativo": "#00CC96", # Verde acqua
+                    "Bancario": "#FFA15A",    # Arancio
+                    "Corporate": "#636EFA",   # Blu viola
+                    "Altro / High Yield": "#EF553B" # Rosso
+                }
+            )
+            
+            # APPLICA STILE "CERCHI VUOTI" (RICHIESTA SPECIFICA)
+            fig.update_traces(
+                marker=dict(
+                    symbol='circle-open', # Questo rende il cerchio vuoto
+                    size=9,               # Grandezza leggibile
+                    line=dict(width=2)    # Spessore del bordo colorato
+                )
+            )
+            
+            # Aggiungi il TUO bond (Stella Rossa Piena per distinguerlo)
+            fig.add_trace(go.Scatter(
+                x=[dur_s], y=[ytm_s],
+                mode='markers+text',
+                name='IL TUO BOND',
+                text=['📍 TU'],
+                textposition="top center",
+                marker=dict(color='red', size=18, symbol='star', line=dict(width=1, color='white')),
+                hoverinfo='text',
+                hovertext=f"TUO BOND<br>{d_smart['desc']}<br>YTM: {ytm_s:.2f}%"
+            ))
+            
+            fig.update_layout(
+                template="plotly_dark", 
+                height=500, 
+                legend=dict(orientation="h", y=1.1), # Legenda orizzontale in alto
+                hovermode="closest",
+                margin=dict(l=20, r=20, t=20, b=20)
+            )
+            
+            # Rendi il grafico cliccabile
+            selected_point = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+            
+            # Gestione click sul grafico
+            if selected_point and len(selected_point['selection']['points']) > 0:
+                try:
+                    point = selected_point['selection']['points'][0]
+                    # Plotly mette i customdata nello stesso ordine di hover_data
+                    if 'customdata' in point:
+                        # L'ISIN è il primo elemento (indice 0) nei customdata definiti sopra
+                        clicked_isin = point['customdata'][0] 
+                        st.session_state.selected_isin_from_chart = clicked_isin
+                        st.rerun() # Ricarica la pagina analizzando il nuovo bond
+                except: pass
+
+            # --- SEZIONE B: SMART SWITCH (TABELLA) ---
+            st.divider()
+            st.subheader("🔄 Smart Switch (Alternative)")
+            st.caption(f"Confronto con bond simili a **{d_smart['desc']}** ({tipo_s})")
+            
+            alternative = trova_alternative_migliori(d_smart, df_market)
+            
+            if not alternative.empty:
+                st.dataframe(
+                    alternative[['Tipologia', 'ISIN', 'Desc', 'Prezzo', 'YTM_Netto', 'Extra', 'Link']],
+                    column_config={
+                        "Link": st.column_config.LinkColumn("Scheda", display_text="🔗 Apri"),
+                        "YTM_Netto": st.column_config.NumberColumn("YTM Netto", format="%.2f%%"),
+                        "Extra": st.column_config.NumberColumn("Delta", format="+%.2f%%"),
+                        "Prezzo": st.column_config.NumberColumn("Prezzo", format="%.2f€"),
+                        "Tipologia": st.column_config.TextColumn("Analisi", width="medium"),
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.success("🏆 Nessuna alternativa nettamente migliore trovata con questi parametri.")
+                
+        else:
+            st.error("ISIN non trovato nel database.")
+    else:
+        st.info("Inserisci un ISIN per iniziare l'analisi.")
+        
 def main_app():
     with st.sidebar:
         st.title("🏛️ BOND TERMINAL")
@@ -1647,6 +1809,7 @@ def main_app():
                         st.rerun()
         else:
             st.info("Nessun bond trovato. Prova ad allargare i filtri e premi 'GENERA CLASSIFICA'.")
+    elif st.session_state.page == "SmartAnalysis":smart_analysis_ui()        
     elif st.session_state.page == "Dashboard": dashboard_mercato_ui()
     elif st.session_state.page == "Diversificazione": diversificazione_portfolio_ui()
     elif st.session_state.page == "Alerts": alert_manager_ui()
