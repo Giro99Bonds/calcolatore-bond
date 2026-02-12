@@ -821,18 +821,19 @@ def get_tasso_cambio_live(da, a):
 # 1. BOND SCREENER INTELLIGENTE
 # 1. BOND SCREENER INTELLIGENTE (MULTI-VALUTA)
 # 1. BOND SCREENER INTELLIGENTE (CON FILTRO ANTI-TRY)
-# 1. BOND SCREENER INTELLIGENTE (CON YTM CONVERTITO / HEDGED)
 def bond_screener_ui():
     """
     Screener Avanzato con Tassi Modificabili dall'Utente.
+    Calcola il 'Rendimento Reale' sottraendo il rischio cambio (Interest Rate Parity).
     """
     st.title("🎯 Bond Screener & Ranking Reale")
     st.caption("Classifica basata sul rendimento reale convertito nella tua valuta (Hedged Yield).")
     
     # --- A. DATI TASSI CENTRALI (DEFAULT MA MODIFICABILI) ---
-    # Questi sono i valori di partenza.
+    # Questi tassi servono per penalizzare le valute ad alta inflazione.
+    # Es: Turchia (50%) - Europa (3%) = 47% di penalizzazione sul rendimento.
     DEFAULT_RATES = {
-        "EUR": 3.00, "USD": 5.25, "GBP": 5.00, "CHF": 1.25,
+        "EUR": 3.00, "USD": 4.75, "GBP": 5.00, "CHF": 1.25,
         "TRY": 50.0, "BRL": 10.75, "ZAR": 8.25, "MXN": 11.00,
         "RON": 6.00, "HUF": 6.50, "JPY": 0.10, "AUD": 4.35 
     }
@@ -844,6 +845,7 @@ def bond_screener_ui():
             st.error("❌ Database vuoto. Aggiorna dalla sidebar.")
             return
         
+        # Riconoscimento Valuta se manca
         if 'Valuta' not in df_market.columns:
             df_market['Valuta'] = df_market.apply(lambda x: detect_valuta(x.get('Desc', ''), x.get('ISIN', '')), axis=1)
 
@@ -861,19 +863,17 @@ def bond_screener_ui():
             index=1
         )
 
-    # === C. PANNELLO TASSI (NUOVA FUNZIONE) ===
-    # Qui diamo il potere all'utente di aggiornare i tassi se cambiano
+    # === C. PANNELLO TASSI (DECIDI TU I TASSI) ===
     RISK_FREE_RATES = DEFAULT_RATES.copy()
     
     if "Globale" in mode:
-        with st.expander("⚙️ Configurazione Tassi Banche Centrali (Clicca per aggiornare)", expanded=False):
-            st.caption("Questi tassi servono per calcolare il costo della copertura valutaria. Puoi modificarli se le Banche Centrali aggiornano i tassi.")
+        with st.expander("⚙️ Configurazione Tassi Banche Centrali (Clicca per modificare)", expanded=False):
+            st.caption("Il sistema penalizza i rendimenti esteri sottraendo il differenziale tassi (costo teorico copertura).")
             
             cols = st.columns(4)
             keys = list(DEFAULT_RATES.keys())
             
             for i, valuta in enumerate(keys):
-                # Distribuiamo i campi su 4 colonne
                 with cols[i % 4]:
                     new_rate = st.number_input(
                         f"Tasso {valuta} (%)", 
@@ -883,10 +883,12 @@ def bond_screener_ui():
                     )
                     RISK_FREE_RATES[valuta] = new_rate
             
-            st.info(f"💡 Esempio: Se la Turchia (TRY) ha tassi al {RISK_FREE_RATES['TRY']}% e l'Europa (EUR) al {RISK_FREE_RATES['EUR']}%, il sistema penalizzerà i bond turchi del {RISK_FREE_RATES['TRY'] - RISK_FREE_RATES['EUR']:.2f}% per compensare il rischio cambio.")
+            # Recuperiamo il tasso base della tua valuta
+            tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
+            st.info(f"💡 Logica applicata: Rendimento Bond - (Tasso Paese Bond - Tasso {valuta_wallet})")
 
-    # Recuperiamo il tasso base della tua valuta (aggiornato dall'input sopra)
-    tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
+    else:
+        tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
 
     # === D. MOTORE DI CALCOLO ===
     df_work = df_market.copy()
@@ -901,7 +903,7 @@ def bond_screener_ui():
     df_work['FX_Rate'] = df_work['Valuta'].map(tassi_cambio_spot).fillna(1.0)
     df_work['Prezzo_Wallet'] = df_work.apply(lambda x: x['Prezzo'] / x['FX_Rate'] if x['FX_Rate'] > 0 else x['Prezzo'], axis=1)
 
-    # 2. Conversione RENDIMENTO (Interest Rate Parity Dinamica)
+    # 2. Conversione RENDIMENTO (Interest Rate Parity)
     def converti_rendimento(row):
         valuta_bond = row['Valuta']
         ytm_locale = row['YTM_Grezzo']
@@ -912,6 +914,7 @@ def bond_screener_ui():
         tasso_locale = RISK_FREE_RATES.get(valuta_bond, 5.0) 
         costo_copertura = tasso_locale - tasso_base_wallet
         
+        # Se il costo copertura è positivo (es. Turchia), riduce il rendimento
         return ytm_locale - costo_copertura
 
     df_work['YTM_Converted'] = df_work.apply(converti_rendimento, axis=1)
@@ -927,6 +930,7 @@ def bond_screener_ui():
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(f"**📊 Rendimento Reale in {valuta_wallet}**")
+        # Nota: min value può essere negativo per escludere bond spazzatura
         ytm_min = st.number_input("Min %", value=0.0, step=0.5) 
         ytm_max = st.number_input("Max %", value=15.0, step=0.5)
     with c2:
@@ -939,6 +943,7 @@ def bond_screener_ui():
     st.write("")
     if st.button("🚀 Genera Classifica", type="primary", use_container_width=True):
         
+        # Filtriamo usando il YTM_Converted (Quello pulito!)
         filtered = df_work[
             (df_work['YTM_Converted'] >= ytm_min) &
             (df_work['YTM_Converted'] <= ytm_max) &
@@ -947,10 +952,13 @@ def bond_screener_ui():
             (df_work['Prezzo_Wallet'] <= p_max)
         ]
         
+        # ORDINAMENTO: Usiamo il rendimento convertito
         filtered = filtered.sort_values('YTM_Converted', ascending=False)
         
         if filtered.empty:
-            st.warning(f"Nessun bond trovato con i criteri selezionati.")
+            st.warning(f"Nessun bond trovato con Rendimento Reale > {ytm_min}% in {valuta_wallet}.")
+            if "Globale" in mode:
+                st.info("💡 Molti bond 'High Yield' (es. TRY, ZAR) sono stati esclusi perché il loro rendimento reale è diventato negativo.")
         else:
             st.success(f"✅ Classifica calcolata su {len(filtered)} titoli.")
             
@@ -959,7 +967,7 @@ def bond_screener_ui():
                 .format({
                     'Prezzo_Wallet': f'{{:.2f}} {valuta_wallet}',
                     'YTM_Grezzo': '{:.2f}%',
-                    'YTM_Converted': '{:.2f}%',
+                    'YTM_Converted': '{:.2f}%', # Questo è il numero che comanda la classifica
                     'Anni': '{:.1f}'
                 })
                 .background_gradient(subset=['YTM_Converted'], cmap='RdYlGn'),
@@ -975,6 +983,10 @@ def bond_screener_ui():
                     "Prezzo_Wallet": f"Prezzo ({valuta_wallet})"
                 }
             )
+            
+            # Export CSV con le nuove colonne
+            csv = filtered.to_csv(index=False).encode('utf-8')
+            st.download_button("💾 Scarica CSV", csv, "bond_ranking_reale.csv", "text/csv")
 # 2. DASHBOARD MERCATO
 def dashboard_mercato_ui():
     """Dashboard con vista mercato completa"""
