@@ -667,34 +667,71 @@ def calcola_rateo(dati):
     except: return 0.0
 
 def genera_flussi_dettagliati(dati, nominale, tax_rate, commissioni, prezzo_acquisto):
-    flussi = []; rateo_pct = calcola_rateo(dati)
-    costo_titolo = (nominale * prezzo_acquisto) / 100
+    """
+    Genera i flussi di cassa.
+    REGOLA D'ORO: Il rimborso è SEMPRE sul Valore Nominale (100), 
+    mai sul prezzo di acquisto.
+    """
+    flussi = []
+    
+    # --- 1. ACQUISTO (USCITA OGGI) ---
+    rateo_pct = calcola_rateo(dati)
+    # Quanto paghi effettivamente il titolo (es. 107 o 95)
+    costo_titolo = (nominale * prezzo_acquisto) / 100 
+    # Rateo interessi che anticipi al venditore
     costo_rateo_netto = (nominale * rateo_pct) / 100 * (1 - tax_rate/100)
     spesa_totale = costo_titolo + costo_rateo_netto + commissioni
-    flussi.append({"Data": date.today(), "Tipo": "USCITA", "Importo": -spesa_totale, "Dettagli": "Acquisto"})
     
+    flussi.append({
+        "Data": date.today(), 
+        "Tipo": "USCITA", 
+        "Importo": -spesa_totale, 
+        "Dettagli": f"Acquisto {nominale:,.0f} nom. @ {prezzo_acquisto:.2f}"
+    })
+    
+    # --- 2. CEDOLE (ENTRATE FUTURE) ---
     totale_cedole_nette = 0
     if dati['freq'] > 0:
         cedola_netta = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100)
         curr = dati['sc']
+        # Calcolo date a ritroso
         while curr > date.today():
-            if curr != dati['sc']: 
-                flussi.append({"Data": curr, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola"})
+            if curr != dati['sc']: # L'ultima la mettiamo col rimborso
+                flussi.append({"Data": curr, "Tipo": "ENTRATA", "Importo": cedola_netta, "Dettagli": "Cedola Periodica"})
                 totale_cedole_nette += cedola_netta
             curr -= timedelta(days=int(365 / dati['freq']))
             
     flussi.sort(key=lambda x: x['Data'])
-    gain = max(0, 100 - prezzo_acquisto)
-    tassa_gain = (gain / 100) * nominale * (tax_rate/100)
-    rimborso_netto = nominale - tassa_gain
-    ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
-    flussi.append({"Data": dati['sc'], "Tipo": "ENTRATA", "Importo": rimborso_netto + ultima_ced, "Dettagli": "Rimborso"})
     
+    # --- 3. RIMBORSO A SCADENZA (Il punto chiave) ---
+    # Ti ridanno il NOMINALE (100), non quello che hai speso.
+    rimborso_lordo = nominale 
+    
+    # Calcolo Tasse sul Capital Gain (Solo se l'hai pagato MENO di 100)
+    # Se l'hai pagato 107 e ti ridanno 100, hai una Minusvalenza (niente tasse, anzi credito)
+    # Se l'hai pagato 90 e ti ridanno 100, paghi tasse su 10.
+    gain_prezzo = max(0, 100 - prezzo_acquisto) 
+    plusvalenza_lorda = (gain_prezzo / 100) * nominale
+    tassa_gain = plusvalenza_lorda * (tax_rate / 100)
+    
+    # Rimborso Netto = Nominale - Tasse Eventuali
+    rimborso_netto = rimborso_lordo - tassa_gain
+    
+    # Ultima cedola
+    ultima_ced = (nominale * (dati['ced'] / 100) / dati['freq']) * (1 - tax_rate / 100) if dati['freq'] > 0 else 0
+    
+    flussi.append({
+        "Data": dati['sc'], 
+        "Tipo": "ENTRATA", 
+        "Importo": rimborso_netto + ultima_ced, 
+        "Dettagli": f"Rimborso Nominale + Ultima Cedola"
+    })
+    
+    # Totali per riepilogo
     incasso_totale = totale_cedole_nette + rimborso_netto + ultima_ced
     totale_cedole_nette += ultima_ced
-    plusvalenza = (gain/100)*nominale - tassa_gain
 
-    return pd.DataFrame(flussi), spesa_totale, incasso_totale, costo_rateo_netto, totale_cedole_nette, plusvalenza
+    return pd.DataFrame(flussi), spesa_totale, incasso_totale, costo_rateo_netto, totale_cedole_nette, plusvalenza_lorda
 # ==============================================================================
 # 🆕 GESTIONE VALUTE LIVE (NUOVO SISTEMA)
 # ==============================================================================
@@ -1534,190 +1571,202 @@ def main_app():
                     st.divider()
                     
                     # === 💰 SIMULATORE & STRESS TEST (UX Gold + Matematica Fixata) ===
+                    # === 💰 SIMULATORE & STRESS TEST (Math Fix + UX Gold) ===
                     st.subheader("💰 Simulatore & Stress Test")
                     
                     col_set1, col_set2, col_set3 = st.columns(3)
-                    with col_set1:
-                        liste_valute = ["EUR", "USD", "GBP", "CHF", "TRY", "BRL", "RON", "JPY", "CAD", "AUD"]
-                        valuta_user = st.selectbox("La tua Valuta (Conto)", liste_valute, index=0)
-                    with col_set2:
-                        # Qui usiamo il BUDGET (fix matematico) per non avere errori di calcolo, ma la UX è uguale
-                        budget_user = st.number_input(f"Budget Totale ({valuta_user})", value=10000.0, step=1000.0, help="Quanto vuoi investire in totale (incluse commissioni).")
-                    with col_set3:
-                        commissioni_input = st.number_input("Commissioni Banca", value=5.0, help="Costi fissi dell'operazione.")
+                    with col_set1: 
+                        # Liste valute principali
+                        liste_valute = ["EUR", "USD", "GBP", "CHF", "TRY", "BRL", "RON", "JPY"]
+                        valuta_user = st.selectbox("La tua Valuta", liste_valute, index=0)
+                    with col_set2: 
+                        budget_user = st.number_input(f"Budget Totale ({valuta_user})", value=10000.0, step=1000.0, help="Quanto vuoi spendere tutto incluso")
+                    with col_set3: 
+                        commissioni_input = st.number_input("Commissioni", value=5.0, help="Costi fissi dell'operazione")
 
-                    # Tasso Cambio Live
+                    # Recupero Tasso Cambio
                     tasso_spot = get_tasso_cambio_live(valuta_user, valuta_bond)
                     
-                    # CONFIGURAZIONE SLIDER ADATTIVA (UX Gold)
+                    # Slider Cambio (Solo se valute diverse)
+                    st.caption(f"📡 Tasso LIVE: 1 {valuta_user} = {tasso_spot:.4f} {valuta_bond}")
                     scenario_fx = 0
                     if valuta_user != valuta_bond:
-                        # Logica avvisi rischio
-                        if valuta_bond in ["TRY", "ARS", "RUB"]:
-                            slider_step = 5; slider_min = -80; slider_max = 20
-                            risk_txt = "ALTISSIMO. Crollo probabile > 30%."
-                            suggested_test = "-40% o -50%"
-                        elif valuta_bond in ["BRL", "ZAR", "MXN", "RON"]:
-                            slider_step = 2; slider_min = -50; slider_max = 20
-                            risk_txt = "ALTO. Oscillazioni forti."
-                            suggested_test = "-20% o -25%"
-                        else: 
-                            slider_step = 1; slider_min = -30; slider_max = 20
-                            risk_txt = "MEDIO. Valute solide."
-                            suggested_test = "-10% o -15%"
-
-                        st.caption(f"📡 Tasso LIVE: 1 {valuta_user} = {tasso_spot:.4f} {valuta_bond}")
-                        st.divider()
-                        
-                        # Box Guida Dinamico
                         c_ux1, c_ux2 = st.columns([2, 1])
                         with c_ux1:
-                            st.info(f"**💡 Rischio {valuta_bond}**: {risk_txt}\n👉 **Consiglio:** Imposta lo slider a **{suggested_test}** per stress test.")
+                            # Box Guida Dinamico
+                            risk_txt = "MEDIO"
+                            sugg = "-10% o -20%"
+                            sl_min, sl_max, sl_step = -50, 50, 1
+                            
+                            if valuta_bond in ["TRY", "ARS", "RUB"]: 
+                                risk_txt = "ALTISSIMO. Crollo probabile > 30%."
+                                sugg = "-40% o -50%"
+                                sl_min, sl_max, sl_step = -80, 20, 5
+                            elif valuta_bond in ["BRL", "ZAR", "MXN", "RON"]: 
+                                risk_txt = "ALTO. Oscillazioni forti."
+                                sugg = "-25% o -30%"
+                                sl_min, sl_max, sl_step = -60, 30, 2
+                            
+                            st.info(f"**💡 Rischio {valuta_bond}: {risk_txt}**\n👉 Consiglio: Imposta lo slider a **{sugg}** per stress test.")
                         
-                        # Slider Adattivo
-                        scenario_fx = st.slider(f"📉 Simula Variazione {valuta_bond} a scadenza", min_value=slider_min, max_value=slider_max, value=0, step=slider_step, format="%d%%")
-                        
-                        if scenario_fx < 0: st.warning(f"⚠️ STRESS TEST: Simuli che il **{valuta_bond} perda il {abs(scenario_fx)}%**.")
-                        elif scenario_fx > 0: st.success(f"📈 SCENARIO OTTIMISTA: Simuli apprezzamento.")
+                        with c_ux2:
+                            scenario_fx = st.slider(f"📉 Variazione {valuta_bond}", sl_min, sl_max, 0, step=sl_step, format="%d%%")
+
+                    # --- CALCOLI FINANZIARI PRECISI ---
+                    # 1. Quanto costa comprarlo oggi?
+                    rateo_unitario = calcola_rateo(d)
+                    prezzo_telquel = d['pr'] + rateo_unitario 
+                    costo_100_user = (prezzo_telquel / tasso_spot) # Costo di 100 nominali nella tua valuta
                     
-                    # --- CALCOLI FINANZIARI PRECISI (Dietro le quinte) ---
-                    # 1. Calcolo rateo unitario bond
-                    rateo_unitario_bond = calcola_rateo(d) # In % su 100
-                    prezzo_telquel_bond = d['pr'] + rateo_unitario_bond # Prezzo + Rateo (in valuta bond)
+                    # 2. Quanto nominale posso permettermi?
+                    nominale_teorico = ((budget_user - commissioni_input) / costo_100_user) * 100
                     
-                    # 2. Costo di 100 nominale in Valuta User
-                    costo_100_nominale_user = (prezzo_telquel_bond / tasso_spot) 
+                    # 3. Arrotondamento al lotto minimo (es. 1000)
+                    lotto = d['taglio'] if d['taglio'] > 0 else 1000.0
+                    nominale_effettivo = int(nominale_teorico / lotto) * lotto
                     
-                    # 3. Calcolo Nominale Acquistabile col Budget
-                    nominale_teorico = ((budget_user - commissioni_input) / costo_100_nominale_user) * 100
-                    
-                    # Arrotondamento al lotto minimo
-                    lotto_min = d['taglio'] if d['taglio'] > 0 else 1000.0
-                    nominale_effettivo = int(nominale_teorico / lotto_min) * lotto_min
-                    if nominale_effettivo == 0 and budget_user > 0: nominale_effettivo = lotto_min # Almeno un lotto se budget c'è
-                    
+                    # Se il budget è troppo basso ma > 0, forza almeno 1 lotto per far vedere i conti (con warning)
+                    force_calc = False
+                    if nominale_effettivo == 0 and budget_user > 0: 
+                        nominale_effettivo = lotto
+                        force_calc = True
+
                     if nominale_effettivo > 0:
-                        # 4. Generazione Flussi Reali con Nominale Calcolato
+                        if force_calc:
+                            st.warning(f"⚠️ Budget insufficiente per 1 lotto. Calcoli mostrati per il minimo acquisto ({lotto:,.0f} {valuta_bond}).")
+
+                        # Generazione Flussi (Con Fix Rimborso Nominale)
+                        # Nota: Qui passiamo il Nominale (es. 10.000), non il prezzo pagato!
                         df_flussi, spesa_loc, incasso_loc, rateo_loc, tot_ced_loc, _ = genera_flussi_dettagliati(
                             d, nominale_effettivo, tax_rate, 0, d['pr']
                         )
                         
-                        # 5. Conversioni e Somme
+                        # Conversioni Valutarie per l'Utente
                         rate_rientro = tasso_spot * (1 - (scenario_fx/100)) if valuta_user != valuta_bond else 1.0
-                        if rate_rientro <= 0.001: rate_rientro = 0.001
+                        if rate_rientro < 0.001: rate_rientro = 0.001
                         
-                        # Uscite (Oggi - Tasso Spot Attuale)
+                        # Spese Oggi (al cambio attuale)
                         costo_titolo_user = ((nominale_effettivo * d['pr'] / 100) / tasso_spot)
                         rateo_user = (rateo_loc / tasso_spot)
                         spesa_reale_user = costo_titolo_user + rateo_user + commissioni_input
                         
-                        # Entrate (Futuro - Tasso Stressato)
+                        # Incassi Futuri (al cambio simulato)
                         df_flussi['Importo_User'] = df_flussi.apply(
                             lambda x: (x['Importo'] / tasso_spot) if x['Tipo'] == 'USCITA' else (x['Importo'] / rate_rientro), axis=1
                         )
                         
                         incasso_reale_user = df_flussi[df_flussi['Tipo'] != 'USCITA']['Importo_User'].sum()
                         cedole_tot_user = tot_ced_loc / rate_rientro
-                        rimborso_user = nominale_effettivo / rate_rientro 
-                        guadagno_netto_user = incasso_reale_user - spesa_reale_user
                         
-                        # ROI e Annualizzato
-                        roi_pct_totale = (guadagno_netto_user / spesa_reale_user) * 100
+                        # Guadagno
+                        guadagno_netto_user = incasso_reale_user - spesa_reale_user
+                        roi_pct = (guadagno_netto_user / spesa_reale_user) * 100
+                        
+                        # Calcolo Annualizzato
                         giorni_residui = (d['sc'] - date.today()).days
                         anni_residui = max(giorni_residui / 365.25, 0.1)
                         if spesa_reale_user > 0 and incasso_reale_user > 0:
                             roi_annuo = ((incasso_reale_user / spesa_reale_user) ** (1 / anni_residui) - 1) * 100
                         else: roi_annuo = -100
 
-                        # --- SCONTRINO (STILE HTML PREMIUM - UX Gold) ---
+                        # --- VISUALIZZAZIONE SCONTRINO (UX GOLD) ---
                         st.write("")
-                        st.markdown(f"### 🧾 Analisi Flussi (Budget: {budget_user:,.0f} {valuta_user})")
+                        st.markdown(f"### 🧾 Analisi Flussi (Nominale Acquistato: {nominale_effettivo:,.0f} {valuta_bond})")
                         col_usc, col_entr = st.columns(2)
                         
                         with col_usc:
                             st.markdown(f"""
                             <div class="receipt-box" style="border-left: 4px solid #FF4B4B; background-color: rgba(255, 75, 75, 0.05); padding: 15px; border-radius: 8px;">
-                                <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px; font-size:14px;">📉 USCITE (Oggi)</div>
-                                <div class="receipt-row" style="color:#aaa; font-size:12px; margin-bottom:5px;">Nominale: {nominale_effettivo:,.0f} {valuta_bond}</div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Costo Titoli:</span> <span>{costo_titolo_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Rateo Interessi:</span> <span>{rateo_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Commissioni:</span> <span>{commissioni_input:,.2f} {valuta_user}</span></div>
-                                <hr style="margin: 10px 0; border-color: #444;">
-                                <div class="receipt-total" style="color: #FF4B4B; font-size:16px; font-weight:bold; display:flex; justify-content:space-between;">
-                                    <span>TOTALE ADDEBITO:</span> <span>-{spesa_reale_user:,.2f} {valuta_user}</span>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-
+                                <div style="font-weight:bold; color:#FF4B4B; margin-bottom:10px;">📉 USCITE (Oggi)</div>
+                                <div class="receipt-row" style="color:#aaa;">Nominale: {nominale_effettivo:,.0f} {valuta_bond}</div>
+                                <div class="receipt-row"><span>Costo Titoli:</span><span>{costo_titolo_user:,.2f} {valuta_user}</span></div>
+                                <div class="receipt-row"><span>Rateo Interessi:</span><span>{rateo_user:,.2f} {valuta_user}</span></div>
+                                <div class="receipt-row"><span>Commissioni:</span><span>{commissioni_input:,.2f} {valuta_user}</span></div>
+                                <hr style="margin:10px 0; border-color:#444;">
+                                <div class="receipt-total" style="color:#FF4B4B;">TOTALE SPESA: -{spesa_reale_user:,.2f} {valuta_user}</div>
+                            </div>""", unsafe_allow_html=True)
+                        
                         with col_entr:
-                            color_res = "#00CC96" if guadagno_netto_user > 0 else "#FF4B4B"
-                            tasso_futuro_lbl = f"{rate_rientro:.2f}" if valuta_user != valuta_bond else "Invariato"
+                            col_res = "#00CC96" if guadagno_netto_user > 0 else "#FF4B4B"
+                            lbl_tasso = f"{rate_rientro:.2f}" if valuta_user != valuta_bond else "Invariato"
+                            
+                            # Calcolo approssimativo rimborso visuale (Totale - Cedole)
+                            rimborso_visual = incasso_reale_user - cedole_tot_user
                             
                             st.markdown(f"""
-                            <div class="receipt-box" style="border-left: 4px solid {color_res}; background-color: rgba(0, 204, 150, 0.05); padding: 15px; border-radius: 8px;">
-                                <div style="font-weight:bold; color:{color_res}; margin-bottom:10px; font-size:14px;">📈 ENTRATE (Futuro - Tasso {tasso_futuro_lbl})</div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Cedole Nette:</span> <span>+{cedole_tot_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row" style="display:flex; justify-content:space-between;"><span>Rimborso Capitale:</span> <span>+{rimborso_user:,.2f} {valuta_user}</span></div>
-                                <div class="receipt-row" style="color:#888; font-size:12px; display:flex; justify-content:space-between;"><span>(Effetto Cambio: {scenario_fx}%)</span> <span></span></div>
-                                <hr style="margin: 10px 0; border-color: #444;">
-                                <div class="receipt-total" style="color: {color_res}; font-size:16px; font-weight:bold; display:flex; justify-content:space-between;">
-                                    <span>TOTALE INCASSO:</span> <span>+{incasso_reale_user:,.2f} {valuta_user}</span>
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            <div class="receipt-box" style="border-left: 4px solid {col_res}; background-color: rgba(0, 204, 150, 0.05); padding: 15px; border-radius: 8px;">
+                                <div style="font-weight:bold; color:{col_res}; margin-bottom:10px;">📈 ENTRATE (Futuro - Tasso {lbl_tasso})</div>
+                                <div class="receipt-row"><span>Cedole Nette:</span><span>+{cedole_tot_user:,.2f} {valuta_user}</span></div>
+                                <div class="receipt-row"><span>Rimborso + Ultima:</span><span>+{rimborso_visual:,.2f} {valuta_user}</span></div>
+                                <div class="receipt-row" style="color:#888;"><span>(Effetto Cambio: {scenario_fx}%)</span></div>
+                                <hr style="margin:10px 0; border-color:#444;">
+                                <div class="receipt-total" style="color:{col_res};">TOTALE INCASSO: +{incasso_reale_user:,.2f} {valuta_user}</div>
+                            </div>""", unsafe_allow_html=True)
 
-                        # VERDETTO FINALE
+                        # VERDETTO
                         st.divider()
                         if guadagno_netto_user > 0:
-                            st.success(f"✅ **GUADAGNO NETTO:** +{guadagno_netto_user:,.2f} {valuta_user}\nRendimento Totale: +{roi_pct_totale:.2f}% | **Rendimento Annuo: +{roi_annuo:.2f}%**")
+                            st.success(f"✅ **PROFITTO:** +{guadagno_netto_user:,.2f} {valuta_user} (Tot: +{roi_pct:.2f}% | **Annuo: +{roi_annuo:.2f}%**)")
                         else:
-                            st.error(f"❌ **PERDITA STIMATA:** {guadagno_netto_user:,.2f} {valuta_user}\nRendimento Totale: {roi_pct_totale:.2f}% | **Rendimento Annuo: {roi_annuo:.2f}%**")
+                            st.error(f"❌ **PERDITA:** {guadagno_netto_user:,.2f} {valuta_user} (Tot: {roi_pct:.2f}% | **Annuo: {roi_annuo:.2f}%**)")
 
-                        # --- GRAFICO BREAKEVEN (UX Gold - Stella e Linee) ---
-                        st.subheader("🗓️ Recupero Capitale nel Tempo")
+                        # --- GRAFICO RECUPERO CAPITALE (PALLINI VUOTI + LINEA GRIGIA) ---
+                        st.subheader("🗓️ Recupero Capitale (Break-Even)")
+                        
                         df_flussi['Cumulativo'] = df_flussi['Importo_User'].cumsum()
                         
-                        df_neg = df_flussi[df_flussi['Cumulativo'] < 0].copy()
-                        df_pos = df_flussi[df_flussi['Cumulativo'] >= 0].copy()
-                        breakeven_date = None
+                        # Colori dinamici per i pallini
+                        colors = ['#FF4B4B' if val < 0 else '#00CC96' for val in df_flussi['Cumulativo']]
                         
-                        if not df_neg.empty and not df_pos.empty:
-                            last_neg = df_neg.iloc[-1]; first_pos = df_pos.iloc[0]
-                            y1, y2 = last_neg['Cumulativo'], first_pos['Cumulativo']
-                            x1, x2 = last_neg['Data'].toordinal(), first_pos['Data'].toordinal()
-                            if y2 != y1:
-                                x_zero = x1 + (0 - y1) * (x2 - x1) / (y2 - y1)
-                                breakeven_date = date.fromordinal(int(x_zero))
-                                row_zero = pd.DataFrame({'Data': [breakeven_date], 'Cumulativo': [0]})
-                                df_neg = pd.concat([df_neg, row_zero], ignore_index=True)
-                                df_pos = pd.concat([row_zero, df_pos], ignore_index=True)
-
-                        if breakeven_date:
-                            days_to_be = (breakeven_date - date.today()).days
-                            st.markdown(f"""<div style="background-color: #e6fffa; padding: 10px; border-radius: 8px; border-left: 5px solid #00CC96; color: #1e2130; margin-bottom:10px;">✅ <b>Pareggio:</b> {breakeven_date.strftime('%d/%m/%Y')} (tra {days_to_be} giorni).</div>""", unsafe_allow_html=True)
-
                         fig = go.Figure()
-                        if not df_neg.empty: fig.add_trace(go.Scatter(x=df_neg['Data'], y=df_neg['Cumulativo'], mode='lines', line=dict(color='#FF4B4B', width=3), name='Sotto Zero'))
-                        if not df_pos.empty: fig.add_trace(go.Scatter(x=df_pos['Data'], y=df_pos['Cumulativo'], mode='lines', line=dict(color='#00CC96', width=3), name='Profitto'))
-                        if breakeven_date: fig.add_trace(go.Scatter(x=[breakeven_date], y=[0], mode='markers', marker=dict(color='yellow', size=12, symbol='star'), name='Pareggio'))
-
-                        fig.add_hline(y=0, line_color='white', line_dash="dash", line_width=1)
-                        fig.update_layout(template="plotly_dark", height=350, margin=dict(l=20,r=20,t=30,b=20), hovermode="x unified", showlegend=False)
-                        st.plotly_chart(fig, use_container_width=True)
                         
-                        # --- CEDOLARIO DETTAGLIATO (UX Gold - Tabella Colorata) ---
-                        st.subheader("📅 Cedolario Dettagliato")
-                        def style_cedola(v): return f'color: {"#00CC96" if v >= 0 else "#FF4B4B"}; font-weight: bold;'
-                        st.dataframe(
-                            df_flussi[['Data', 'Tipo', 'Importo', 'Importo_User', 'Dettagli']]
-                            .style.format({'Importo': f'{{:+,.2f}} {valuta_bond}', 'Importo_User': f'{{:+,.2f}} {valuta_user}'})
-                            .map(style_cedola, subset=['Importo', 'Importo_User']),
-                            use_container_width=True
+                        # 1. Linea Guida (Grigia Trattexgiata)
+                        fig.add_trace(go.Scatter(
+                            x=df_flussi['Data'], 
+                            y=df_flussi['Cumulativo'], 
+                            mode='lines', 
+                            line=dict(color='#666', width=1, dash='dot'), 
+                            name='Percorso'
+                        ))
+                        
+                        # 2. Marker Vuoti (Circle Open)
+                        fig.add_trace(go.Scatter(
+                            x=df_flussi['Data'], 
+                            y=df_flussi['Cumulativo'], 
+                            mode='markers', 
+                            marker=dict(
+                                symbol='circle-open', # Pallino vuoto
+                                size=10, 
+                                color=colors,         # Bordo colorato
+                                line=dict(width=3)    # Spessore bordo
+                            ),
+                            text=df_flussi['Dettagli'], 
+                            hovertemplate="<b>%{text}</b><br>Saldo: %{y:,.2f}<extra></extra>",
+                            name='Flussi'
+                        ))
+                        
+                        fig.add_hline(y=0, line_color='white', line_width=1)
+                        fig.update_layout(
+                            template="plotly_dark", 
+                            height=350, 
+                            showlegend=False, 
+                            margin=dict(l=20,r=20,t=30,b=20),
+                            yaxis_title="Saldo Cumulativo"
                         )
-                    else:
-                        st.warning(f"⚠️ Budget insufficiente. Il taglio minimo è {lotto_min:,.0f} {valuta_bond} (Costo: {costo_100_nominale_user*lotto_min/100:.2f} {valuta_user}).")
+                        st.plotly_chart(fig, use_container_width=True)
 
-                else: st.error("❌ Nessun risultato trovato.")
+                        # TABELLA DETTAGLIATA (CEDOLARIO)
+                        with st.expander("📅 Cedolario Dettagliato"):
+                            def style_cedola(v): return f'color: {"#00CC96" if v >= 0 else "#FF4B4B"}; font-weight: bold;'
+                            st.dataframe(
+                                df_flussi[['Data', 'Tipo', 'Importo', 'Importo_User', 'Dettagli']]
+                                .style.format({'Importo': f'{{:+,.2f}} {valuta_bond}', 'Importo_User': f'{{:+,.2f}} {valuta_user}'})
+                                .map(style_cedola, subset=['Importo', 'Importo_User']),
+                                use_container_width=True
+                            )
+
+                    else: st.warning(f"⚠️ Budget insufficiente. Il taglio minimo è {lotto:,.0f} {valuta_bond}.")
+                        # ---------------------------------------------
     # --- SCREENER AVANZATO (FILTRI VALUTA + CONVERSIONE PREZZI) ---
 # --- SCREENER (LOGICA DIRETTA: DAL TUO PORTAFOGLIO AL MERCATO) ---
     elif st.session_state.page == "Screener":
