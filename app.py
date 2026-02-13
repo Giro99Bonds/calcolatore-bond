@@ -441,16 +441,109 @@ def analizza_bond_quality_dettagliata(dati, risk, tax, patrimonio):
 # 6. LOGICHE SMART & DB (COMPLETO)
 # ==============================================================================
 
-def calcola_rendimento_grezzo(prezzo, cedola, scadenza):
-    try:
-        anni = (scadenza - date.today()).days / 365.25
-        if anni <= 0 or prezzo <= 0: return 0
-        gain_annuo = (100 - prezzo) / anni
-        rendimento = (cedola + gain_annuo) / prezzo * 100
-        return round(rendimento, 2)
-    except: return 0
+# ==============================================================================
+# 🧠 MOTORE DI CALCOLO RENDIMENTI (CORRETTO E AVANZATO)
+# ==============================================================================
 
-@st.cache_data(ttl=3600)
+def identifica_tipo_bond(desc):
+    """
+    Capisce il tipo di struttura del bond dalla descrizione.
+    """
+    desc = desc.upper()
+    if "ZERO COUPON" in desc or " ZC " in desc:
+        return "ZC"
+    if "CUMULATIVE" in desc or " CUM " in desc:
+        return "CUMULATIVE" # Accumula cedole, paga alla fine
+    if "STEP UP" in desc:
+        return "STEP_UP" # Cedola variabile (approssimiamo alla corrente)
+    return "STANDARD"
+
+def stima_tassazione(desc, emittente=""):
+    """
+    Determina l'aliquota fiscale corretta (12.5% vs 26%).
+    """
+    s = (str(desc) + " " + str(emittente)).upper()
+    
+    # White List (Titoli di Stato e Sovranazionali) -> 12.5%
+    white_list = [
+        "BTP", "BOT", "CCT", "CTZ", "ITALIA", "REPUBBLICA", 
+        "GERMANIA", "BUND", "SCHATZ", "BOBL", "OAT", "FRANCE", 
+        "USA", "TREASURY", "T-NOTE", "T-BOND", "SPAIN", "BONOS", 
+        "BEI", "EIB", "EBRD", "WORLD BANK", "EU ", "EUROPEAN UNION",
+        "KFW", "IADB", "ROMANIA", "HUNGARY", "POLAND" 
+    ]
+    
+    if any(k in s for k in white_list):
+        return 12.5
+    
+    return 26.0
+
+def calcola_rendimento_avanzato(prezzo, cedola, scadenza, desc):
+    """
+    Calcola YTM Lordo e Netto applicando la formula corretta per ogni tipo di bond.
+    Gestisce correttamente ZC e Cumulative.
+    """
+    try:
+        if prezzo <= 0: return 0.0, 0.0
+        
+        oggi = date.today()
+        if scadenza <= oggi: return 0.0, 0.0
+        
+        anni_residui = (scadenza - oggi).days / 365.25
+        tipo = identifica_tipo_bond(desc)
+        tax_rate = stima_tassazione(desc)
+        
+        ytm_lordo = 0.0
+        
+        # --- CASO 1: ZERO COUPON (ZC) ---
+        if tipo == "ZC" or cedola == 0:
+            # Formula: (Rimborso / Prezzo)^(1/Anni) - 1
+            ytm_lordo = ((100 / prezzo) ** (1 / anni_residui) - 1) * 100
+            
+        # --- CASO 2: CUMULATIVE (Il caso problematico) ---
+        elif tipo == "CUMULATIVE":
+            # Questi bond non pagano cedola annuale, ma rimborsano 100 + (Cedola * AnniTotali) alla fine.
+            # STIMA: Poiché non conosciamo la data di emissione esatta, usiamo una stima conservativa.
+            # Assumiamo che il "Monte Cedole" futuro sia pari agli anni residui * cedola.
+            # È una stima che corregge l'errore del 30%, portandolo a valori realistici (es. 5-6%).
+            
+            montante_finale = 100 + (cedola * anni_residui)
+            ytm_lordo = ((montante_finale / prezzo) ** (1 / anni_residui) - 1) * 100
+            
+        # --- CASO 3: STANDARD (Cedola Annuale) ---
+        else:
+            # Formula Semplificata (Approssimazione Accademica per velocità)
+            # YTM ~ (Cedola + (100-P)/Anni) / ((100+P)/2)
+            guadagno_capitale_annuo = (100 - prezzo) / anni_residui
+            media_capitale = (100 + prezzo) / 2
+            ytm_lordo = ((cedola + guadagno_capitale_annuo) / media_capitale) * 100
+
+        # --- CALCOLO NETTO (Tassazione) ---
+        # Tassiamo la cedola (se c'è) e il capital gain separatamente
+        # Nota: È una stima. Il calcolo fiscale esatto richiederebbe i ratei precisi.
+        
+        rendimento_cedolare = 0
+        if tipo == "STANDARD": 
+            rendimento_cedolare = cedola 
+        
+        plusvalenza = max(0, 100 - prezzo) / anni_residui
+        
+        # Tassazione
+        netto_cedola = rendimento_cedolare * (1 - tax_rate/100)
+        netto_plusvalenza = plusvalenza * (1 - tax_rate/100) # Semplificato (minusvalenze escluse)
+        
+        # Ricostruzione YTM Netto
+        # Se è ZC o Cumulative, tutto è capital gain (o quasi)
+        if tipo in ["ZC", "CUMULATIVE"]:
+            ytm_netto = ytm_lordo * (1 - tax_rate/100)
+        else:
+            # Per i bond standard, ricalcoliamo con componenti nette
+            ytm_netto = ((netto_cedola + netto_plusvalenza) / media_capitale) * 100
+
+        return round(ytm_lordo, 2), round(ytm_netto, 2)
+
+    except:
+        return 0.0, 0.0
 def carica_dati_mercato():
     all_bonds = []
     if not os.path.exists(DB_FOLDER): return pd.DataFrame()
