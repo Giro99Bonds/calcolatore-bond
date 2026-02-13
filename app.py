@@ -819,178 +819,151 @@ def get_tasso_cambio_live(da, a):
 # -----------------------------------------------------------------------------
 
 # 1. BOND SCREENER INTELLIGENTE
-# 1. BOND SCREENER INTELLIGENTE (MULTI-VALUTA)
 def bond_screener_ui():
     """
-    Screener Professionale con UX migliorata, Info Box e Tabella avanzata.
+    Screener Professionale con 'Breakdown' del rendimento.
+    Mostra esplicitamente: YTM Locale - Costo Svalutazione = YTM Reale.
     """
-    st.title("🎯 Bond Screener & Ranking Reale")
-    st.caption("Analisi comparativa dei rendimenti obbligazionari rettificati per il rischio cambio (Interest Rate Parity).")
+    st.title("🎯 Screener & Ranking Globale")
+    st.caption("Confronta i rendimenti di tutto il mondo portandoli alla TUA valuta base.")
     
-    # --- A. MOTORE DATI TASSI (AGGIORNATI) ---
+    # --- A. DATI DI MERCATO (TASSI 10Y AGGIORNATI) ---
     @st.cache_data(ttl=3600)
-    def get_market_rates():
-        # Benchmark aggiornati (Proxy Yields 10Y)
+    def get_rates_data():
+        # Rendimenti Governativi 10Y (Proxy del Risk Free / Costo Denaro)
         rates = {
             "EUR": 2.77, "USD": 4.12, "GBP": 4.46, "CHF": 0.80,
             "TRY": 28.00, "BRL": 13.60, "ZAR": 9.80, "MXN": 9.50,
             "RON": 6.80, "HUF": 6.50, "JPY": 2.20, "AUD": 4.75
         }
-        status = {k: "🟠 STIMA" for k in rates}
-        
-        # Live fetch per USD (Driver Globale)
+        # Tentativo Live su USD
         try:
             data = yf.Ticker("^TNX").history(period="1d")
-            if not data.empty:
-                rates["USD"] = float(data['Close'].iloc[-1])
-                status["USD"] = "🟢 LIVE"
+            if not data.empty: rates["USD"] = float(data['Close'].iloc[-1])
         except: pass
-        return rates, status
+        return rates
 
     # Caricamento
-    with st.spinner("Inizializzazione Environment..."):
+    with st.spinner("Analisi differenziale tassi..."):
         df_market = carica_dati_mercato()
-        if df_market.empty: st.error("❌ Database offline."); return
-        
+        if df_market.empty: st.error("Database vuoto."); return
         if 'Valuta' not in df_market.columns:
             df_market['Valuta'] = df_market.apply(lambda x: detect_valuta(x.get('Desc', ''), x.get('ISIN', '')), axis=1)
-
-        market_rates, rate_status = get_market_rates()
+        market_rates = get_rates_data()
 
     st.divider()
     
-    # --- B. CONFIGURAZIONE PORTAFOGLIO ---
+    # --- B. CONFIGURAZIONE UTENTE ---
     c1, c2 = st.columns(2)
     with c1:
-        valuta_wallet = st.selectbox("Valuta di Riferimento (Portafoglio)", ["EUR", "USD"], index=0)
+        # 1. CHI SEI?
+        valuta_wallet = st.selectbox("1️⃣ La tua Valuta Base (Portafoglio)", ["EUR", "USD"], index=0)
     with c2:
-        # UX MIGLIORATA: Terminologia professionale
+        # 2. COSA CERCHI?
         mode = st.radio(
-            "Perimetro di Analisi", 
-            ["🔒 Valuta Portafoglio (Rischio Cambio Nullo)", "🌍 Globale (Hedged / Cross-Currency)"],
-            index=1,
-            help="Scegli 'Globale' per confrontare titoli esteri convertendo il loro rendimento nella tua valuta."
+            "2️⃣ Perimetro Analisi", 
+            ["🔒 Solo Mercato Locale (Nessun rischio cambio)", "🌍 Mercato Globale (Confronto Totale)"],
+            index=1
         )
 
-    # --- C. PANNELLO TASSI (UX MIGLIORATA) ---
+    # --- C. CALCOLO TRASPARENTE ---
     RISK_FREE_RATES = market_rates.copy()
     
+    # Se l'utente vuole, può modificare i tassi "motore"
     if "Globale" in mode:
-        with st.expander("⚙️ Parametri Tassi & Copertura (Avanzato)", expanded=False):
-            # INFO BOX ESPLICATIVO
-            st.info("""
-            **ℹ️ Guida ai Tassi di Riferimento**
-            
-            Questi valori rappresentano il **Rendimento 'Risk-Free' (es. Titoli di Stato 10Y)** per ogni valuta.
-            Il sistema li usa per calcolare il *Costo della Copertura Valutaria*:
-            
-            * **Logica:** Se investi in una valuta con tassi alti (es. TRY 30%), il mercato sconta una svalutazione pari alla differenza con i tassi bassi (es. EUR 3%).
-            * **Quando modificarli:** I valori arancioni (🟠) sono stime. Se la Banca Centrale di un paese modifica i tassi oggi, aggiorna il valore manualmente qui sotto per ricalcolare immediatamente il **Fair Value**.
-            """)
-            
-            cols = st.columns(4)
+        with st.expander("⚙️ Parametri di Conversione (Tassi Risk Free)", expanded=False):
+            st.info("Il sistema usa questi tassi per calcolare la svalutazione attesa. Esempio: Se TRY=28% e EUR=3%, ci aspettiamo che la Lira perda il 25% annuo contro l'Euro.")
+            cols = st.columns(6)
             for i, curr in enumerate(RISK_FREE_RATES.keys()):
-                with cols[i % 4]:
-                    stat = rate_status.get(curr, "🟠")
-                    RISK_FREE_RATES[curr] = st.number_input(
-                        f"Yield {curr} {stat}", 
-                        value=float(RISK_FREE_RATES[curr]), 
-                        step=0.10, format="%.2f",
-                        help=f"Tasso di rendimento sicuro a 10 anni per {curr}"
-                    )
+                with cols[i%6]:
+                    RISK_FREE_RATES[curr] = st.number_input(f"{curr}%", value=float(RISK_FREE_RATES[curr]), format="%.1f")
 
+    # Logica Core
     tasso_base = RISK_FREE_RATES.get(valuta_wallet, 3.0)
-
-    # --- D. CALCOLI FINANZIARI ---
     df_work = df_market.copy()
     
+    # Prezzo Spot
     tassi_spot = {v: (1.0 if v == valuta_wallet else get_tasso_cambio_live(valuta_wallet, v)) for v in df_work['Valuta'].unique()}
     df_work['FX_Rate'] = df_work['Valuta'].map(tassi_spot).fillna(1.0)
     df_work['Prezzo_Wallet'] = df_work.apply(lambda x: x['Prezzo']/x['FX_Rate'] if x['FX_Rate']>0 else x['Prezzo'], axis=1)
 
-    def converti_ytm(row):
-        if row['Valuta'] == valuta_wallet: return row['YTM_Grezzo']
-        rf_locale = RISK_FREE_RATES.get(row['Valuta'], 5.0)
-        costo_copertura = rf_locale - tasso_base 
-        return row['YTM_Grezzo'] - costo_copertura
-
-    df_work['YTM_Converted'] = df_work.apply(converti_ytm, axis=1)
-
-    if "Valuta Portafoglio" in mode: df_work = df_work[df_work['Valuta'] == valuta_wallet]
-
-    # --- E. FILTRI ---
-    st.divider()
-    st.subheader("🔎 Filtri di Selezione")
-    
-    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-    with col_f1: y_min = st.number_input("Rendimento Netto Min (%)", -5.0, step=0.5, value=0.0)
-    with col_f2: y_max = st.number_input("Rendimento Netto Max (%)", 15.0, step=0.5)
-    with col_f3: p_max = st.number_input(f"Prezzo Max ({valuta_wallet})", 130.0)
-    with col_f4: 
-        cats_avail = sorted(df_work['Categoria'].unique().tolist()) if not df_work.empty else []
-        sel_cat = st.multiselect("Categoria", cats_avail, placeholder="Tutte")
-
-    # --- F. RISULTATI (TABELLA PRO) ---
-    st.write("")
-    if st.button("🚀 Esegui Analisi", type="primary", use_container_width=True):
+    # === IL CUORE DELLA TRASPARENZA ===
+    def analizza_rendimento(row):
+        valuta_bond = row['Valuta']
+        ytm_locale = row['YTM_Grezzo'] # Es. 30%
         
-        # Filtro Categorie
-        if sel_cat: df_work = df_work[df_work['Categoria'].isin(sel_cat)]
+        if valuta_bond == valuta_wallet:
+            return pd.Series([ytm_locale, 0.0, ytm_locale])
+        
+        # Tasso Risk Free Locale
+        rf_locale = RISK_FREE_RATES.get(valuta_bond, 5.0)
+        
+        # Costo Copertura / Svalutazione Implicita
+        # Se Turchia rende 28% risk free e USA 4%, il mercato prezza una svalutazione del 24%
+        costo_svalutazione = rf_locale - tasso_base
+        
+        # YTM Netto Stimato
+        ytm_convertito = ytm_locale - costo_svalutazione
+        
+        return pd.Series([ytm_locale, costo_svalutazione, ytm_convertito])
 
-        res = df_work[
-            (df_work['YTM_Converted'] >= y_min) & 
-            (df_work['YTM_Converted'] <= y_max) &
-            (df_work['Prezzo_Wallet'] <= p_max)
-        ].sort_values('YTM_Converted', ascending=False)
+    # Creiamo 3 colonne esplicite
+    df_work[['YTM_L', 'Cost_FX', 'YTM_Net']] = df_work.apply(analizza_rendimento, axis=1)
 
-        if res.empty: st.warning("Nessun risultato soddisfa i criteri.")
+    if "Solo Mercato" in mode: df_work = df_work[df_work['Valuta'] == valuta_wallet]
+
+    # --- D. TABELLA RISULTATI ---
+    st.divider()
+    st.subheader("📊 Classifica Migliori Opportunità")
+    
+    # Filtri veloci
+    c_f1, c_f2 = st.columns([1, 3])
+    with c_f1:
+        sort_by = st.selectbox("Ordina per:", ["Rendimento Netto (Consigliato)", "Rendimento Nominale (Alto Rischio)"])
+    with c_f2:
+        st.caption("💡 **Legenda:** `YTM Locale` (Rendimento nella valuta originale) - `Costo FX` (Svalutazione attesa) = `YTM Netto` (Quello che ti rimane in tasca).")
+
+    # Azione
+    if st.button("🔄 Aggiorna Classifica", use_container_width=True):
+        
+        # Ordinamento
+        if "Netto" in sort_by:
+            res = df_work.sort_values('YTM_Net', ascending=False)
         else:
-            st.success(f"Analisi completata: **{len(res)}** opportunità individuate.")
+            res = df_work.sort_values('YTM_L', ascending=False)
             
-            # CONFIGURAZIONE TABELLA AVANZATA
-            st.dataframe(
-                res[['Desc', 'Valuta', 'Prezzo_Wallet', 'YTM_Grezzo', 'YTM_Converted', 'Anni', 'ISIN']].head(100),
-                use_container_width=True,
-                height=600,
-                column_config={
-                    "Desc": st.column_config.TextColumn(
-                        "Descrizione Titolo", 
-                        width="medium",
-                        help="Nome dell'emittente e dettagli"
-                    ),
-                    "Valuta": st.column_config.TextColumn(
-                        "Divisa", 
-                        width="small"
-                    ),
-                    "Prezzo_Wallet": st.column_config.NumberColumn(
-                        f"Prezzo ({valuta_wallet})",
-                        format="%.2f",
-                        help=f"Prezzo convertito nella tua valuta ({valuta_wallet})"
-                    ),
-                    "YTM_Grezzo": st.column_config.NumberColumn(
-                        "YTM Nominale",
-                        format="%.2f%%",
-                        help="Rendimento nella valuta originale (non rettificato)"
-                    ),
-                    "YTM_Converted": st.column_config.NumberColumn(
-                        "✅ YTM Reale (Hedged)",
-                        format="%.2f%%",
-                        help="Rendimento stimato al netto del costo di copertura valutaria."
-                    ),
-                    "Anni": st.column_config.ProgressColumn(
-                        "Duration (Anni)",
-                        format="%.1f y",
-                        min_value=0,
-                        max_value=30,
-                        help="Tempo alla scadenza"
-                    ),
-                    "ISIN": st.column_config.TextColumn("Codice ISIN")
-                },
-                hide_index=True
-            )
-            
-            csv = res.to_csv(index=False).encode('utf-8')
-            st.download_button("💾 Esporta Dati (CSV)", csv, "ranking_pro.csv", "text/csv")
+        # Visualizzazione Tabella "Glass Box"
+        st.dataframe(
+            res[['Desc', 'Valuta', 'Prezzo_Wallet', 'YTM_L', 'Cost_FX', 'YTM_Net', 'Anni', 'ISIN']].head(100),
+            use_container_width=True,
+            height=700,
+            column_config={
+                "Desc": st.column_config.TextColumn("Titolo", width="medium"),
+                "Valuta": st.column_config.TextColumn("Val", width="small"),
+                "Prezzo_Wallet": st.column_config.NumberColumn(f"Prezzo {valuta_wallet}", format="%.2f"),
+                
+                # LE TRE COLONNE DELLA VERITÀ
+                "YTM_L": st.column_config.NumberColumn(
+                    "1. Rend. Locale", 
+                    format="%.2f%%", 
+                    help="Rendimento facciale nella valuta originale (es. TRY)."
+                ),
+                "Cost_FX": st.column_config.NumberColumn(
+                    "2. Costo Cambio", 
+                    format="-%.2f%%", 
+                    help="Quanto rendimento perdi a causa della svalutazione attesa (Differenziale Tassi)."
+                ),
+                "YTM_Net": st.column_config.NumberColumn(
+                    "3. Rend. Netto", 
+                    format="%.2f%%", 
+                    help="Risultato finale stimato: 1 - 2 = 3"
+                ),
+                
+                "Anni": st.column_config.NumberColumn("Scad.", format="%.1f y"),
+                "ISIN": "ISIN"
+            },
+            hide_index=True
+        )
 # 2. DASHBOARD MERCATO
 def dashboard_mercato_ui():
     """Dashboard con vista mercato completa"""
