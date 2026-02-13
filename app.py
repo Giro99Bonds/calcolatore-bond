@@ -821,148 +821,143 @@ def get_tasso_cambio_live(da, a):
 # 1. BOND SCREENER INTELLIGENTE
 def bond_screener_ui():
     """
-    Screener UX 5.0:
-    - Spiegazione chiara per l'utente (Info Box).
-    - Ranking pulito: Ordina per rendimento REALE (Turchia finisce in fondo).
-    - Tabella professionale e leggibile.
+    Screener UX 6.0 (Future-Proof):
+    - Tassi USD Live.
+    - Pannello Parametri modificabile dall'utente (per aggiornare i tassi futuri).
+    - Classifica Ranking Reale.
     """
-    st.title("🌐 Classifica Rendimenti Reali (Global)")
+    st.title("🌐 Global Fixed Income Ranking")
+    st.caption("Analisi comparativa dei rendimenti reali. Il sistema stima il costo di copertura valutaria.")
     
-    # BOX SPIEGAZIONE SEMPLICE (Per far capire cosa fa il tool)
-    st.info("""
-    **💡 Come funziona questa classifica?**
-    
-    Molti bond esteri (es. Turchia, Brasile) offrono cedole altissime (20-30%), ma comportano un alto rischio di svalutazione della moneta.
-    
-    Questo tool **converte automaticamente** tutti i rendimenti nella tua valuta (es. Euro), sottraendo il costo stimato del rischio cambio.
-    * **Risultato:** Vedrai in cima alla classifica i titoli che ti fanno guadagnare davvero, non quelli con numeri "finti" gonfiati dall'inflazione.
-    """)
-    
-    # --- 1. MOTORE DATI NASCOSTO (Auto-Configurato) ---
-    @st.cache_data(ttl=3600)
-    def get_auto_rates():
-        # Tassi Benchmark (Feb 2026) - Usati per calcolare la svalutazione
-        rates = {
-            "EUR": 2.77, "USD": 4.12, "GBP": 4.46, "CHF": 0.80, "JPY": 0.85,
-            "CAD": 3.50, "AUD": 4.20, "TRY": 28.00, "BRL": 13.60, "ZAR": 9.80, 
-            "MXN": 9.50, "RON": 6.80, "HUF": 6.50
-        }
-        try: # Aggiornamento Live USD
-            data = yf.Ticker("^TNX").history(period="1d")
-            if not data.empty: rates["USD"] = float(data['Close'].iloc[-1])
-        except: pass
-        return rates
+    # --- 1. MOTORE DATI BASE (DEFAULTS) ---
+    # Questi sono i valori di "partenza". L'utente potrà modificarli nel pannello.
+    defaults = {
+        "EUR": 2.50, "USD": 4.00, "GBP": 4.25, "CHF": 0.75, "JPY": 0.90,
+        "CAD": 3.20, "AUD": 4.10, "TRY": 28.00, "BRL": 12.00, "ZAR": 9.50, 
+        "MXN": 9.00, "RON": 6.50, "HUF": 6.00
+    }
 
-    with st.spinner("Calcolo conversioni e svalutazioni..."):
+    # Caricamento Dati Mercato
+    with st.spinner("Caricamento database..."):
         df_market = carica_dati_mercato()
         if df_market.empty: st.error("Database offline."); return
         if 'Valuta' not in df_market.columns:
             df_market['Valuta'] = df_market.apply(lambda x: detect_valuta(x.get('Desc', ''), x.get('ISIN', '')), axis=1)
-        RISK_FREE_RATES = get_auto_rates()
 
     st.divider()
 
-    # --- 2. CONFIGURAZIONE SEMPLICE ---
+    # --- 2. CONFIGURAZIONE & PARAMETRI ---
     c_wal, c_scope = st.columns(2)
     with c_wal:
-        valuta_wallet = st.selectbox("1️⃣ La tua Valuta (Portafoglio)", ["EUR", "USD"], index=0)
+        valuta_wallet = st.selectbox("1️⃣ Valuta Portafoglio", ["EUR", "USD"], index=0)
     
     with c_scope:
         scope = st.radio(
-            "2️⃣ Dove cercare?", 
-            [f"🔒 Solo Mercato Locale ({valuta_wallet})", "🌍 Tutto il Mondo (Convertito)"],
-            index=1 # Default su Globale
+            "2️⃣ Universo Investibile", 
+            [f"🔒 Mercato Locale ({valuta_wallet})", "🌍 Mercato Globale (Hedged)"],
+            index=1
         )
 
-    # --- 3. MOTORE MATEMATICO (Il "Filtro Anti-Turchia") ---
+    # --- 3. PANNELLO TASSI (IL CUORE DEL SISTEMA) ---
+    # Qui gestiamo il problema "Tra 5 mesi".
+    RISK_FREE_RATES = defaults.copy()
+    
+    # Aggiornamento Live USD (Se possibile)
+    try:
+        usd_live = yf.Ticker("^TNX").history(period="1d")
+        if not usd_live.empty: RISK_FREE_RATES["USD"] = float(usd_live['Close'].iloc[-1])
+    except: pass
+
+    # Se siamo in Global Mode, diamo all'utente il potere di aggiornare
+    if "Mercato Globale" in scope:
+        with st.expander("⚙️ Parametri di Mercato (Tassi Risk Free) - Clicca per aggiornare", expanded=False):
+            st.info("I valori qui sotto sono i rendimenti 'Risk Free' (10Y) usati per calcolare la svalutazione. Se i tassi di mercato sono cambiati, aggiornali qui.")
+            
+            # Creiamo una griglia di input
+            cols = st.columns(5)
+            # Mettiamo USD ed EUR per primi
+            priority_keys = ["EUR", "USD", "TRY", "BRL", "ZAR"]
+            other_keys = [k for k in RISK_FREE_RATES.keys() if k not in priority_keys]
+            
+            idx = 0
+            for key in priority_keys + other_keys:
+                with cols[idx % 5]:
+                    val_live = RISK_FREE_RATES.get(key, 0.0)
+                    # L'utente può modificare questo numero!
+                    RISK_FREE_RATES[key] = st.number_input(
+                        f"{key} (%)", 
+                        value=float(val_live), 
+                        step=0.25, 
+                        format="%.2f",
+                        key=f"rate_{key}" # Key univoca per streamli
+                    )
+                idx += 1
+
+    # --- 4. MOTORE DI CALCOLO ---
     tasso_base = RISK_FREE_RATES.get(valuta_wallet, 3.0)
     df_work = df_market.copy()
     
-    # Conversione Prezzo
+    # Prezzo Spot
     tassi_spot = {v: (1.0 if v == valuta_wallet else get_tasso_cambio_live(valuta_wallet, v)) for v in df_work['Valuta'].unique()}
     df_work['FX_Rate'] = df_work['Valuta'].map(tassi_spot).fillna(1.0)
     df_work['Prezzo_Wallet'] = df_work.apply(lambda x: x['Prezzo']/x['FX_Rate'] if x['FX_Rate']>0 else x['Prezzo'], axis=1)
 
-    # Conversione Rendimento (Hedged Yield)
+    # Rendimento Reale
     def calcola_rendimento_reale(row):
-        # Se è la stessa valuta, il rendimento è quello che vedi
         if row['Valuta'] == valuta_wallet: return row['YTM_Grezzo']
-        
-        # Se è valuta estera, togliamo il differenziale tassi (Svalutazione attesa)
+        # Qui usiamo il tasso che l'utente ha eventualmente aggiornato nel pannello!
         rf_locale = RISK_FREE_RATES.get(row['Valuta'], 5.0)
-        costo_cambio = rf_locale - tasso_base
-        
-        # Esempio Turchia: 30% (Nominale) - 25% (Costo Cambio) = 5% (Reale)
-        return row['YTM_Grezzo'] - costo_cambio
+        return row['YTM_Grezzo'] - (rf_locale - tasso_base)
 
     df_work['YTM_Reale'] = df_work.apply(calcola_rendimento_reale, axis=1)
     
-    # Filtro Scope
     if "Mercato Locale" in scope: df_work = df_work[df_work['Valuta'] == valuta_wallet]
 
     st.divider()
 
-    # --- 4. FILTRI UTENTE ---
-    st.subheader("🔍 Filtri Ricerca")
-    
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        # Nota: Filtriamo sul Rendimento REALE!
-        min_y = st.number_input(f"Rendimento {valuta_wallet} Min (%)", value=2.5, step=0.5)
-    with c2:
-        max_p = st.number_input(f"Prezzo Max ({valuta_wallet})", value=115.0, step=1.0)
-    with c3:
-        sel_cat = st.multiselect("Categoria", ["🌐 TUTTE"] + sorted(df_work['Categoria'].unique().tolist()), default=["🌐 TUTTE"])
+    # --- 5. FILTRI (Minimal) ---
+    st.subheader("🛠️ Filtri")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: min_y = st.number_input(f"Yield {valuta_wallet} Min (%)", value=2.0, step=0.5)
+    with c2: max_p = st.number_input(f"Prezzo Max ({valuta_wallet})", value=120.0, step=1.0)
+    with c3: min_d = st.number_input("Anni Min", value=0.0, step=1.0)
+    with c4: max_d = st.number_input("Anni Max", value=30.0, step=1.0)
 
-    # --- 5. CLASSIFICA PULITA ---
+    cats = ["🌐 TUTTE"] + sorted(df_work['Categoria'].unique().tolist())
+    sel_cat = st.multiselect("Settore", cats, default=["🌐 TUTTE"])
+
+    # --- 6. OUTPUT ---
     st.write("")
-    if st.button("🚀 TROVA I MIGLIORI", type="primary", use_container_width=True):
+    if st.button("🚀 TROVA OPPORTUNITÀ", type="primary", use_container_width=True):
         
-        # Filtra
         res = df_work[
             (df_work['YTM_Reale'] >= min_y) & 
+            (df_work['Anni'] >= min_d) &
+            (df_work['Anni'] <= max_d) &
             (df_work['Prezzo_Wallet'] <= max_p)
         ]
-        if sel_cat and "🌐 TUTTE" not in sel_cat:
-            res = res[res['Categoria'].isin(sel_cat)]
+        if sel_cat and "🌐 TUTTE" not in sel_cat: res = res[res['Categoria'].isin(sel_cat)]
         
-        # ORDINA PER RENDIMENTO REALE (Anti-Turchia)
-        # Questo comando mette in cima i bond che rendono di più in EURO, non in Lire Turche.
+        # Ordina per Rendimento Reale
         res = res.sort_values('YTM_Reale', ascending=False)
 
         if res.empty: 
-            st.warning("Nessun bond trovato.")
+            st.warning("Nessun risultato.")
         else:
-            st.success(f"Ecco i Top **{len(res)}** bond ordinati per rendimento reale in {valuta_wallet}.")
+            st.success(f"Trovati **{len(res)}** titoli.")
             
             st.dataframe(
                 res[['Desc', 'Valuta', 'Prezzo_Wallet', 'YTM_Reale', 'YTM_Grezzo', 'Anni', 'ISIN']].head(100),
                 use_container_width=True,
-                height=650,
+                height=600,
                 column_config={
                     "Desc": st.column_config.TextColumn("Titolo", width="medium"),
-                    "Valuta": st.column_config.TextColumn("Divisa", width="small"),
-                    
-                    "Prezzo_Wallet": st.column_config.NumberColumn(
-                        f"Prezzo {valuta_wallet}", format="%.2f",
-                        help=f"Prezzo convertito al cambio di oggi."
-                    ),
-                    
-                    # QUESTA È LA COLONNA CHE COMANDA
-                    "YTM_Reale": st.column_config.NumberColumn(
-                        f"✅ Yield {valuta_wallet}", 
-                        format="%.2f%%",
-                        help=f"Rendimento netto stimato. Il bond Turco scende in classifica perché scontiamo la svalutazione."
-                    ),
-                    
-                    "YTM_Grezzo": st.column_config.NumberColumn(
-                        "Yield Locale", 
-                        format="%.2f%%",
-                        help="Rendimento facciale (es. 30% TRY). Attenzione: non include il rischio cambio."
-                    ),
-                    
-                    "Anni": st.column_config.ProgressColumn("Durata", format="%.1f a", min_value=0, max_value=30),
-                    "ISIN": st.column_config.TextColumn("ISIN", width="small")
+                    "Valuta": st.column_config.TextColumn("Ccy", width="small"),
+                    "Prezzo_Wallet": st.column_config.NumberColumn(f"Prezzo {valuta_wallet}", format="%.2f"),
+                    "YTM_Reale": st.column_config.NumberColumn("✅ Yield Reale", format="%.2f%%", help="Rendimento al netto del rischio cambio."),
+                    "YTM_Grezzo": st.column_config.NumberColumn("Yield Nominale", format="%.2f%%"),
+                    "Anni": st.column_config.ProgressColumn("Duration", format="%.1f y", min_value=0, max_value=30),
+                    "ISIN": "ISIN"
                 },
                 hide_index=True
             )
@@ -970,106 +965,12 @@ def bond_screener_ui():
             # Link Scanner
             st.divider()
             c_i, c_b = st.columns([3, 1])
-            with c_i: isin_chk = st.text_input("ISIN", placeholder="Copia ISIN per analisi...", label_visibility="collapsed")
+            with c_i: isin_chk = st.text_input("ISIN", placeholder="Copia ISIN...", label_visibility="collapsed")
             with c_b: 
                 if st.button("Analizza ➡️", use_container_width=True) and isin_chk:
                     st.session_state.selected_isin_from_chart = isin_chk
                     st.session_state.page = "Scanner"
                     st.rerun()
-# 2. DASHBOARD MERCATO
-def dashboard_mercato_ui():
-    """Dashboard con vista mercato completa"""
-    st.title("📊 Dashboard Mercato Bond")
-    st.caption("Vista d'insieme del mercato obbligazionario oggi")
-    
-    with st.spinner("Caricamento dati mercato..."):
-        df = carica_dati_mercato()
-        if df.empty:
-            st.error("❌ Database vuoto.")
-            return
-    
-    # === KPI GLOBALI ===
-    st.subheader("📈 Statistiche Mercato")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Bond Disponibili", len(df))
-    col2.metric("YTM Medio", f"{df['YTM_Grezzo'].mean():.2f}%")
-    col3.metric("Prezzo Medio", f"{df['Prezzo'].mean():.2f}€")
-    col4.metric("Scadenza Media", f"{df['Anni'].mean():.1f} anni")
-    
-    st.divider()
-    
-    # === TOP 10 RENDIMENTI ===
-    st.subheader("🏆 Top 10 Rendimenti (YTM Lordo)")
-    
-    top10 = df.nlargest(10, 'YTM_Grezzo')
-    col_tab, col_chart = st.columns([1, 1])
-    with col_tab:
-        st.dataframe(
-            top10[['ISIN', 'Desc', 'YTM_Grezzo', 'Prezzo']].style.format({
-                'YTM_Grezzo': '{:.2f}%',
-                'Prezzo': '{:.2f}€'
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
-    with col_chart:
-        fig_top = px.bar(
-            top10,
-            x='YTM_Grezzo',
-            y='Desc',
-            orientation='h',
-            color='YTM_Grezzo',
-            color_continuous_scale='RdYlGn'
-        )
-        fig_top.update_layout(showlegend=False, height=400)
-        st.plotly_chart(fig_top, use_container_width=True)
-    
-    st.divider()
-    
-    # === RENDIMENTI PER CATEGORIA ===
-    st.subheader("📊 Rendimenti per Categoria")
-    
-    df_cat = df.groupby('Categoria').agg({
-        'YTM_Grezzo': 'mean',
-        'ISIN': 'count'
-    }).reset_index()
-    df_cat.columns = ['Categoria', 'YTM Medio', 'Numero Bond']
-    
-    fig_cat = px.bar(
-        df_cat,
-        x='Categoria',
-        y='YTM Medio',
-        text='YTM Medio',
-        color='YTM Medio',
-        color_continuous_scale='Viridis'
-    )
-    fig_cat.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
-    st.plotly_chart(fig_cat, use_container_width=True)
-    
-    st.divider()
-    
-    # === HEATMAP SCADENZA vs RENDIMENTO ===
-    st.subheader("🔥 Heatmap: Scadenza vs Rendimento")
-    
-    # Crea bucket
-    df['Bucket_Scadenza'] = pd.cut(df['Anni'], bins=[0, 2, 5, 10, 15, 30], labels=['0-2y', '2-5y', '5-10y', '10-15y', '15-30y'])
-    
-    pivot = df.pivot_table(
-        values='YTM_Grezzo',
-        index='Categoria',
-        columns='Bucket_Scadenza',
-        aggfunc='mean'
-    ).fillna(0)
-    
-    fig_heat = px.imshow(
-        pivot,
-        text_auto='.2f',
-        color_continuous_scale='RdYlGn',
-        labels={'color': 'YTM %'}
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
-
 # 3. CALCOLATORE DIVERSIFICAZIONE
 def diversificazione_portfolio_ui():
     """Calcolatore diversificazione automatica"""
