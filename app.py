@@ -971,6 +971,127 @@ def bond_screener_ui():
                     st.session_state.selected_isin_from_chart = isin_chk
                     st.session_state.page = "Scanner"
                     st.rerun()
+# ==============================================================================
+# DASHBOARD MERCATO (RIPRISTINATA)
+# ==============================================================================
+def dashboard_mercato_ui():
+    """
+    Dashboard con vista macro sul mercato obbligazionario (KPI, Top 10, Heatmap).
+    """
+    st.title("📊 Dashboard Mercato")
+    st.caption("Panoramica dei rendimenti nominali e delle opportunità attuali.")
+
+    # Caricamento Dati
+    with st.spinner("Analisi macro in corso..."):
+        df = carica_dati_mercato()
+        if df.empty:
+            st.error("❌ Database vuoto. Aggiorna i dati dalla sidebar.")
+            return
+
+    # === 1. KPI GLOBALI ===
+    st.subheader("📈 Statistiche Generali")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Bond Censiti", len(df))
+    col2.metric("YTM Medio (Nominale)", f"{df['YTM_Grezzo'].mean():.2f}%")
+    col3.metric("Prezzo Medio", f"{df['Prezzo'].mean():.2f}€")
+    col4.metric("Duration Media", f"{df['Anni'].mean():.1f} anni")
+
+    st.divider()
+
+    # === 2. TOP 10 RENDIMENTI (NOMINALI) ===
+    st.subheader("🏆 Top 10 Rendimenti Nominali")
+    st.caption("Attenzione: classifica basata sul rendimento facciale (non rettificato per il cambio).")
+
+    # Prendiamo i migliori 10 per YTM Grezzo
+    top10 = df.nlargest(10, 'YTM_Grezzo').sort_values('YTM_Grezzo', ascending=True)
+
+    col_chart, col_tab = st.columns([2, 1])
+    
+    with col_chart:
+        # Grafico a Barre Orizzontali
+        fig_top = px.bar(
+            top10,
+            x='YTM_Grezzo',
+            y='Desc',
+            orientation='h',
+            text='YTM_Grezzo',
+            color='YTM_Grezzo',
+            color_continuous_scale='Viridis',
+            labels={'YTM_Grezzo': 'Rendimento %', 'Desc': 'Titolo'}
+        )
+        fig_top.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
+        fig_top.update_layout(showlegend=False, height=400, margin=dict(l=0, r=0, t=0, b=0))
+        st.plotly_chart(fig_top, use_container_width=True)
+
+    with col_tab:
+        # Tabella compatta
+        st.dataframe(
+            top10[['ISIN', 'YTM_Grezzo', 'Prezzo']].sort_values('YTM_Grezzo', ascending=False),
+            use_container_width=True,
+            height=400,
+            column_config={
+                "YTM_Grezzo": st.column_config.NumberColumn("Yield", format="%.2f%%"),
+                "Prezzo": st.column_config.NumberColumn("Px", format="%.2f"),
+                "ISIN": st.column_config.TextColumn("ISIN", width="medium")
+            },
+            hide_index=True
+        )
+
+    st.divider()
+
+    # === 3. ANALISI PER CATEGORIA ===
+    st.subheader("📊 Rendimenti per Settore")
+
+    if 'Categoria' in df.columns:
+        df_cat = df.groupby('Categoria').agg({
+            'YTM_Grezzo': 'mean',
+            'ISIN': 'count'
+        }).reset_index()
+        df_cat.columns = ['Categoria', 'YTM Medio', 'Numero Bond']
+
+        fig_cat = px.bar(
+            df_cat,
+            x='Categoria',
+            y='YTM Medio',
+            text='YTM Medio',
+            color='Categoria',
+            title=""
+        )
+        fig_cat.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
+        st.plotly_chart(fig_cat, use_container_width=True)
+    else:
+        st.info("Dati categoria non disponibili per il grafico.")
+
+    # === 4. HEATMAP (SCADENZA vs RENDIMENTO) ===
+    st.divider()
+    st.subheader("🔥 Mappa Calore: Scadenza vs Rendimento")
+
+    try:
+        # Creiamo i bucket di scadenza
+        df['Bucket_Scadenza'] = pd.cut(
+            df['Anni'], 
+            bins=[0, 2, 5, 10, 20, 50], 
+            labels=['Breve (0-2y)', 'Medio (2-5y)', 'Lungo (5-10y)', 'Extra-Lungo (10-20y)', 'Lunghissimo (20y+)']
+        )
+
+        pivot = df.pivot_table(
+            values='YTM_Grezzo',
+            index='Categoria',
+            columns='Bucket_Scadenza',
+            aggfunc='mean'
+        ).fillna(0)
+
+        fig_heat = px.imshow(
+            pivot,
+            text_auto='.2f',
+            aspect="auto",
+            color_continuous_scale='RdYlGn',
+            labels={'color': 'YTM %'}
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
+    except Exception as e:
+        st.warning("Dati insufficienti per generare la Heatmap.")
 # 3. CALCOLATORE DIVERSIFICAZIONE
 def diversificazione_portfolio_ui():
     """Calcolatore diversificazione automatica"""
