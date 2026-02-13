@@ -820,38 +820,69 @@ def get_tasso_cambio_live(da, a):
 
 # 1. BOND SCREENER INTELLIGENTE
 # 1. BOND SCREENER INTELLIGENTE (MULTI-VALUTA)
-# 1. BOND SCREENER INTELLIGENTE (CON FILTRO ANTI-TRY)
+# 1. BOND SCREENER INTELLIGENTE (LIVE RATES ENGINE)
 def bond_screener_ui():
     """
-    Screener Avanzato con Tassi Modificabili dall'Utente.
-    Calcola il 'Rendimento Reale' sottraendo il rischio cambio (Interest Rate Parity).
+    Screener Avanzato con Tassi Risk-Free LIVE.
+    Tenta di scaricare i rendimenti dei titoli di stato 10Y come proxy del tasso Risk Free.
     """
     st.title("🎯 Bond Screener & Ranking Reale")
-    st.caption("Classifica basata sul rendimento reale convertito nella tua valuta (Hedged Yield).")
+    st.caption("Classifica basata sul rendimento reale convertito (Hedged Yield) utilizzando tassi di mercato aggiornati.")
     
-    # --- A. DATI TASSI CENTRALI (DEFAULT MA MODIFICABILI) ---
-    # Questi tassi servono per penalizzare le valute ad alta inflazione.
-    # Es: Turchia (50%) - Europa (3%) = 47% di penalizzazione sul rendimento.
-    DEFAULT_RATES = {
-        "EUR": 3.00, "USD": 4.75, "GBP": 5.00, "CHF": 1.25,
-        "TRY": 50.0, "BRL": 10.75, "ZAR": 8.25, "MXN": 11.00,
-        "RON": 6.00, "HUF": 6.50, "JPY": 0.10, "AUD": 4.35 
-    }
-    
-    # Caricamento Dati
+    # --- FUNZIONE INTERNA PER I TASSI LIVE ---
+    @st.cache_data(ttl=3600) # Aggiorna ogni ora
+    def get_live_risk_free_rates():
+        # Tickers di Yahoo Finance per i rendimenti decennali (Proxy Risk Free)
+        # Nota: Per Turchia (TRY) e altri emergenti, i dati live sono spesso inaccessibili gratis.
+        tickers_map = {
+            "USD": "^TNX",   # CBOE 10 Year Treasury Note Yield
+            # "EUR": non ha un ticker unico affidabile su YF free, usiamo fallback o stima
+        }
+        
+        # Tassi di Fallback (aggiornati al 2025/2026 scenario)
+        rates = {
+            "EUR": 3.00, "USD": 4.50, "GBP": 4.75, "CHF": 1.00,
+            "TRY": 45.0, "BRL": 11.50, "ZAR": 9.75, "MXN": 10.50,
+            "RON": 6.50, "HUF": 6.75, "JPY": 0.80, "AUD": 4.20
+        }
+        
+        status = {} # Per tracciare chi è live e chi no
+        
+        # 1. Tentativo Fetch LIVE (Principalmente USA che guida il mercato)
+        for curr, ticker in tickers_map.items():
+            try:
+                data = yf.Ticker(ticker).history(period="1d")
+                if not data.empty:
+                    # Il ticker ^TNX è già in percentuale (es. 4.50)
+                    yield_val = float(data['Close'].iloc[-1])
+                    rates[curr] = yield_val
+                    status[curr] = "🟢 LIVE (Mkt)"
+            except:
+                status[curr] = "🟠 STIMA"
+        
+        # 2. Per gli altri, segniamo come stima manuale
+        for curr in rates:
+            if curr not in status: status[curr] = "🟠 STIMA"
+            
+        return rates, status
+
+    # Caricamento Dati Mercato
     with st.spinner("Analisi differenziale tassi e valute..."):
         df_market = carica_dati_mercato()
         if df_market.empty:
             st.error("❌ Database vuoto. Aggiorna dalla sidebar.")
             return
         
-        # Riconoscimento Valuta se manca
+        # Riconoscimento Valuta
         if 'Valuta' not in df_market.columns:
             df_market['Valuta'] = df_market.apply(lambda x: detect_valuta(x.get('Desc', ''), x.get('ISIN', '')), axis=1)
 
+        # RECUPERO TASSI LIVE
+        live_rates, rate_status = get_live_risk_free_rates()
+
     st.divider()
     
-    # === B. IMPOSTAZIONI UTENTE ===
+    # === 2. IMPOSTAZIONI UTENTE ===
     c_wal, c_mode = st.columns(2)
     with c_wal:
         valuta_wallet = st.selectbox("💰 La tua Valuta Base", ["EUR", "USD"], index=0)
@@ -863,37 +894,42 @@ def bond_screener_ui():
             index=1
         )
 
-    # === C. PANNELLO TASSI (DECIDI TU I TASSI) ===
-    RISK_FREE_RATES = DEFAULT_RATES.copy()
+    # === 3. PANNELLO TASSI (LIVE + EDITABILE) ===
+    # Copiamo i tassi live in una variabile modificabile
+    RISK_FREE_RATES = live_rates.copy()
     
     if "Globale" in mode:
-        with st.expander("⚙️ Configurazione Tassi Banche Centrali (Clicca per modificare)", expanded=False):
-            st.caption("Il sistema penalizza i rendimenti esteri sottraendo il differenziale tassi (costo teorico copertura).")
+        with st.expander("⚙️ Tassi Risk Free (Live & Config)", expanded=False):
+            st.caption("Questi tassi vengono usati per calcolare il costo di copertura (Interest Rate Parity).")
             
+            # Creiamo una griglia per mostrarli
             cols = st.columns(4)
-            keys = list(DEFAULT_RATES.keys())
+            keys = list(RISK_FREE_RATES.keys())
             
             for i, valuta in enumerate(keys):
                 with cols[i % 4]:
+                    # Mostriamo se è LIVE o STIMA nel label
+                    stat_icon = rate_status.get(valuta, "🟠")
+                    label_txt = f"{valuta} {stat_icon}"
+                    
                     new_rate = st.number_input(
-                        f"Tasso {valuta} (%)", 
-                        value=DEFAULT_RATES[valuta], 
+                        label_txt, 
+                        value=float(RISK_FREE_RATES[valuta]), 
                         step=0.25,
-                        format="%.2f"
+                        format="%.2f",
+                        key=f"rate_{valuta}"
                     )
                     RISK_FREE_RATES[valuta] = new_rate
             
-            # Recuperiamo il tasso base della tua valuta
-            tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
-            st.info(f"💡 Logica applicata: Rendimento Bond - (Tasso Paese Bond - Tasso {valuta_wallet})")
+            st.info("💡 **Nota:** '🟢 LIVE' indica dati presi ora dal mercato obbligazionario (es. Treasury). '🟠 STIMA' sono valori di riferimento che puoi aggiornare manualmente se la Banca Centrale cambia i tassi.")
 
-    else:
-        tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
+    # Tasso base wallet
+    tasso_base_wallet = RISK_FREE_RATES.get(valuta_wallet, 3.0)
 
-    # === D. MOTORE DI CALCOLO ===
+    # === 4. MOTORE DI CALCOLO ===
     df_work = df_market.copy()
     
-    # 1. Conversione PREZZO (Spot)
+    # A. Conversione PREZZO (Spot - QUESTO È SEMPRE LIVE)
     valute_presenti = df_work['Valuta'].unique()
     tassi_cambio_spot = {}
     for v in valute_presenti:
@@ -903,18 +939,17 @@ def bond_screener_ui():
     df_work['FX_Rate'] = df_work['Valuta'].map(tassi_cambio_spot).fillna(1.0)
     df_work['Prezzo_Wallet'] = df_work.apply(lambda x: x['Prezzo'] / x['FX_Rate'] if x['FX_Rate'] > 0 else x['Prezzo'], axis=1)
 
-    # 2. Conversione RENDIMENTO (Interest Rate Parity)
+    # B. Conversione RENDIMENTO (Interest Rate Parity Dinamica)
     def converti_rendimento(row):
         valuta_bond = row['Valuta']
         ytm_locale = row['YTM_Grezzo']
         
         if valuta_bond == valuta_wallet: return ytm_locale
         
-        # Usiamo il tasso risk free aggiornato dall'utente
+        # Usiamo il tasso risk free (che può essere LIVE o Manuale)
         tasso_locale = RISK_FREE_RATES.get(valuta_bond, 5.0) 
         costo_copertura = tasso_locale - tasso_base_wallet
         
-        # Se il costo copertura è positivo (es. Turchia), riduce il rendimento
         return ytm_locale - costo_copertura
 
     df_work['YTM_Converted'] = df_work.apply(converti_rendimento, axis=1)
@@ -925,12 +960,11 @@ def bond_screener_ui():
 
     st.divider()
 
-    # === E. FILTRI RICERCA ===
+    # === 5. FILTRI RICERCA ===
     st.subheader("🔧 Filtri")
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(f"**📊 Rendimento Reale in {valuta_wallet}**")
-        # Nota: min value può essere negativo per escludere bond spazzatura
         ytm_min = st.number_input("Min %", value=0.0, step=0.5) 
         ytm_max = st.number_input("Max %", value=15.0, step=0.5)
     with c2:
@@ -939,11 +973,10 @@ def bond_screener_ui():
     with c3:
         p_max = st.number_input(f"Prezzo Max ({valuta_wallet})", 130.0)
 
-    # === F. RISULTATI ===
+    # === 6. RISULTATI ===
     st.write("")
     if st.button("🚀 Genera Classifica", type="primary", use_container_width=True):
         
-        # Filtriamo usando il YTM_Converted (Quello pulito!)
         filtered = df_work[
             (df_work['YTM_Converted'] >= ytm_min) &
             (df_work['YTM_Converted'] <= ytm_max) &
@@ -952,22 +985,20 @@ def bond_screener_ui():
             (df_work['Prezzo_Wallet'] <= p_max)
         ]
         
-        # ORDINAMENTO: Usiamo il rendimento convertito
+        # Ordinamento REALE
         filtered = filtered.sort_values('YTM_Converted', ascending=False)
         
         if filtered.empty:
-            st.warning(f"Nessun bond trovato con Rendimento Reale > {ytm_min}% in {valuta_wallet}.")
-            if "Globale" in mode:
-                st.info("💡 Molti bond 'High Yield' (es. TRY, ZAR) sono stati esclusi perché il loro rendimento reale è diventato negativo.")
+            st.warning(f"Nessun bond trovato con i criteri selezionati.")
         else:
             st.success(f"✅ Classifica calcolata su {len(filtered)} titoli.")
             
             st.dataframe(
-                filtered[['Desc', 'Valuta', 'Prezzo_Wallet', 'YTM_Grezzo', 'YTM_Converted', 'Anni']].head(100).style
+                filtered[['Desc', 'Valuta', 'Prezzo_Wallet', 'YTM_Grezzo', 'YTM_Converted', 'Anni', 'ISIN']].head(100).style
                 .format({
                     'Prezzo_Wallet': f'{{:.2f}} {valuta_wallet}',
                     'YTM_Grezzo': '{:.2f}%',
-                    'YTM_Converted': '{:.2f}%', # Questo è il numero che comanda la classifica
+                    'YTM_Converted': '{:.2f}%', 
                     'Anni': '{:.1f}'
                 })
                 .background_gradient(subset=['YTM_Converted'], cmap='RdYlGn'),
@@ -977,16 +1008,15 @@ def bond_screener_ui():
                     "Desc": st.column_config.TextColumn("Nome Bond", width="medium"),
                     "YTM_Converted": st.column_config.NumberColumn(
                         f"Rend. {valuta_wallet}", 
-                        help=f"Rendimento netto stimato convertendo i flussi in {valuta_wallet}."
+                        help=f"Rendimento netto REALE (Yield - Costo Copertura Valuta)."
                     ),
-                    "YTM_Grezzo": st.column_config.NumberColumn("Rend. Locale"),
+                    "YTM_Grezzo": st.column_config.NumberColumn("Rend. Nominale", help="Rendimento facciale in valuta locale (ingannevole se alta inflazione)"),
                     "Prezzo_Wallet": f"Prezzo ({valuta_wallet})"
                 }
             )
             
-            # Export CSV con le nuove colonne
             csv = filtered.to_csv(index=False).encode('utf-8')
-            st.download_button("💾 Scarica CSV", csv, "bond_ranking_reale.csv", "text/csv")
+            st.download_button("💾 Scarica CSV", csv, "bond_ranking_live.csv", "text/csv")
 # 2. DASHBOARD MERCATO
 def dashboard_mercato_ui():
     """Dashboard con vista mercato completa"""
