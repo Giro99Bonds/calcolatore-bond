@@ -1094,179 +1094,202 @@ def dashboard_mercato_ui():
         st.warning("Dati insufficienti per generare la Heatmap.")
 # 3. CALCOLATORE DIVERSIFICAZIONE
 def diversificazione_portfolio_ui():
-    """Calcolatore diversificazione automatica"""
-    st.title("🧮 Calcolatore Diversificazione Portafoglio")
-    st.caption("Costruisci un portafoglio bilanciato automaticamente")
-    
-    st.info("""
-    **💡 Cos'è la Diversificazione?**
-    
-    È la strategia di **NON mettere tutte le uova nello stesso paniere**.
-    
-    Questo strumento ti aiuta a:
-    - Distribuire il capitale su più bond
-    - Evitare concentrazione su un singolo emittente
-    - Bilanciare scadenze (Bond Ladder)
-    - Ottimizzare rendimento/rischio
-    """)
-    
+    """
+    Robo-Advisor UX 3.0:
+    - Spiegazione dinamica del profilo di rischio.
+    - Logica di allocazione rigorosa (Math Check).
+    - Output educativo.
+    """
+    st.title("🧩 Costruisci il tuo Portafoglio")
+    st.caption("Un assistente automatico che seleziona i titoli migliori in base ai tuoi obiettivi.")
+
+    # Caricamento
+    with st.spinner("Analisi universo investibile..."):
+        df = carica_dati_mercato()
+        if df.empty: st.error("Database vuoto."); return
+
+    # ==============================================================================
+    # STEP 1: QUANTO VUOI INVESTIRE?
+    # ==============================================================================
+    st.subheader("1️⃣ Il tuo Capitale")
+    c1, c2 = st.columns(2)
+    with c1:
+        capitale = st.number_input("Importo Totale (€)", min_value=5000.0, step=5000.0, value=50000.0)
+    with c2:
+        n_bond = st.slider("Numero di Titoli (Diversificazione)", 3, 12, 6)
+        st.caption(f"💡 Acquisterai circa {capitale/n_bond:,.0f} € per ogni titolo.")
+
     st.divider()
+
+    # ==============================================================================
+    # STEP 2: SCEGLI IL TUO STILE (CON SPIEGAZIONE LIVE)
+    # ==============================================================================
+    st.subheader("2️⃣ Il tuo Profilo di Rischio")
     
-    # === INPUT UTENTE ===
-    col1, col2, col3 = st.columns(3)
+    # Dizionario delle "Ricette" (Logica Matematica Esposta)
+    PROFILI = {
+        "🛡️ Prudente (Protezione)": {
+            "desc": "Ideale se vuoi dormire sonni tranquilli. Priorità assoluta alla difesa del capitale.",
+            "regole": ["Solo Titoli di Stato (BTP, Bund, Treasury)", "Nessun titolo Corporate o Bancario", "Scadenza Massima: 5 Anni (Bassa volatilità)"],
+            "allocazione": {"Gov": 1.0, "Corp": 0.0, "HY": 0.0}, # 100% Gov
+            "max_duration": 5
+        },
+        "⚖️ Bilanciato (Equilibrio)": {
+            "desc": "Il giusto compromesso. Cerchi un rendimento superiore all'inflazione accettando una moderata volatilità.",
+            "regole": ["Mix di Titoli di Stato (60%) e Aziendali Solidi (40%)", "Diversificazione settoriale", "Scadenza Massima: 10 Anni"],
+            "allocazione": {"Gov": 0.6, "Corp": 0.4, "HY": 0.0},
+            "max_duration": 10
+        },
+        "🚀 Aggressivo (Crescita)": {
+            "desc": "Per chi cerca il massimo rendimento e sopporta oscillazioni di prezzo anche forti.",
+            "regole": ["Inclusione di Bond Alto Rendimento (High Yield)", "Esposizione a valute estere (es. Dollaro)", "Scadenze anche lunghe (>10 anni) per massimizzare le cedole"],
+            "allocazione": {"Gov": 0.3, "Corp": 0.4, "HY": 0.3},
+            "max_duration": 30
+        }
+    }
+
+    # Selezione con Radio Button (Orizzontale per pulizia)
+    profilo_scelto = st.radio("Seleziona il tuo obiettivo:", list(PROFILI.keys()), index=1, horizontal=True)
     
-    with col1:
-        capitale_tot = st.number_input(
-            "💰 Capitale Totale (€)",
-            min_value=5000.0,
-            value=50000.0,
-            step=5000.0
-        )
-    with col2:
-        num_bond = st.slider(
-            "🎯 Numero Bond",
-            min_value=3,
-            max_value=10,
-            value=5
-        )
-    with col3:
-        profilo = st.selectbox(
-            "⚠️ Profilo Rischio",
-            ["Conservativo", "Moderato", "Aggressivo"]
-        )
+    # --- BOX ESPLICATIVO DINAMICO (UX MAGIC) ---
+    dati_prof = PROFILI[profilo_scelto]
     
-    # Preferenze avanzate
-    with st.expander("⚙️ Opzioni Avanzate"):
-        solo_gov = st.checkbox("Solo Governativi", value=True)
-        max_per_bond_pct = st.slider("Max % per singolo bond", 10, 50, 25)
-        anni_target = st.slider("Scadenza target (anni)", 1, 15, 5)
+    with st.chat_message("assistant"):
+        st.markdown(f"**Hai scelto: {profilo_scelto.split(' ')[1]}**")
+        st.write(dati_prof["desc"])
+        st.markdown("📋 **La Strategia che applicherò:**")
+        for regola in dati_prof["regole"]:
+            st.markdown(f"- {regola}")
+
+    st.divider()
+
+    # ==============================================================================
+    # STEP 3: MOTORE DI GENERAZIONE
+    # ==============================================================================
+    st.subheader("3️⃣ Risultato")
     
-    # === COSTRUZIONE PORTAFOGLIO ===
-    if st.button("🚀 Costruisci Portafoglio", type="primary"):
-        with st.spinner("Ottimizzazione in corso..."):
-            df_market = carica_dati_mercato()
-            
-            if df_market.empty:
-                st.error("Database vuoto")
-                return
-            
-            # Filtra per profilo rischio
-            if profilo == "Conservativo":
-                df_filt = df_market[df_market['Categoria'] == 'Governativo']
-            elif profilo == "Moderato":
-                df_filt = df_market[df_market['Categoria'].isin(['Governativo', 'Bancario'])]
-            else:
-                df_filt = df_market
-            
-            if solo_gov:
-                df_filt = df_filt[df_filt['Categoria'] == 'Governativo']
-            
-            # Crea ladder scadenze
-            df_filt = df_filt[
-                (df_filt['Anni'] >= anni_target * 0.5) &
-                (df_filt['Anni'] <= anni_target * 1.5)
+    if st.button("✨ Genera Portafoglio", type="primary", use_container_width=True):
+        
+        # --- LOGICA DI CLASSIFICAZIONE (MOTORE NASCOSTO) ---
+        df_pool = df.copy()
+        
+        # Funzione avanzata per capire cos'è un bond
+        def tagga_bond(row):
+            desc = (str(row['Desc']) + " " + str(row['Categoria'])).upper()
+            # 1. HIGH YIELD / EMERGING (Per profili aggressivi)
+            if any(x in desc for x in ["TRY", "ZAR", "PEMEX", "PETROBRAS", "SUB", "BRL"]): return "HY"
+            # 2. GOVERNATIVI SICURI
+            if any(x in desc for x in ["BTP", "BOT", "BUND", "OAT", "TREASURY", "USA", "SPAGNA", "BEI", "EU "]): return "Gov"
+            # 3. CORPORATE / BANCARI
+            return "Corp"
+
+        df_pool['TipoAsset'] = df_pool.apply(tagga_bond, axis=1)
+        
+        # --- ALGORITMO DI SELEZIONE (BOND PICKING) ---
+        portfolio = []
+        target_alloc = dati_prof["allocazione"]
+        max_dur = dati_prof["max_duration"]
+        used_isins = []
+
+        # Creazione "Slot" (Posti vuoti da riempire)
+        slots = []
+        for asset_class, weight in target_alloc.items():
+            num = int(round(n_bond * weight))
+            for _ in range(num): slots.append(asset_class)
+        
+        # Riempimento o taglio slot per arrivare a n_bond esatti
+        while len(slots) < n_bond: slots.append("Gov") # Fallback sicuro
+        while len(slots) > n_bond: slots.pop()
+        
+        # Riempimento Slot
+        for target_type in slots:
+            # Filtra candidati validi per questo slot
+            # Regola: Tipo Corretto + Durata < Max + Non ancora preso
+            candidates = df_pool[
+                (df_pool['TipoAsset'] == target_type) &
+                (df_pool['Anni'] <= max_dur) &
+                (~df_pool['ISIN'].isin(used_isins))
             ]
             
-            if len(df_filt) < num_bond:
-                st.warning(f"Trovati solo {len(df_filt)} bond. Rilassa i filtri.")
-                return
+            # Fallback intelligente: Se non trovo HY, cerco Corporate. Se non trovo Corp, cerco Gov.
+            if candidates.empty:
+                if target_type == "HY": 
+                    candidates = df_pool[(df_pool['TipoAsset'] == "Corp") & (df_pool['Anni'] <= max_dur) & (~df_pool['ISIN'].isin(used_isins))]
+                if candidates.empty: # Ancora vuoto?
+                    candidates = df_pool[(df_pool['TipoAsset'] == "Gov") & (df_pool['Anni'] <= max_dur) & (~df_pool['ISIN'].isin(used_isins))]
             
-            # Seleziona bond
-            step_anni = (df_filt['Anni'].max() - df_filt['Anni'].min()) / num_bond
-            
-            portfolio = []
-            capitale_per_bond = capitale_tot / num_bond
-            max_capitale_per_bond = (capitale_tot * max_per_bond_pct) / 100
-            
-            for i in range(num_bond):
-                anni_min_bucket = df_filt['Anni'].min() + (i * step_anni)
-                anni_max_bucket = anni_min_bucket + step_anni
+            if not candidates.empty:
+                # CRITERIO DI SCELTA:
+                # Per Prudente -> Miglior rapporto Rendimento/Rischio (Non solo max yield)
+                # Per Aggressivo -> Max Yield
+                if "Prudente" in profilo_scelto:
+                    # Ordina per scadenza più breve tra quelli con rendimento decente (>2%)
+                    candidates = candidates.sort_values('Anni', ascending=True)
+                else:
+                    # Ordina per rendimento puro
+                    candidates = candidates.sort_values('YTM_Grezzo', ascending=False)
                 
-                bucket = df_filt[
-                    (df_filt['Anni'] >= anni_min_bucket) &
-                    (df_filt['Anni'] < anni_max_bucket)
-                ]
+                best_bond = candidates.iloc[0]
                 
-                if not bucket.empty:
-                    # Seleziona migliore per YTM
-                    best = bucket.nlargest(1, 'YTM_Grezzo').iloc[0]
-                    
-                    alloc = min(capitale_per_bond, max_capitale_per_bond)
-                    
-                    portfolio.append({
-                        'ISIN': best['ISIN'],
-                        'Desc': best['Desc'],
-                        'Categoria': best['Categoria'],
-                        'YTM': best['YTM_Grezzo'],
-                        'Scadenza': best['Scadenza'],
-                        'Anni': best['Anni'],
-                        'Allocazione': alloc,
-                        'Peso %': (alloc / capitale_tot) * 100
-                    })
+                portfolio.append({
+                    "Categoria": best_bond['TipoAsset'],
+                    "Emittente": best_bond['Desc'],
+                    "Prezzo": best_bond['Prezzo'],
+                    "Cedola %": best_bond['Cedola'],
+                    "YTM %": best_bond['YTM_Grezzo'],
+                    "Scadenza": best_bond['Anni'],
+                    "ISIN": best_bond['ISIN'],
+                    "Allocazione": capitale / n_bond
+                })
+                used_isins.append(best_bond['ISIN'])
+
+        # --- VISUALIZZAZIONE RISULTATI ---
+        if not portfolio:
+            st.error("Non ho trovato bond adatti nel database per questo profilo.")
+        else:
+            df_pf = pd.DataFrame(portfolio)
             
-            df_port = pd.DataFrame(portfolio)
+            # Calcolo Metriche Portafoglio Ponderate
+            ytm_medio = df_pf['YTM %'].mean()
+            dur_media = df_pf['Scadenza'].mean()
+            cedola_annua = (capitale * df_pf['Cedola %'].mean() / 100) * 0.875 # Stima netta 12.5%
             
-            # === RISULTATI ===
-            st.success(f"✅ Portafoglio costruito con {len(df_port)} bond!")
+            st.success("✅ Portafoglio Ottimizzato Generato!")
             
-            # Metriche
-            m1, m2, m3, m4 = st.columns(4)
-            
-            m1.metric("Capitale Allocato", f"{df_port['Allocazione'].sum():,.0f}€")
-            m2.metric("YTM Medio Ponderato", f"{(df_port['YTM'] * df_port['Allocazione']).sum() / df_port['Allocazione'].sum():.2f}%")
-            m3.metric("Scadenza Media", f"{(df_port['Anni'] * df_port['Allocazione']).sum() / df_port['Allocazione'].sum():.1f} anni")
-            m4.metric("Diversificazione", f"{len(df_port['Categoria'].unique())} categorie")
-            
-            st.divider()
-            
-            # Tabella
-            st.subheader("📋 Il Tuo Portafoglio")
-            
+            # KPI Cards
+            k1, k2, k3 = st.columns(3)
+            k1.metric("Rendimento Atteso (Lordo)", f"{ytm_medio:.2f}%", delta="Medio Annuo")
+            k2.metric("Orizzonte Temporale", f"{dur_media:.1f} Anni", help="Durata media finanziaria")
+            k3.metric("Flusso Cedolare", f"~ {cedola_annua:,.0f} €/anno", help="Stima incassi netti annuali")
+
+            # Tabella Interattiva
             st.dataframe(
-                df_port.style.format({
-                    'YTM': '{:.2f}%',
-                    'Anni': '{:.1f}',
-                    'Allocazione': '{:,.0f}€',
-                    'Peso %': '{:.1f}%'
-                }),
-                use_container_width=True
+                df_pf,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Allocazione": st.column_config.NumberColumn("Investimento", format="%.0f €"),
+                    "Prezzo": st.column_config.NumberColumn("Prezzo", format="%.2f"),
+                    "YTM %": st.column_config.NumberColumn("Rendimento", format="%.2f%%"),
+                    "Scadenza": st.column_config.ProgressColumn("Durata", format="%.1f y", min_value=0, max_value=30),
+                    "Categoria": st.column_config.TextColumn("Tipo", width="small")
+                }
             )
             
-            # Grafici
-            col_pie, col_bar = st.columns(2)
+            # Grafico Distribuzione (Bond Ladder)
+            st.caption("📅 Scadenze nel tempo (Bond Ladder)")
+            df_pf = df_pf.sort_values('Scadenza')
+            fig = px.bar(
+                df_pf, x='Scadenza', y='Allocazione', 
+                color='Categoria', 
+                text='Emittente',
+                color_discrete_map={"Gov": "#00CC96", "Corp": "#636EFA", "HY": "#EF553B"}
+            )
+            st.plotly_chart(fig, use_container_width=True)
             
-            with col_pie:
-                fig_pie = px.pie(
-                    df_port,
-                    values='Allocazione',
-                    names='Desc',
-                    title='Allocazione Capitale'
-                )
-                st.plotly_chart(fig_pie, use_container_width=True)
-            
-            with col_bar:
-                fig_bar = px.bar(
-                    df_port,
-                    x='Anni',
-                    y='Allocazione',
-                    color='YTM',
-                    title='Distribuzione Scadenze'
-                )
-                st.plotly_chart(fig_bar, use_container_width=True)
-            
-            # Verifica concentrazione
-            st.divider()
-            st.subheader("🛡️ Verifica Rischi")
-            
-            max_peso = df_port['Peso %'].max()
-            
-            if max_peso > 30:
-                st.error(f"⚠️ ATTENZIONE: Un bond pesa il {max_peso:.1f}% (troppo!). Riduci a <25%")
-            elif max_peso > 25:
-                st.warning(f"⚠️ Un bond pesa il {max_peso:.1f}%. OK, ma attenzione.")
-            else:
-                st.success(f"✅ Massimo peso: {max_peso:.1f}%. Diversificazione ottima!")
-
+            # Export
+            csv = df_pf.to_csv(index=False).encode('utf-8')
+            st.download_button("💾 Scarica il tuo Portafoglio (PDF/CSV)", csv, "mio_portafoglio.csv", "text/csv")
 # 5. SISTEMA ALERT
 def alert_manager_ui():
     """Gestione alert personalizzati"""
