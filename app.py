@@ -621,7 +621,7 @@ def carica_dati_mercato():
                     # ma ti consiglio vivamente la versione smart per evitare errori sui Cumulative.
                     try:
                         y_lordo = calcola_rendimento_smart(pr, ced, sc, desc) 
-                    exceptNameError:
+                        exceptNameError:
                         # Fallback se non hai ancora incollato la funzione smart
                         y_lordo = 0.0 
 
