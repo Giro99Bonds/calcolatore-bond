@@ -544,6 +544,7 @@ def calcola_rendimento_avanzato(prezzo, cedola, scadenza, desc):
 
     except:
         return 0.0, 0.0
+        
 def carica_dati_mercato():
     all_bonds = []
     
