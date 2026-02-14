@@ -546,78 +546,101 @@ def calcola_rendimento_avanzato(prezzo, cedola, scadenza, desc):
         return 0.0, 0.0
 def carica_dati_mercato():
     all_bonds = []
+    
+    # 1. Controllo Cartella
     if not os.path.exists(DB_FOLDER): return pd.DataFrame()
-    for filename in os.listdir(DB_FOLDER):
-        if filename.endswith(".csv"):
-            try:
-                path = os.path.join(DB_FOLDER, filename)
-                df = pd.read_csv(path)
-                cols = df.columns
-                c_pr = next((c for c in cols if any(k in str(c).lower() for k in ['prezzo', 'last', 'price'])), None)
-                c_sc = next((c for c in cols if 'scadenza' in str(c).lower()), None)
-                c_de = next((c for c in cols if 'desc' in str(c).lower()), None)
-                c_isin = next((c for c in cols if 'isin' in str(c).lower()), None)
-                if all([c_pr, c_sc, c_de, c_isin]):
-                    df = df.dropna(subset=[c_pr, c_sc])
-                    for _, row in df.iterrows():
-                        try:
-                            sc_str = str(row[c_sc]).strip()
-                            try: sc = datetime.strptime(sc_str, '%Y-%m-%d').date()
-                            except: sc = datetime.strptime(sc_str, '%d/%m/%Y').date()
-                            if sc <= date.today(): continue
-                            pr = float(str(row[c_pr]).replace(',', '.').replace('€', '').strip())
-                            desc = str(row[c_de])
-                            ced = 0.0
-                            m = re.search(r'(\d+(?:[.,]\d+)?)\s*%', desc)
-                            if m: ced = float(m.group(1).replace(',', '.'))
-                            isin_v = str(row[c_isin]).strip()
-                            
-                            cat = "Altro"
-                            if any(x in desc.upper() for x in ["BTP", "BOT", "BUND", "TREASURY", "OAT", "SPAGNA", "PORTOGALLO"]): cat = "Governativo"
-                            elif any(x in desc.upper() for x in ["INTESA", "UNICREDIT", "BANCA", "B.", "MEDIOBANCA"]): cat = "Bancario"
-                            elif any(x in desc.upper() for x in ["ENI", "ENEL", "STELLANTIS", "FERRARI", "TELECOM"]): cat = "Corporate"
-                            
-                            all_bonds.append({
-                                "ISIN": isin_v, "Desc": desc, "Prezzo": pr, "Scadenza": sc, "Cedola": ced,
-                                "YTM_Grezzo": calcola_rendimento_grezzo(pr, ced, sc),
-                                "Anni": (sc - date.today()).days / 365.25, "Fonte": filename.replace('.csv', ''),
-                                "Categoria": cat
-                            })
-                        except: continue
-            except: continue
-    return pd.DataFrame(all_bonds)
+    files = [f for f in os.listdir(DB_FOLDER) if f.endswith(".csv")]
+    if not files: return pd.DataFrame()
 
-@st.cache_data(ttl=3600)
-def carica_tutto_mercato():
-    """Versione ottimizzata per dashboard e analisi"""
-    return carica_dati_mercato().rename(columns={'Categoria': 'Tipo', 'Desc': 'Descrizione'})
-def categorizza_rischio(isin, nome, desc):
-    """Calcola il livello di rischio (1=Basso, 4=Alto) basandosi su nome e ISIN"""
-    try:
-        nome = str(nome).upper()
-        desc = str(desc).upper()
-        isin = str(isin).upper()
-        
-        # Livello 1: Governativi Ultra Safe (Tripla A o quasi)
-        gov_safe = ["GERMANIA", "BUND", "FRANCIA", "OAT", "USA", "TREASURY", "BEI", "EU", "EUROPA"]
-        if any(k in nome or k in desc for k in gov_safe): return 1
-        
-        # Livello 2: Governativi Periferici / Bancari Senior
-        gov_mid = ["ITALIA", "BTP", "BOT", "CCT", "SPAGNA", "BONOS"]
-        if any(k in nome or k in desc for k in gov_mid): return 2
-        if "INTESA" in nome or "UNICREDIT" in nome: return 2
-        
-        # Livello 3: Corporate IG / XS Generici
-        # Se l'ISIN inizia con XS, spesso è Corporate o Sovranazionale, rischio medio-alto rispetto a BTP
-        if isin.startswith("XS"): return 3
-        
-        # Livello 4: High Risk / Subordinate / Emergenti
-        if "SUBORDINAT" in nome or "SUB" in desc: return 4
-        if "ROMANIA" in nome or "TURCHIA" in nome or "UNGHERIA" in nome: return 4
-        
-        return 3 # Default (Corporate Generico)
-    except:
-        return 3
+    for filename in files:
+        path = os.path.join(DB_FOLDER, filename)
+        try:
+            # 2. Lettura Intelligente (Gestisce ; e , automaticamente)
+            try:
+                df = pd.read_csv(path, sep=None, engine='python')
+            except:
+                try: df = pd.read_csv(path, sep=';') # Tentativo forzato
+                except: continue
+            
+            # Pulizia nomi colonne
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            cols = df.columns
+
+            # 3. Mappatura Colonne
+            c_pr = next((c for c in cols if any(x in c for x in ['prezzo', 'last', 'price', 'ultimo'])), None)
+            c_sc = next((c for c in cols if 'scadenza' in c or 'matur' in c), None)
+            c_de = next((c for c in cols if 'desc' in c or 'nome' in c or 'titolo' in c), None)
+            c_isin = next((c for c in cols if 'isin' in c), None)
+            c_ced = next((c for c in cols if 'cedola' in c or 'coupon' in c), None)
+
+            if not all([c_pr, c_sc, c_de]): continue
+
+            df = df.dropna(subset=[c_pr, c_sc])
+            
+            for _, row in df.iterrows():
+                try:
+                    # Parsing Prezzo
+                    pr_raw = str(row[c_pr]).replace('€', '').replace(',', '.').strip()
+                    try: pr = float(pr_raw)
+                    except: continue
+                    if pr <= 0: continue
+
+                    # Parsing Scadenza
+                    sc_str = str(row[c_sc]).strip()
+                    sc = None
+                    for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y']:
+                        try: 
+                            sc = datetime.strptime(sc_str, fmt).date()
+                            break
+                        except: pass
+                    
+                    if sc is None or sc <= date.today(): continue
+
+                    # Parsing Dati
+                    desc = str(row[c_de])
+                    isin_v = str(row[c_isin]).strip().upper() if c_isin else "NO_ISIN"
+                    
+                    # Parsing Cedola
+                    ced = 0.0
+                    if c_ced and pd.notna(row[c_ced]):
+                        try: ced = float(str(row[c_ced]).replace(',', '.').replace('%', ''))
+                        except: pass
+                    else:
+                        m = re.search(r'(\d+(?:[.,]\d+)?)\s*%', desc)
+                        if m: ced = float(m.group(1).replace(',', '.'))
+
+                    # Categoria
+                    cat = "Altro"
+                    d_upper = desc.upper()
+                    if any(x in d_upper for x in ["BTP", "BOT", "BUND", "TREASURY", "OAT", "BONOS", "USA", "SPAGNA"]): cat = "Governativo"
+                    elif any(x in d_upper for x in ["INTESA", "UNICREDIT", "BANCA", "B.", "MEDIOBANCA"]): cat = "Bancario"
+                    elif any(x in d_upper for x in ["ENI", "ENEL", "STELLANTIS", "FERRARI", "TELECOM"]): cat = "Corporate"
+
+                    # CALCOLO RENDIMENTO (Usa la funzione smart che devi aver definito prima)
+                    # Se non hai definito 'calcola_rendimento_smart', usa 'calcola_rendimento_grezzo'
+                    # ma ti consiglio vivamente la versione smart per evitare errori sui Cumulative.
+                    try:
+                        y_lordo = calcola_rendimento_smart(pr, ced, sc, desc) 
+                    exceptNameError:
+                        # Fallback se non hai ancora incollato la funzione smart
+                        y_lordo = 0.0 
+
+                    all_bonds.append({
+                        "ISIN": isin_v, 
+                        "Desc": desc, 
+                        "Prezzo": pr, 
+                        "Scadenza": sc, 
+                        "Cedola": ced,
+                        "YTM_Grezzo": y_lordo,
+                        "Anni": (sc - date.today()).days / 365.25, 
+                        "Fonte": filename.replace('.csv', ''),
+                        "Categoria": cat,
+                        "Valuta": detect_valuta(desc, isin_v) 
+                    })
+                except: continue
+        except: continue
+
+    return pd.DataFrame(all_bonds)
 def trova_alternative_migliori(bond_target, df_mercato):
     """
     VERSIONE 'AGGRESSIVA': Cerca alternative con maglie più larghe
