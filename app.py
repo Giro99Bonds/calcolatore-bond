@@ -6,10 +6,12 @@ from datetime import datetime, date, timedelta
 import numpy as np
 import time
 import random
+import html
 import plotly.graph_objects as go
 import plotly.express as px
 import os
 import shutil
+from bs4 import BeautifulSoup
 import logging
 import calendar
 from io import StringIO
@@ -82,7 +84,8 @@ def init_session_state():
     defaults = {
         'portfolio': [], 'alerts': [], 'connection_status': "In attesa...",
         'page': "Scanner", 'last_scrape_time': None, 'patrimonio': 50000.0,
-        'selected_isin_from_chart': None, 'last_scrape_results': []
+        'selected_isin_from_chart': None, 'last_scrape_results': [],
+        'recent_isins': []
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -218,6 +221,49 @@ def macaulay_and_modified_duration(price, coupon_pct, maturity, freq=1, settleme
     mac = weighted / pv_total
     return mac, mac / df
 
+def convexity(price, coupon_pct, maturity, freq=1, settlement=None, face=100.0):
+    """Convessità: misura curvatura prezzo-rendimento."""
+    if settlement is None:
+        settlement = date.today()
+    y = ytm_from_price(price, coupon_pct, maturity, freq, settlement, face)
+    if y is None:
+        return None
+    if freq <= 0:
+        freq = 1
+    n = max(1, int(round(years_to_maturity(settlement, maturity) * freq)))
+    c = (coupon_pct / 100.0) * face / freq
+    df = 1.0 + y / freq
+    conv = 0.0
+    for t in range(1, n + 1):
+        cf = c + (face if t == n else 0.0)
+        conv += cf * t * (t + 1) / df ** (t + 2)
+    return conv / (price * freq ** 2)
+
+
+def ytm_netto_corretto(prezzo, cedola_pct, scadenza, freq, tax_rate):
+    """YTM netto con tassazione separata su cedole e capital gain."""
+    y_lordo = ytm_from_price(prezzo, cedola_pct, scadenza, freq)
+    if y_lordo is None:
+        return 0.0
+    if freq <= 0:
+        freq = 1
+    n = max(1, int(round(years_to_maturity(date.today(), scadenza) * freq)))
+    c_lordo = (cedola_pct / 100.0) * 100.0 / freq
+    c_netto = c_lordo * (1 - tax_rate / 100)
+    cg_lordo = max(0, 100 - prezzo)
+    cg_netto = 100 - cg_lordo * (tax_rate / 100)
+
+    def npv(y):
+        if y <= -0.999:
+            return float('inf')
+        df = 1.0 + y / freq
+        return sum(c_netto / df ** t for t in range(1, n + 1)) + cg_netto / df ** n - prezzo
+
+    try:
+        return brentq(npv, -0.49, 2.0, maxiter=100) * 100
+    except Exception:
+        return y_lordo * 100 * (1 - tax_rate / 100)
+
 
 def coupon_dates(maturity: date, freq: int, settlement: date):
     if freq <= 0:
@@ -304,9 +350,13 @@ def scrape_source(source, session, ua_index=0):
     t0 = time.monotonic()
     headers = {
         "User-Agent": USER_AGENTS[ua_index % len(USER_AGENTS)],
-        "Accept": "text/html,application/xhtml+xml",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
         "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache",
+        "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Referer": "https://www.simpletoolsforinvestors.eu/",
     }
     try:
         resp = session.get(source["url"], headers=headers, timeout=20)
@@ -316,17 +366,31 @@ def scrape_source(source, session, ua_index=0):
         logger.warning(f"[{name}] HTTP failed: {e}")
         return None, ScrapeResult(name, False, error=str(e)[:80], elapsed_ms=elapsed)
 
+    # Tentativo 1: pd.read_html diretto
     try:
         tables = pd.read_html(StringIO(resp.text), decimal=",", thousands=".")
-    except ValueError:
-        elapsed = int((time.monotonic() - t0) * 1000)
-        return None, ScrapeResult(name, False, error="no_tables", elapsed_ms=elapsed)
+        for df in tables:
+            if _validate_bond_table(df):
+                elapsed = int((time.monotonic() - t0) * 1000)
+                logger.info(f"[{name}] OK ({len(df)} rows, {elapsed}ms)")
+                return df, ScrapeResult(name, True, rows=len(df), elapsed_ms=elapsed)
+    except (ValueError, ImportError):
+        pass
 
-    for df in tables:
-        if _validate_bond_table(df):
-            elapsed = int((time.monotonic() - t0) * 1000)
-            logger.info(f"[{name}] OK ({len(df)} rows, {elapsed}ms)")
-            return df, ScrapeResult(name, True, rows=len(df), elapsed_ms=elapsed)
+    # Tentativo 2: Fallback BeautifulSoup
+    try:
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tbl in soup.find_all("table"):
+            try:
+                df = pd.read_html(StringIO(str(tbl)), decimal=",", thousands=".")[0]
+                if _validate_bond_table(df):
+                    elapsed = int((time.monotonic() - t0) * 1000)
+                    logger.info(f"[{name}] OK via BS4 ({len(df)} rows)")
+                    return df, ScrapeResult(name, True, rows=len(df), elapsed_ms=elapsed)
+            except Exception:
+                continue
+    except Exception as e:
+        logger.debug(f"[{name}] BS4 fallback failed: {e}")
 
     elapsed = int((time.monotonic() - t0) * 1000)
     return None, ScrapeResult(name, False, error="invalid_schema", elapsed_ms=elapsed)
@@ -536,8 +600,7 @@ def analizza_bond_quality_dettagliata(d, risk, tax, patrimonio):
     score += p
     breakdown.append({"cat": "🏷️ Prezzo", "val": f"{prezzo:.2f}", "msg": msg, "pts": p, "col": col})
 
-    ytm_lordo = risk.get('ytm', 0)
-    ytm_net = ytm_lordo * (1 - tax / 100)
+    ytm_net = ytm_netto_corretto(d['pr'], d['ced'], d['sc'], d['freq'], tax)
     if ytm_net < 1.5:
         p, msg, col = -20, "Rendimento basso", "score-bad"
     elif ytm_net > 3.0:
@@ -698,7 +761,28 @@ def trova_alternative_migliori(target, df_market):
     if not df_alt.empty:
         return df_alt.sort_values('Extra', ascending=False).head(10)
     return pd.DataFrame()
-
+def fair_value_zscore(df_market, isin):
+    """Z-score vs peer group. Z>+1 = bond economico, Z<-1 = caro."""
+    if df_market.empty:
+        return None
+    row = df_market[df_market['ISIN'] == isin]
+    if row.empty:
+        return None
+    r = row.iloc[0]
+    peers = df_market[
+        (df_market['Categoria'] == r['Categoria']) &
+        (df_market['Anni'].between(r['Anni'] - 2, r['Anni'] + 2)) &
+        (df_market['ISIN'] != isin)
+    ]
+    if len(peers) < 5:
+        return None
+    mean_y = peers['YTM_Grezzo'].mean()
+    std_y = peers['YTM_Grezzo'].std()
+    if std_y == 0 or pd.isna(std_y):
+        return None
+    z = (r['YTM_Grezzo'] - mean_y) / std_y
+    verdict = "ECONOMICO" if z > 1 else "CARO" if z < -1 else "FAIR"
+    return {"z": z, "peers": len(peers), "peer_avg": mean_y, "verdict": verdict}
 
 def cerca_db(isin, cat_macro):
     if not valida_isin(isin):
@@ -811,7 +895,7 @@ def login():
 def scanner_ui():
     st.title("🔎 Scanner Obbligazionario Pro")
     st.caption("Analisi professionale: flussi reali, fiscalità italiana e stress test valutario.")
-
+    desc_safe = html.escape(d['desc'])
     st.markdown("### 🧭 Guida Rapida")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -853,6 +937,11 @@ def scanner_ui():
         st.error("❌ Bond non trovato nel database. Prova ad aggiornare i dati.")
         return
 
+    # ⬇️ NUOVO: salva ISIN nella cronologia
+    if isin not in st.session_state.recent_isins:
+        st.session_state.recent_isins.insert(0, isin)
+        st.session_state.recent_isins = st.session_state.recent_isins[:5]
+
     tax_rate = determina_tasse(d['fonte'], d['desc'])
     valuta_bond = detect_valuta(d['desc'], d['isin'])
     risk = calcola_metriche_rischio(d['pr'], d['ced'], d['sc'], d['freq'])
@@ -885,7 +974,7 @@ def scanner_ui():
         <div style="display:flex;justify-content:space-between;align-items:flex-start;">
             <div style="flex-grow:1;">
                 <div style="color:#b0b3c5;font-size:13px;text-transform:uppercase;letter-spacing:1px;">{chi}</div>
-                <div style="color:white;font-size:22px;font-weight:bold;line-height:1.2;">{d['desc']}</div>
+                <div style="color:white;font-size:22px;font-weight:bold;line-height:1.2;">{desc_safe}</div>
                 <div style="color:#00CC96;font-size:13px;">{tipo} | {risk_msg}</div>
             </div>
             <div style="text-align:right;min-width:90px;">
@@ -911,7 +1000,35 @@ def scanner_ui():
     m4.metric("Cedola", f"{d['ced']}%")
     m5.metric("Valuta", valuta_bond)
     m6.metric("Mod. Duration", f"{risk['mod_dur']:.2f}", help="Sensibilità ai tassi")
+    st.subheader("📊 Dati Chiave")
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    sym = "€" if valuta_bond == "EUR" else valuta_bond
+    m1.metric("Prezzo", f"{d['pr']} {sym}")
+    m2.metric("Rend. NETTO", f"{rendimento_netto:.2f}%", help="XIRR sui flussi netti reali")
+    m3.metric("Rend. LORDO", f"{risk['ytm']:.2f}%")
+    m4.metric("Cedola", f"{d['ced']}%")
+    m5.metric("Valuta", valuta_bond)
+    m6.metric("Mod. Duration", f"{risk['mod_dur']:.2f}", help="Sensibilità ai tassi")
 
+    # ⬇️ NUOVO: Badge Fair Value
+    df_mkt_fv = carica_dati_mercato()
+    fv = fair_value_zscore(df_mkt_fv, isin)
+    if fv:
+        if fv['verdict'] == "ECONOMICO":
+            color = "#00CC96"
+        elif fv['verdict'] == "CARO":
+            color = "#FF4B4B"
+        else:
+            color = "#888"
+        st.markdown(
+            f'<div style="padding:12px;background:{color};border-radius:8px;color:white;'
+            f'text-align:center;margin:15px 0;font-weight:bold;">'
+            f'🏷️ Fair Value: {fv["verdict"]} '
+            f'(Z={fv["z"]:+.2f} vs {fv["peers"]} peer · YTM medio peer: {fv["peer_avg"]:.2f}%)'
+            f'</div>', unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("💰 Simulatore & Stress Test")
     st.divider()
     st.subheader("💰 Simulatore & Stress Test")
     s1, s2, s3 = st.columns(3)
@@ -1225,15 +1342,17 @@ def smart_analysis_ui():
     fig.update_layout(template="plotly_dark", height=500, legend=dict(orientation="h", y=1.1),
                       hovermode="closest", margin=dict(l=20, r=20, t=20, b=20))
     sel = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
-
     if sel and len(sel.get('selection', {}).get('points', [])) > 0:
         try:
             pt = sel['selection']['points'][0]
-            if 'customdata' in pt:
-                st.session_state.selected_isin_from_chart = pt['customdata'][0]
+            idx = pt.get('point_index')
+            if idx is not None and idx < len(df_zoom):
+                clicked_isin = df_zoom.iloc[idx]['ISIN']
+                st.session_state.selected_isin_from_chart = clicked_isin
+                st.session_state.page = "Scanner"
                 st.rerun()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Chart click failed: {e}")
 
     st.divider()
     st.subheader("🔄 Smart Switch (Alternative)")
@@ -1254,6 +1373,13 @@ def smart_analysis_ui():
 
 def dashboard_mercato_ui():
     st.title("📊 Dashboard Mercato")
+    last = get_last_update_time()
+    if last:
+        delta = datetime.now() - last
+        if delta > timedelta(hours=24):
+            st.warning(f"⚠️ Dati vecchi di {delta.days} giorni. Aggiorna dalla sidebar.")
+        elif delta < timedelta(hours=1):
+            st.success(f"✅ Dati freschi ({int(delta.total_seconds()/60)} min fa)")
     with st.spinner("Analisi macro..."):
         df = carica_dati_mercato()
     if df.empty:
@@ -1269,7 +1395,8 @@ def dashboard_mercato_ui():
 
     st.divider()
     st.subheader("🏆 Top 10 Rendimenti Nominali")
-    top = df.nlargest(10, 'YTM_Grezzo').sort_values('YTM_Grezzo', ascending=True)
+    st.caption("Filtrati per liquidità: prezzo 70-130 (esclude distressed bond)")
+    top = df[(df['Prezzo'] > 70) & (df['Prezzo'] < 130)].nlargest(10, 'YTM_Grezzo').sort_values('YTM_Grezzo', ascending=True)
     cc, ct = st.columns([2, 1])
     with cc:
         fig = px.bar(top, x='YTM_Grezzo', y='Desc', orientation='h', text='YTM_Grezzo',
@@ -1295,6 +1422,21 @@ def dashboard_mercato_ui():
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
+    st.subheader("📈 Curva dei Rendimenti (Governativi)")
+    gov = df[df['Categoria'] == 'Governativo'].copy()
+    if len(gov) > 5:
+        gov['Paese'] = gov['Desc'].str.extract(r'(BTP|BUND|TREASURY|OAT|BONOS|BOT)', expand=False).fillna('Altro')
+        try:
+            fig_yc = px.scatter(gov, x='Anni', y='YTM_Grezzo', color='Paese',
+                                trendline='lowess', title="",
+                                labels={'Anni': 'Durata (anni)', 'YTM_Grezzo': 'Rendimento %'})
+        except Exception:
+            fig_yc = px.scatter(gov, x='Anni', y='YTM_Grezzo', color='Paese',
+                                labels={'Anni': 'Durata (anni)', 'YTM_Grezzo': 'Rendimento %'})
+        fig_yc.update_layout(template="plotly_dark", height=400, margin=dict(l=0, r=0, t=20, b=0))
+        st.plotly_chart(fig_yc, use_container_width=True)
+    else:
+        st.info("Dati governativi insufficienti per la curva.")
     st.subheader("🔥 Heatmap: Scadenza vs Rendimento")
     try:
         df['Bucket'] = pd.cut(df['Anni'], bins=[0, 2, 5, 10, 20, 50],
@@ -1390,9 +1532,14 @@ def diversificazione_portfolio_ui():
             return
 
         df_pf = pd.DataFrame(portfolio)
-        ytm_m = df_pf['YTM %'].mean()
-        dur_m = df_pf['Scadenza'].mean()
-        cedola_a = (capitale * df_pf['Cedola %'].mean() / 100) * 0.875
+        ytm_m = (df_pf['YTM %'] * df_pf['Allocazione']).sum() / df_pf['Allocazione'].sum()
+        dur_m = (df_pf['Scadenza'] * df_pf['Allocazione']).sum() / df_pf['Allocazione'].sum()
+        # Tassazione corretta per categoria
+        def _tax_for(tipo):
+            return 12.5 if tipo == "Gov" else 26.0
+        df_pf['Tax'] = df_pf['Categoria'].apply(_tax_for)
+        df_pf['Cedola_Netta'] = df_pf['Allocazione'] * (df_pf['Cedola %'] / 100) * (1 - df_pf['Tax'] / 100)
+        cedola_a = df_pf['Cedola_Netta'].sum()
 
         st.success("✅ Portafoglio Generato!")
         k1, k2, k3 = st.columns(3)
@@ -1486,6 +1633,19 @@ def main_app():
         if st.button("🔔 Alert Manager", use_container_width=True):
             st.session_state.page = "Alerts"
             st.rerun()
+
+        # ⬇️ NUOVO: Cronologia ISIN
+        if st.session_state.get('recent_isins'):
+            st.divider()
+            st.caption("🕐 ISIN Recenti")
+            for old in st.session_state.recent_isins:
+                if st.button(f"  {old}", key=f"hist_{old}", use_container_width=True):
+                    st.session_state.selected_isin_from_chart = old
+                    st.session_state.page = "Scanner"
+                    st.rerun()
+
+        st.divider()
+        st.caption("⚙️ STATO SISTEMA")
 
         st.divider()
         st.caption("⚙️ STATO SISTEMA")
