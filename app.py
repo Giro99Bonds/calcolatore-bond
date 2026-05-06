@@ -59,8 +59,15 @@ st.markdown("""
 # ============================================================
 SECRET_KEY = os.environ.get("BOND_TERMINAL_SECRET", "change-me-in-production-please")
 
-UTENTI_IN_CHIARO = {"giulio": "Giulio99mac!", "guest": "mifumoleboix"}
-UTENTI_ABILITATI = {u: hashlib.sha256(p.encode()).hexdigest() for u, p in UTENTI_IN_CHIARO.items()}
+# SECURITY: Spostare in variabile d'ambiente. Es: export BOND_USERS='{"giulio":"hash256...","guest":"hash256..."}'
+# In produzione NON tenere password in chiaro nel codice sorgente.
+_users_env = os.environ.get("BOND_USERS_HASH")
+if _users_env:
+    import json as _json
+    UTENTI_ABILITATI = _json.loads(_users_env)
+else:
+    UTENTI_IN_CHIARO = {"giulio": "Giulio99mac!", "guest": "mifumoleboix"}
+    UTENTI_ABILITATI = {u: hashlib.sha256(p.encode()).hexdigest() for u, p in UTENTI_IN_CHIARO.items()}
 
 DB_FOLDER = "bond_database"
 TMP_FOLDER = "bond_database_tmp"
@@ -617,6 +624,7 @@ def analizza_bond_quality_dettagliata(d, risk, tax, patrimonio):
     return {"score": max(0, min(100, score)), "breakdown": breakdown, "ytm_netto": ytm_net, "flags": flags}
 
 
+@st.cache_data(ttl=300)
 def carica_dati_mercato():
     all_bonds = []
     if not os.path.exists(DB_FOLDER):
@@ -719,7 +727,7 @@ def trova_alternative_migliori(target, df_market):
         return pd.DataFrame()
     anni_t = (target['sc'] - date.today()).days / 365.25
     tax_t = determina_tasse(target['fonte'], target['desc'])
-    ytm_net_t = calcola_rendimento_grezzo(target['pr'], target['ced'], target['sc']) * (1 - tax_t / 100)
+    ytm_net_t = ytm_netto_corretto(target['pr'], target['ced'], target['sc'], target['freq'], tax_t)
     isin_t = target.get('isin', '')
     risk_t = categorizza_rischio(isin_t, target['fonte'], target['desc'])
 
@@ -734,7 +742,7 @@ def trova_alternative_migliori(target, df_market):
 
         risk_a = categorizza_rischio(row['ISIN'], row['Fonte'], row['Desc'])
         tax_a = determina_tasse(row['Fonte'], row['Desc'])
-        ytm_net_a = row['YTM_Grezzo'] * (1 - tax_a / 100)
+        ytm_net_a = ytm_netto_corretto(row['Prezzo'], row['Cedola'], row['Scadenza'], 1, tax_a)
         extra = ytm_net_a - ytm_net_t
 
         tipo = ""
@@ -932,9 +940,9 @@ def scanner_ui():
         st.error("❌ Bond non trovato nel database. Prova ad aggiornare i dati.")
         return
 
-    # ⬇️ NUOVO: salva ISIN nella cronologia
-    if isin not in st.session_state.recent_isins:
-        st.session_state.recent_isins.insert(0, isin)
+    if isin not in [x[0] if isinstance(x, tuple) else x for x in st.session_state.recent_isins]:
+        short_desc = d['desc'][:30] if len(d['desc']) > 30 else d['desc']
+        st.session_state.recent_isins.insert(0, (isin, short_desc))
         st.session_state.recent_isins = st.session_state.recent_isins[:5]
 
     desc_safe = html.escape(d['desc'])  # ✅ QUI: d esiste già
@@ -989,23 +997,24 @@ def scanner_ui():
     """, unsafe_allow_html=True)
 
     st.subheader("📊 Dati Chiave")
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    conv_val = convexity(d['pr'], d['ced'], d['sc'], d['freq'])
+    m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
     sym = "€" if valuta_bond == "EUR" else valuta_bond
     m1.metric("Prezzo", f"{d['pr']} {sym}")
     m2.metric("Rend. NETTO", f"{rendimento_netto:.2f}%", help="XIRR sui flussi netti reali")
     m3.metric("Rend. LORDO", f"{risk['ytm']:.2f}%")
     m4.metric("Cedola", f"{d['ced']}%")
     m5.metric("Valuta", valuta_bond)
-    m6.metric("Mod. Duration", f"{risk['mod_dur']:.2f}", help="Sensibilità ai tassi")
-    st.subheader("📊 Dati Chiave")
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    sym = "€" if valuta_bond == "EUR" else valuta_bond
-    m1.metric("Prezzo", f"{d['pr']} {sym}")
-    m2.metric("Rend. NETTO", f"{rendimento_netto:.2f}%", help="XIRR sui flussi netti reali")
-    m3.metric("Rend. LORDO", f"{risk['ytm']:.2f}%")
-    m4.metric("Cedola", f"{d['ced']}%")
-    m5.metric("Valuta", valuta_bond)
-    m6.metric("Mod. Duration", f"{risk['mod_dur']:.2f}", help="Sensibilità ai tassi")
+    mod_dur = risk['mod_dur']
+    price_impact_1pct = -mod_dur * 1.0
+    m6.metric("Mod. Duration", f"{mod_dur:.2f}",
+              help=f"Sensibilità: +1% tassi → {price_impact_1pct:+.2f}% sul prezzo")
+    if conv_val is not None:
+        m7.metric("Convexity", f"{conv_val:.2f}",
+                  help="Curvatura: un bond con convexity alta guadagna più di quanto perde a parità di shock sui tassi")
+    else:
+        m7.metric("Convexity", "N/D")
+    st.caption(f"📐 Sensibilità tassi: se i tassi salgono del +1%, il prezzo scende di ~**{abs(price_impact_1pct):.2f}%** (≈ {abs(price_impact_1pct/100 * d['pr']):.2f} {sym} per titolo da 100)")
 
     # ⬇️ NUOVO: Badge Fair Value
     df_mkt_fv = carica_dati_mercato()
@@ -1022,10 +1031,11 @@ def scanner_ui():
             f'text-align:center;margin:15px 0;font-weight:bold;">'
             f'🏷️ Fair Value: {fv["verdict"]} '
             f'(Z={fv["z"]:+.2f} vs {fv["peers"]} peer · YTM medio peer: {fv["peer_avg"]:.2f}%)'
+            f'</div>'
+            f'<div style="color:#888;font-size:11px;text-align:center;margin-top:4px;">'
+            f'⚠️ Confronto su base lorda — bond con tassazione diversa (12.5% vs 26%) non sono direttamente comparabili'
             f'</div>', unsafe_allow_html=True)
 
-    st.divider()
-    st.subheader("💰 Simulatore & Stress Test")
     st.divider()
     st.subheader("💰 Simulatore & Stress Test")
     s1, s2, s3 = st.columns(3)
@@ -1094,9 +1104,11 @@ def scanner_ui():
     st.markdown(f"### 🧾 Analisi Flussi (Nominale: {nominale_eff:,.0f} {valuta_bond})")
     cu, ce = st.columns(2)
     with cu:
+        fx_label = f"Cambio applicato: 1 {valuta_user} = {tasso_spot:.4f} {valuta_bond}" if valuta_user != valuta_bond else ""
         st.markdown(f"""
         <div class="receipt-box" style="border-left:4px solid #FF4B4B;background-color:rgba(255,75,75,0.05);padding:15px;border-radius:8px;">
             <div style="font-weight:bold;color:#FF4B4B;">📉 USCITE (Oggi)</div>
+            {f'<div class="receipt-row" style="color:#888;font-size:12px;"><span>{fx_label}</span></div>' if fx_label else ""}
             <div class="receipt-row"><span>Costo Titoli:</span><span>{costo_titolo_user:,.2f} {valuta_user}</span></div>
             <div class="receipt-row"><span>Rateo:</span><span>{rateo_user:,.2f} {valuta_user}</span></div>
             <div class="receipt-row"><span>Commissioni:</span><span>{commissioni:,.2f} {valuta_user}</span></div>
@@ -1540,9 +1552,11 @@ def diversificazione_portfolio_ui():
 
         st.success("✅ Portafoglio Generato!")
         k1, k2, k3 = st.columns(3)
-        k1.metric("Rendimento Lordo", f"{ytm_m:.2f}%")
+        k1.metric("Rendimento Lordo Medio", f"{ytm_m:.2f}%",
+                  help="YTM lordo ponderato per allocazione — prima delle imposte")
         k2.metric("Durata Media", f"{dur_m:.1f} anni")
-        k3.metric("Flusso Annuo", f"~{cedola_a:,.0f} €")
+        k3.metric("Flusso Cedole Netto/Anno", f"~{cedola_a:,.0f} €",
+                  help="Cedole già al netto della tassazione (12.5% Gov, 26% altri)")
 
         st.dataframe(df_pf, use_container_width=True, hide_index=True,
                      column_config={
@@ -1571,29 +1585,39 @@ def alert_manager_ui():
     st.subheader("➕ Crea Alert")
     tipo = st.selectbox("Tipo", ["Prezzo Scende Sotto", "YTM Sale Sopra", "Nuova Emissione"])
     c1, c2 = st.columns(2)
+    alert_isin = ""
+    alert_cat = ""
     with c1:
         if tipo == "Prezzo Scende Sotto":
-            st.text_input("ISIN")
+            alert_isin = st.text_input("ISIN", placeholder="IT...", key="alert_isin_input").strip().upper()
             target = st.number_input("Prezzo Target", value=95.0)
         elif tipo == "YTM Sale Sopra":
-            st.selectbox("Categoria", ["Governativo", "Bancario", "Corporate"])
+            alert_cat = st.selectbox("Categoria", ["Governativo", "Bancario", "Corporate"])
             target = st.number_input("YTM Min %", value=3.5)
         else:
-            st.selectbox("Categoria", ["BTP", "Corporate", "Bancari"])
+            alert_cat = st.selectbox("Categoria", ["BTP", "Corporate", "Bancari"])
             target = None
     with c2:
         st.radio("Notifica", ["Email", "App (N/D)"], disabled=True)
 
     if st.button("✅ Attiva"):
-        st.session_state.alerts.append({'tipo': tipo, 'target': target, 'data': date.today()})
-        st.success("Alert attivato!")
+        if tipo == "Prezzo Scende Sotto" and not valida_isin(alert_isin):
+            st.error("❌ Inserisci un ISIN valido (12 caratteri)")
+        else:
+            st.session_state.alerts.append({
+                'tipo': tipo, 'target': target, 'data': date.today(),
+                'isin': alert_isin, 'categoria': alert_cat
+            })
+            st.success("Alert attivato!")
 
     st.divider()
     st.subheader("📋 Alert Attivi")
     if st.session_state.alerts:
         for i, a in enumerate(st.session_state.alerts):
             ci, cb = st.columns([4, 1])
-            ci.info(f"**{a['tipo']}** - Target: {a.get('target', 'N/A')} - {a['data']}")
+            ref = a.get('isin') or a.get('categoria') or ''
+            target_str = f"{a['target']:.2f}" if a.get('target') is not None else "N/A"
+            ci.info(f"**{a['tipo']}** · {ref} · Target: {target_str} · {a['data']}")
             with cb:
                 if st.button("❌", key=f"del_{i}"):
                     st.session_state.alerts.pop(i)
@@ -1635,14 +1659,16 @@ def main_app():
         if st.session_state.get('recent_isins'):
             st.divider()
             st.caption("🕐 ISIN Recenti")
-            for old in st.session_state.recent_isins:
-                if st.button(f"  {old}", key=f"hist_{old}", use_container_width=True):
-                    st.session_state.selected_isin_from_chart = old
+            for entry in st.session_state.recent_isins:
+                if isinstance(entry, tuple):
+                    old_isin, old_desc = entry
+                else:
+                    old_isin, old_desc = entry, entry
+                label = f"{old_isin[:12]}  {old_desc[:22]}…" if len(old_desc) > 22 else f"{old_isin[:12]}  {old_desc}"
+                if st.button(label, key=f"hist_{old_isin}", use_container_width=True):
+                    st.session_state.selected_isin_from_chart = old_isin
                     st.session_state.page = "Scanner"
                     st.rerun()
-
-        st.divider()
-        st.caption("⚙️ STATO SISTEMA")
 
         st.divider()
         st.caption("⚙️ STATO SISTEMA")
@@ -1686,7 +1712,8 @@ def main_app():
                 aggiorna_db()
 
         with st.expander("🛠️ Manutenzione"):
-            st.caption(f"Status: {check_connection_status()}")
+            if st.button("🌐 Verifica Connessione", use_container_width=True):
+                st.caption(f"Status: {check_connection_status()}")
             if st.button("🗑️ Reset Database", use_container_width=True):
                 try:
                     if os.path.exists(DB_FOLDER):
