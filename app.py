@@ -895,7 +895,6 @@ def login():
 def scanner_ui():
     st.title("🔎 Scanner Obbligazionario Pro")
     st.caption("Analisi professionale: flussi reali, fiscalità italiana e stress test valutario.")
-    desc_safe = html.escape(d['desc'])
     st.markdown("### 🧭 Guida Rapida")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -941,6 +940,8 @@ def scanner_ui():
     if isin not in st.session_state.recent_isins:
         st.session_state.recent_isins.insert(0, isin)
         st.session_state.recent_isins = st.session_state.recent_isins[:5]
+
+    desc_safe = html.escape(d['desc'])  # ✅ QUI: d esiste già
 
     tax_rate = determina_tasse(d['fonte'], d['desc'])
     valuta_bond = detect_valuta(d['desc'], d['isin'])
